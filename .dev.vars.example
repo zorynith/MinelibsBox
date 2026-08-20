@@ -1,0 +1,5 @@
+# Cloudflare Workers local development variables
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=changeme
+SITE_TITLE=KodCloud
+CHUNK_SIZE_MB=10

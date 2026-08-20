@@ -1,0 +1,32 @@
+/**
+ * Example Wrangler config used for CI type generation.
+ * Replace with real values in actual deployment config.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "minelibsbox",
+  "main": "./workers/app.ts",
+  "compatibility_date": "2025-04-04",
+  "assets": {
+    "directory": "./static",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "SITE_TITLE": "MinelibsBox",
+    "CHUNK_SIZE_MB": "10",
+    "STATIC_HOST": "https://static.minelibs.eu.org/"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "minelibsbox",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "minelibsbox-files"
+    }
+  ]
+}

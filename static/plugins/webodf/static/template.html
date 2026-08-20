@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html dir="ltr" mozdisallowselectionprint moznomarginboxes>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+	<title>@@fileNameHtml@@</title>
+</head>
+
+@@odtStyle@@
+
+<body id="theBODY">
+	<div id="odf"></div>
+	<script src="@@pluginHost@@static/webodf.js"></script>
+	<script type="text/javascript">
+		var fileURL = "@@fileUrl@@";
+		var odfelement = document.getElementById("odf"),
+		odfcanvas = new odf.OdfCanvas(odfelement);
+		odfcanvas.load(fileURL);
+	</script>
+</body>
+</html>

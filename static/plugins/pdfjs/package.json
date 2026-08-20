@@ -1,0 +1,29 @@
+{
+	"id":"pdfjs",
+	"name":"{{LNG['pdfjs.meta.name']}}",
+	"title":"{{LNG['pdfjs.meta.title']}}",
+	"version":"1.57",
+	"category":"file",
+	"source":{
+		"icon":"{{pluginHost}}static/app/images/icon.png"
+	},
+	"description":"{{LNG['pdfjs.meta.desc']}}",
+	"auther":{
+		"copyright":"kodcloud",
+		"homePage":"http://kodcloud.com"
+	},
+	"configItem":{
+		"fileExt":{
+			"type":"tags",
+			"value":"pdf,ai"
+		},
+		"fileSort":{
+			"type":"number",
+			"value":1000
+		},
+		"openWith":{
+			"type":"radio",
+			"value":"dialog"
+		}
+	}
+}

@@ -1,0 +1,19 @@
+{
+	"officeViewer.meta.name": "Office阅读器",
+	"officeViewer.meta.title": "Office在线预览",
+	"officeViewer.meta.desc": "Office文件在线预览。整合WebOffice前端解析方式，实现office文件基本的在线预览需求。",
+	"officeViewer.main.error": "操作失败！",
+	"officeViewer.main.invalidType": "当前方式无法预览此文件，请选择其他打开方式！",
+	"officeViewer.main.invalidUrl": "无效的请求地址，请尝试重新打开或选择其他方式！",
+	"officeViewer.main.notNetwork": "请求失败，检查服务器能否连接网络。",
+	"officeViewer.main.invalidExt": "不支持的文件格式",
+	"officeViewer.main.fileSizeErr": "文件已损坏（size=0），无法预览！",
+	"officeViewer.main.typeErr": "没有有效的文件编辑方式",
+	"officeViewer.webOffice.name": "自动解析",
+	"officeViewer.webOffice.parsing": "正在解析",
+	"officeViewer.webOffice.reqErrPath": "请求失败，检查文件是否正常！",
+	"officeViewer.webOffice.reqErrNet": "加载时间过长，检查网络是否正常！",
+	"officeViewer.webOffice.reqErrUrl": "文件请求失败，请检查地址是否正常！",
+	"officeViewer.webOffice.noEditTips": "不支持内容编辑，请选择其他方式！",
+	"officeViewer.webOffice.warning": "当前模式下，公式、图表等内容可能显示不全或异常，查看完整内容请选用其他方式"
+}

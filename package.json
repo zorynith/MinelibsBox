@@ -1,0 +1,25 @@
+{
+  "name": "minelibsbox",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "cf-typegen": "node -e \"const fs=require('fs');const path=require('path');const dir=path.join('.wrangler','tmp');fs.mkdirSync(dir,{recursive:true});const cfg=path.join(dir,'wrangler.jsonc');fs.writeFileSync(cfg,fs.readFileSync('wrangler.jsonc.example','utf8'));\" && wrangler types --config .wrangler/tmp/wrangler.jsonc",
+    "deploy": "npm run build && wrangler deploy",
+    "dev": "wrangler dev",
+    "postinstall": "npm run cf-typegen",
+    "typecheck": "npm run cf-typegen && tsc -b"
+  },
+  "dependencies": {
+    "hono": "^4.8.5",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.40.2",
+    "@types/node": "^22",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7",
+    "wrangler": "^4.55.0"
+  }
+}
