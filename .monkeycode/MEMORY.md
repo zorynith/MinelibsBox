@@ -164,7 +164,7 @@ Entries discovered by the Agent during task execution should follow this format:
 - Instructions:
   - user/view 返回的 `io` 字段（前端 `G.io`）值必须是实际 path 类型字符串（`{source}`/`{block}`/`{userRencent}`/`{shareToMe}`/`{userFileTag}`/`{userFileType}` 等），不能是 `"KOD_SOURCE"` 字面量；值错误会让前端 pathInfoParse 的 switch、parsePathAuth、parse 的 isTruePath 全部走 default，表现为分类点击弹「此类型目录不支持该操作」、面包屑渲染异常。
   - 前端 parse path 用正则 `^\{(\w+):?(\d|[-\w]+)?\}(.*)$`，type = `{`+单词+`}`；KOD 常量值必须与之一致（KOD_USER_RECENT=`{userRencent}`、KOD_USER_SHARE_TO_ME=`{shareToMe}`、KOD_BLOCK=`{block}` 等）。
-  - 虚拟路径拼写易错点：`{shareToMe}`（非 {userShareToMe}）、`{userRencent}`（非 {userRecent}）。
+  - 虚拟路径拼写易错点：`{shareToMe}`（非 {userShareToMe}）、`{userRencent}`（非 {userRecent}）；分享落地页前缀枚举 KOD_SHARE_LINK 必须为 `{shareItemLink}`（分享目录→点文件报「此类型目录不支持操作」、右键菜单空的根因），KOD_SHARE_ITEM=`{shareItem}`、KOD_SHARE_OUTER=`{shareOuter}`，后端 user-api.ts 的 options.io 与前端落地页生成路径必须一致。
   - 面包屑（addressChildren）由前端 pathInfoParse 的 f(e) 用 pathDisplay 生成；source 路径缺 pathDisplay 时会显示 `{source:home}` 字面量，需给 current/folderItem/fileItem 补 pathDisplay，把 `{source:home}` 前缀替换为 rootPath 显示名（"个人空间"）。
   - block 根/子节点响应严禁内嵌 `children`（无论是布尔哨兵 `children:true` 还是数组嵌套）：前端 zTree `beforeAsync` 用 `_.isEmpty(n.children)` 判断是否丢弃 async 结果，`children:true` 会判为非空导致 `t=[]` 丢弃真实子节点（文件类型/个人标签展开无反应）；内嵌数组则因 item 未走 `dataFilterTree` 递归而缺 `_itemDataBefore`/`isTreeNode`，直点导航 getSourceInfo 返回 UNDEFINED → 空白警告。正确做法是 block 节点只返回 `type/isParent/path` 不内嵌 children，子节点统一由前端展开时请求 `{block:xxx}` / `{source:home}` 异步加载。
 
