@@ -1111,10 +1111,11 @@ export async function listUserShareVirtual(
     const source = await resolveShareSource(env, user, share);
     if (!source) continue;
     const isFolder = source.type === "folder";
+    const itemPath = `{shareItem:${share.shareID}}` + (isFolder ? "/" : "");
     const base: Record<string, unknown> = {
       name: source.name,
-      path: `{shareItem:${share.shareID}}` + (isFolder ? "/" : ""),
-      pathDisplay: `{shareItem:${share.shareID}}` + (isFolder ? "/" : ""),
+      path: itemPath,
+      pathDisplay: itemPath.replace(/^\{shareItem:\d+\}/, share.title || source.name),
       type: isFolder ? "folder" : "file",
       isFolder,
       isWriteable: true,
@@ -1167,6 +1168,8 @@ export async function listShareItemDir(
 
   const realDir = joinShareRealPath(share.sourcePath, rel, true);
   const virtualDir = `{shareItem:${shareID}}` + (rel ? "/" + rel.replace(/\/+$/, "") + "/" : "/");
+  const displayRoot = share.title || share.sourcePath.split("/").filter(Boolean).pop() || "分享";
+  const displayPath = (virtual: string) => virtual.replace(/^\{shareItem:\d+\}/, displayRoot);
   try {
     const { folders, files } = await listDirectory(env.FILES, owner.username, realDir);
     const folderList = folders
@@ -1175,7 +1178,7 @@ export async function listShareItemDir(
       .map((name) => ({
         name,
         path: virtualDir + name + "/",
-        pathDisplay: virtualDir + name + "/",
+        pathDisplay: displayPath(virtualDir + name + "/"),
         type: "folder",
         isFolder: true,
         isWriteable: true,
@@ -1195,7 +1198,7 @@ export async function listShareItemDir(
         return {
           name,
           path: virtualDir + name,
-          pathDisplay: virtualDir + name,
+          pathDisplay: displayPath(virtualDir + name),
           type: "file",
           isFolder: false,
           isWriteable: true,
@@ -1211,7 +1214,7 @@ export async function listShareItemDir(
       current: {
         name: curRel ? curRel.split("/").pop()! : share.title,
         path: virtualDir,
-        pathDisplay: virtualDir,
+        pathDisplay: displayPath(virtualDir),
         type: "folder",
         isFolder: true,
         isWriteable: true,
