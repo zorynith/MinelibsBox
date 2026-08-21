@@ -180,3 +180,12 @@ Entries discovered by the Agent during task execution should follow this format:
   - 前端 API 映射（api.js / main.js adminModel 模块 7 apiConfig）：`groupList→admin/group/get、memberList→admin/member/get、roleList→admin/role/get、jobList→admin/job/get、authList→admin/auth/get`；写接口 `admin/group/add|edit|status|remove|sort|switchGroup`、`admin/member/add|edit|status|remove|addGroup|removeGroup|switchGroup|metaInfo`、`admin/role/add|edit|remove|sort`、`admin/job/*`、`admin/auth/*`、`admin/setting/get|set`、`admin/storage/get`、`admin/server/analysis` 均已在 `app/routes/admin-api.ts` 实现，写接口成功返回 `ok("explorer.success", 回插ID?)`。
   - `admin/setting/set` 前端参数名为 `data=<json>`，Worker 逐键 UPSERT 到 `settings` 表（key=value），`admin/setting/get` JSON 优先解析返回；`allParams` 同时合并 query 与 body 以兼容前端 GET/POST。
   - `admin/member/add` 密码 `salt==="1"` 时用 `parseKodPassword` 解密，否则按明文；`groupInfo` 接受 `{"groupID":"authID"}` 或 `{"groupID":{authID:xx}}`，缺失时 fallback `{"1": roleID||3}`；写 `user_groups` 前先 `DELETE WHERE user_id=?` 再重建，`authID` 空则写 0。
+
+[Project Knowledge Summary]
+- Date: 2026-08-21
+- Context: Discovered by Agent while performing 新建普通用户后桌面「我的电脑/回收站/我的相册/轻应用/使用帮助」点击报无权限/不支持/无写权限排查
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - `G.user.role`（user/view/options 注入）契约是扁平 `{权限点: 0|1}` 对象：前端 `allow(e)=G.user.isRoot==1 || !!G.user.role[e]==1`、`adminAuth/initAuth` 直接按 key 取。严禁把嵌套 `{info, allowAction, roleList}` 塞给前端（全 undefined → 一切操作判失败）。权限点来源：普通用户 `user_groups.authID` → `roles.auth`（逗号分隔权限点），admin 固定角色 1；缺省权限点必须补 0。
+  - 前端 `parseSourceAuth`（KOD_SOURCE/{source:home} 权限）对非 root 用户要求 item 满足 `targetType=="user" && targetID==G.user.userID`，否则返回空 auth（「没有权限」）。explorer list 的 current/folderItem/fileItem/emptyListData/fav 项必须带 `targetType:"user"`、`targetID: user.id`（fileItem/folderItem 需透传 userID 参数）；回收站/相册走 pathAuthList 不依赖 targetType。
+  - 前端 `authCheck` 是无条件 `e!="unzip"` 的 stub；`parsePathAuth` 返回 `{auth, errorMsg, sourceInfo}`，errorMsg 仅在 auth 为空时弹「无权限/不支持」提示。
