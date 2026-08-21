@@ -1209,11 +1209,43 @@ async function listAllKeys(bucket: R2Bucket, prefix: string): Promise<string[]> 
   return keys;
 }
 
-/** 读取临时对象里保存的 multipart uploadId。 */
-async function readUploadId(bucket: R2Bucket, uploadIdKey: string): Promise<string | null> {
-  const obj = await bucket.get(uploadIdKey);
-  if (!obj) return null;
-  return await obj.text();
+/** 按序流式拼接多个 R2 对象的 body 写入目标 key。
+ *  R2 put 要求 body 是已知长度的流, 用 FixedLengthStream 包装合并流,
+ *  规避 multipart 每 part 最小 5MiB 的限制(前端默认分片仅 2MB)。 */
+async function mergeChunks(bucket: R2Bucket, keys: string[], size: number, key: string, metadata: R2PutOptions): Promise<void> {
+  const fixed = new FixedLengthStream(size);
+  const writePromise = (async () => {
+    const writer = fixed.writable.getWriter();
+    try {
+      for (const k of keys) {
+        const obj = await bucket.get(k);
+        if (!obj) throw new Error(`missing chunk: ${k}`);
+        const reader = obj.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            await writer.write(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      }
+      await writer.close();
+    } catch (err) {
+      await writer.abort(err).catch(() => {});
+      throw err;
+    }
+  })();
+
+  try {
+    await bucket.put(key, fixed.readable, metadata);
+  } catch (err) {
+    // 消费失败(如并发合并时临时对象已被清理), 结束写入线程避免悬挂
+    await writePromise.catch(() => {});
+    throw err;
+  }
+  await writePromise;
 }
 
 explorerApi.post("/upload/fileUpload", async (c) => {
@@ -1224,8 +1256,11 @@ explorerApi.post("/upload/fileUpload", async (c) => {
   let checkType = "", fileInfo = "";
   let file: File | null = null;
 
-  if (contentType.includes("application/octet-stream")) {
+  const isMultipart = contentType.includes("multipart/form-data");
+  const isUrlencoded = contentType.includes("application/x-www-form-urlencoded");
+  if (!isMultipart && !isUrlencoded) {
     // sendAsBinary 模式: webuploader 将表单参数拼入 URL query, 请求体为文件二进制流
+    // (浏览器请求 Content-Type 为文件自身 MIME, 如 text/plain; 而非 application/octet-stream)
     const q = c.req.query();
     path = q.path || "/";
     name = q.name || "";
@@ -1281,58 +1316,50 @@ explorerApi.post("/upload/fileUpload", async (c) => {
 
   try {
     if (chunks > 1) {
-      // 分片上传: 使用 R2 multipart upload, 每个分片作为一个 part 直传,
-      // 避免在单个请求内合并大量分片导致的 subrequest/CPU 超限。
+      // 分片上传: 每个分片独立暂存为临时对象, 全部到达后按序流式合并,
+      // 规避 R2 multipart 每 part 最小 5MiB 的限制(前端默认分片仅 2MB)。
       const sessionId = await sha256Hex(`${user.username}|${realDir}|${fileName}|${size}`);
       const tmpPrefix = getUserFileKey(user.username, `/.upload_tmp/${sessionId}/`);
-      const uploadIdKey = tmpPrefix + "uploadId";
-      const etagPrefix = tmpPrefix + "etag/";
+      const chunkKey = `${tmpPrefix}chunk_${chunk}`;
+      const mergedKey = `${tmpPrefix}merged`;
 
-      let mpu: R2MultipartUpload;
-      if (chunk === 0) {
-        // 清理重试可能残留的旧 etag 索引, 避免 complete 收集到过期 part
-        const staleKeys = await listAllKeys(c.env.FILES, etagPrefix);
+      // 上次会话已完整合并过(merged 存在)才清理, 否则保留在途/残留分片
+      // (断点续传语义: 分片并发上传时不得删掉已在途的其他分片)
+      if (chunk === 0 && (await c.env.FILES.head(mergedKey))) {
+        const staleKeys = await listAllKeys(c.env.FILES, tmpPrefix);
         if (staleKeys.length > 0) await c.env.FILES.delete(staleKeys);
-        mpu = await c.env.FILES.createMultipartUpload(key, { httpMetadata: { contentType: file.type || getFileMimeType(fileName) } });
-        await c.env.FILES.put(uploadIdKey, mpu.uploadId);
-      } else {
-        const uploadId = await readUploadId(c.env.FILES, uploadIdKey);
-        if (!uploadId) throw new Error("missing upload session");
-        mpu = c.env.FILES.resumeMultipartUpload(key, uploadId);
       }
 
-      const part = await mpu.uploadPart(chunk + 1, file.stream());
-      await c.env.FILES.put(`${etagPrefix}${part.partNumber}/${part.etag}`, "");
+      // 暂存当前分片 (覆盖式, 分片并发/重试时幂等)
+      await c.env.FILES.put(chunkKey, file.stream(), { httpMetadata: { contentType: file.type || getFileMimeType(fileName) } });
 
-      if (chunk < chunks - 1) {
+      // 检查全部分片是否已到齐
+      const chunkKeys: string[] = [];
+      for (let i = 0; i < chunks; i++) chunkKeys.push(`${tmpPrefix}chunk_${i}`);
+      let allPresent = true;
+      for (const k of chunkKeys) {
+        if (!(await c.env.FILES.head(k))) {
+          allPresent = false;
+          break;
+        }
+      }
+      if (!allPresent) {
         return c.json({ code: true, data: `chunk_success_${chunk}` });
       }
 
-      // 最后一块: 从临时索引收集全部 part etag 并完成合并
-      const parts: R2UploadedPart[] = [];
-      for (const k of await listAllKeys(c.env.FILES, etagPrefix)) {
-        const rest = k.slice(etagPrefix.length);
-        const idx = rest.indexOf("/");
-        if (idx <= 0) continue;
-        const partNumber = parseInt(rest.slice(0, idx), 10);
-        if (!Number.isFinite(partNumber)) continue;
-        parts.push({ partNumber, etag: rest.slice(idx + 1) });
-      }
-      parts.sort((a, b) => a.partNumber - b.partNumber);
-
-      if (parts.length !== chunks) {
-        await mpu.abort().catch(() => {});
-        throw new Error(`incomplete upload: expected ${chunks} parts, got ${parts.length}`);
+      // 已合并完成则跳过, 否则按序流式合并写入最终 key
+      const mergedObj = await c.env.FILES.head(mergedKey);
+      if (!mergedObj) {
+        try {
+          await mergeChunks(c.env.FILES, chunkKeys, size, key, { httpMetadata: { contentType: file.type || getFileMimeType(fileName) } });
+          await c.env.FILES.put(mergedKey, "1");
+        } catch (err) {
+          // 并发分片可能同时触发合并; 若已由其他请求完成则视为成功
+          if (!(await c.env.FILES.head(mergedKey))) throw err;
+        }
       }
 
-      try {
-        await mpu.complete(parts);
-      } catch (err) {
-        await mpu.abort().catch(() => {});
-        throw err;
-      }
-
-      // 清理临时对象 (uploadId + etag 索引), 批量删除
+      // 清理临时对象 (分片 + merged 标记)
       const tmpKeys = await listAllKeys(c.env.FILES, tmpPrefix);
       if (tmpKeys.length > 0) await c.env.FILES.delete(tmpKeys);
     } else {
