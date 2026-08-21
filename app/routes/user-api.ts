@@ -351,7 +351,7 @@ userApi.get("/view/options", async (c) => {
       KOD_SOURCE: "{source}",
       KOD_IO: "{io}",
       KOD_SHARE_ITEM: "{shareItem}",
-      KOD_SHARE_LINK: "{shareLink}",
+      KOD_SHARE_LINK: "{shareItemLink}",
       KOD_SHARE_OUTER: "{shareOuter}",
       KOD_USER_RECYCLE: "{userRecycle}",
       KOD_USER_FAV: "{userFav}",
