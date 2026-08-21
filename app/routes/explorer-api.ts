@@ -145,7 +145,7 @@ function kodFileType(name: string): string {
   return "others";
 }
 
-function folderItem(name: string, dirPath: string): Record<string, unknown> {
+function folderItem(name: string, dirPath: string, targetID?: string | number): Record<string, unknown> {
   const path = dirPath + name + "/";
   return {
     name,
@@ -158,6 +158,8 @@ function folderItem(name: string, dirPath: string): Record<string, unknown> {
     isWriteable: true,
     isReadable: true,
     isTruePath: true,
+    targetType: "user",
+    targetID,
     ext: "",
     size: 0,
     modifyTime: new Date().toISOString(),
@@ -165,7 +167,7 @@ function folderItem(name: string, dirPath: string): Record<string, unknown> {
   };
 }
 
-function fileItem(obj: R2Object, dirPath: string): Record<string, unknown> {
+function fileItem(obj: R2Object, dirPath: string, targetID?: string | number): Record<string, unknown> {
   const name = obj.key.split("/").pop() || obj.key;
   const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
   const path = dirPath + name;
@@ -178,6 +180,8 @@ function fileItem(obj: R2Object, dirPath: string): Record<string, unknown> {
     isWriteable: true,
     isReadable: true,
     isTruePath: true,
+    targetType: "user",
+    targetID,
     ext,
     size: obj.size,
     modifyTime: obj.uploaded ? new Date(obj.uploaded).toISOString() : new Date().toISOString(),
@@ -185,7 +189,7 @@ function fileItem(obj: R2Object, dirPath: string): Record<string, unknown> {
   };
 }
 
-function emptyListData(thisPath: string, name?: string): Record<string, unknown> {
+function emptyListData(thisPath: string, name?: string, targetID?: string | number): Record<string, unknown> {
   return {
     current: {
       name: name || "",
@@ -196,6 +200,8 @@ function emptyListData(thisPath: string, name?: string): Record<string, unknown>
       isWriteable: true,
       isReadable: true,
       isTruePath: true,
+      targetType: "user",
+      targetID,
     },
     folderList: [],
     fileList: [],
@@ -585,7 +591,7 @@ explorerApi.all("/list/path", async (c) => {
   }
 
   if (parsed.kind === "recycle") {
-    return c.json({ code: true, data: emptyListData(parsed.thisPath, "回收站") });
+    return c.json({ code: true, data: emptyListData(parsed.thisPath, "回收站", user.id) });
   }
   if (parsed.kind === "fav") {
     return listFav(c, user, parsed.thisPath);
@@ -597,7 +603,7 @@ explorerApi.all("/list/path", async (c) => {
     return c.json({ code: true, data: await listTagSourcesData(c, user, parsed) });
   }
   if (parsed.kind === "recent") {
-    return c.json({ code: true, data: emptyListData(parsed.thisPath, "最近文档") });
+    return c.json({ code: true, data: emptyListData(parsed.thisPath, "最近文档", user.id) });
   }
   if (parsed.kind === "virtual") {
     const cleanPath = parsed.thisPath.replace(/\/+$/, "");
@@ -623,7 +629,7 @@ explorerApi.all("/list/path", async (c) => {
       return c.json({ code: true, data });
     }
     const vname = virtualNames[cleanPath] || "";
-    return c.json({ code: true, data: emptyListData(parsed.thisPath, vname) });
+    return c.json({ code: true, data: emptyListData(parsed.thisPath, vname, user.id) });
   }
 
   const dirPath = normDirPath(parsed.realPath);
@@ -636,14 +642,14 @@ explorerApi.all("/list/path", async (c) => {
     const folderList = folders
       .map((f) => f.key.split("/").filter(Boolean).pop() || "")
       .filter((name) => name && !name.startsWith("."))
-      .map((name) => folderItem(name, virtualDir));
+      .map((name) => folderItem(name, virtualDir, user.id));
 
     const fileList = files
       .filter((f) => {
         const n = f.key.split("/").pop() || "";
         return n !== ".keep" && !n.startsWith(".");
       })
-      .map((f) => fileItem(f, virtualDir));
+      .map((f) => fileItem(f, virtualDir, user.id));
 
     const currentName = dirPath === "/" ? rootName(user) : dirPath.split("/").filter(Boolean).pop() || rootName(user);
     const current = {
@@ -655,6 +661,8 @@ explorerApi.all("/list/path", async (c) => {
       isWriteable: true,
       isReadable: true,
       isTruePath: true,
+      targetType: "user",
+      targetID: user.id,
     };
 
     const totalNum = folderList.length + fileList.length;
@@ -690,6 +698,8 @@ async function listFav(c: AppContext, user: Vars["currentUser"], thisPath: strin
       isFolder,
       isWriteable: true,
       isReadable: true,
+      targetType: "user",
+      targetID: user.id,
       modifyTime: item.modifyTime || new Date().toISOString(),
       createTime: item.createTime || new Date().toISOString(),
       sourceInfo: { isFav: 1, favName: item.name, favID: item.id },
@@ -706,7 +716,7 @@ async function listFav(c: AppContext, user: Vars["currentUser"], thisPath: strin
   return c.json({
     code: true,
     data: {
-      current: { name: "收藏夹", path: thisPath, pathDisplay: displayPath(thisPath), type: "folder", isFolder: true, isWriteable: true, isReadable: true, isTruePath: true },
+      current: { name: "收藏夹", path: thisPath, pathDisplay: displayPath(thisPath), type: "folder", isFolder: true, isWriteable: true, isReadable: true, isTruePath: true, targetType: "user", targetID: user.id },
       folderList,
       fileList,
       groupList: [],
@@ -727,7 +737,7 @@ explorerApi.all("/list/tree", async (c) => {
     const { folders } = await listDirectory(c.env.FILES, user.username, path);
     const dirs = folders.map((p) => {
       const name = p.key.split("/").filter(Boolean).pop() || "";
-      return folderItem(name, path);
+      return folderItem(name, path, user.id);
     });
     return c.json({ code: true, data: dirs });
   } catch (err: any) {

@@ -287,6 +287,30 @@ userApi.get("/view/options", async (c) => {
         Object.keys(userRoleAuth.allowAction).forEach(k => { (userRoleAuth.allowAction as Record<string, number>)[k] = 1; });
       }
 
+      // G.user.role 必须是扁平权限对象 {key: 0|1}（前端 allow()/adminAuth()/initAuth() 直接按 key 取值）。
+      // 权限点来自 roles.auth（用户角色经 user_groups.authID 关联），admin 固定取角色 1。
+      const roleAuth: Record<string, number> = {};
+      try {
+        const authIDs: number[] = isAdmin ? [1] : [];
+        if (!isAdmin) {
+          const grpRows = await c.env.DB.prepare("SELECT authID FROM user_groups WHERE user_id = ?").bind(session.user_id).all<{ authID: number }>();
+          for (const r of grpRows.results || []) {
+            const id = Number(r.authID);
+            if (id > 0 && !authIDs.includes(id)) authIDs.push(id);
+          }
+        }
+        if (authIDs.length) {
+          const ph = authIDs.map(() => "?").join(",");
+          const roles = await c.env.DB.prepare(`SELECT auth FROM roles WHERE id IN (${ph})`).bind(...authIDs).all<{ auth: string }>();
+          for (const r of roles.results || []) {
+            for (const p of String(r.auth || "").split(",").map(x => x.trim()).filter(Boolean)) roleAuth[p] = 1;
+          }
+        }
+      } catch {
+        // roles/user_groups 表不可用时回退为仅给基础用户权限
+      }
+      for (const k of Object.keys(permList)) if (roleAuth[k] !== 1) roleAuth[k] = 0;
+
       userObj = {
         userID: session.user_id,
         myhome: "{source:home}",
@@ -300,7 +324,7 @@ userApi.get("/view/options", async (c) => {
           sex: 0, email: "", phone: "", avatar: "",
           sizeMax: 0, sizeUse: 0, status: 1,
         },
-        role: userRoleAuth,
+        role: roleAuth,
         config: {
           listType: "icon", listSortField: "name", listSortOrder: "up",
           fileIconSize: "80", fileOpenClick: "dbclick", fileShowDesc: "0",
