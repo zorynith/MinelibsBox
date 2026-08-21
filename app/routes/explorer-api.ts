@@ -15,6 +15,7 @@ import { authRequired } from "../lib/auth";
 import { getUserFileKey, listDirectory, listAllFiles, deleteDirectory, getFileMimeType } from "../lib/r2";
 import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources } from "../lib/db";
 import { getStaticHost } from "../lib/user-system";
+import { parseShareItemPath, listUserShareVirtual, listShareItemDir } from "./share-api";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const explorerApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -599,6 +600,13 @@ explorerApi.all("/list/path", async (c) => {
     return c.json({ code: true, data: emptyListData(parsed.thisPath, "最近文档") });
   }
   if (parsed.kind === "virtual") {
+    const cleanPath = parsed.thisPath.replace(/\/+$/, "");
+    const shareItem = parseShareItemPath(cleanPath);
+    if (shareItem) {
+      const data = await listShareItemDir(c.env, user, shareItem.shareID, shareItem.rel, parsed.thisPath);
+      if (data) return c.json({ code: true, data });
+      return c.json({ code: false, data: "分享不存在！" });
+    }
     const virtualNames: Record<string, string> = {
       "{userShare}": "我分享的",
       "{userShareLink}": "外链分享",
@@ -606,7 +614,15 @@ explorerApi.all("/list/path", async (c) => {
       "{groupRootSelf}": "我的部门",
       "{search}": "搜索",
     };
-    const vname = virtualNames[parsed.thisPath.replace(/\/+$/, "")] || "";
+    if (cleanPath === "{userShare}") {
+      const data = await listUserShareVirtual(c.env, user, parsed.thisPath, false);
+      return c.json({ code: true, data });
+    }
+    if (cleanPath === "{userShareLink}") {
+      const data = await listUserShareVirtual(c.env, user, parsed.thisPath, true);
+      return c.json({ code: true, data });
+    }
+    const vname = virtualNames[cleanPath] || "";
     return c.json({ code: true, data: emptyListData(parsed.thisPath, vname) });
   }
 

@@ -5,6 +5,7 @@
 import { Hono } from "hono";
 import { userApi } from "./user-api";
 import { explorerApi } from "./explorer-api";
+import { shareApi } from "./share-api";
 import { adminApi } from "./admin-api";
 import { pluginApi } from "./plugin-api";
 
@@ -12,6 +13,8 @@ const apiRoutes = new Hono<{ Bindings: Env }>();
 
 // Mount user API
 apiRoutes.route("/user", userApi);
+// Mount explorer API
+apiRoutes.route("/explorer", shareApi);
 // Mount explorer API
 apiRoutes.route("/explorer", explorerApi);
 // Mount admin API (用户管理)

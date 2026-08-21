@@ -156,6 +156,27 @@ export async function initDatabase(db: D1Database): Promise<void> {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
 
+    // Share (外链分享/内部协作分享, replaces 001 share table)
+    `CREATE TABLE IF NOT EXISTS share (
+      shareID INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL DEFAULT '',
+      shareHash TEXT NOT NULL DEFAULT '',
+      userID INTEGER NOT NULL,
+      sourceID TEXT NOT NULL DEFAULT '0',
+      sourcePath TEXT NOT NULL DEFAULT '',
+      url TEXT NOT NULL DEFAULT '',
+      isLink INTEGER NOT NULL DEFAULT 0,
+      isShareTo INTEGER NOT NULL DEFAULT 0,
+      password TEXT NOT NULL DEFAULT '',
+      timeTo INTEGER NOT NULL DEFAULT 0,
+      numView INTEGER NOT NULL DEFAULT 0,
+      numDownload INTEGER NOT NULL DEFAULT 0,
+      options TEXT NOT NULL DEFAULT '{}',
+      createTime TEXT DEFAULT (datetime('now')),
+      modifyTime TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (userID) REFERENCES users(id) ON DELETE CASCADE
+    )`,
+
     // Audit logs
     `CREATE TABLE IF NOT EXISTS audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,6 +192,8 @@ export async function initDatabase(db: D1Database): Promise<void> {
     // Indexes
     `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(share_token)`,
+    `CREATE INDEX IF NOT EXISTS idx_share_hash ON share(shareHash)`,
+    `CREATE INDEX IF NOT EXISTS idx_share_user ON share(userID)`,
     `CREATE INDEX IF NOT EXISTS idx_user_fav_user ON user_fav(userID)`,
     `CREATE INDEX IF NOT EXISTS idx_user_fav_name ON user_fav(name)`,
     `CREATE INDEX IF NOT EXISTS idx_user_tag_user ON user_tag(userID)`,
