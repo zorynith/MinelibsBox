@@ -135,22 +135,6 @@ function maskName(name: string): string {
   return name.length > 3 ? name.slice(0, 3) + "***" : name;
 }
 
-/** 文件类型（与主 explorer 的 kodFileType 一致）。 */
-function kodFileType(name: string): string {
-  const ext = name.split(".").pop()?.toLowerCase() || "";
-  const doc = "txt,md,pdf,ofd,doc,docx,xls,xlsx,ppt,pptx,xps,pps,ppsx,ods,odt,odp,docm,dot,dotm,xlsb,xlsm,mht,djvu,wps,dpt,csv,et,ett,pages,numbers,key,dotx,vsd,vsdx,mpp".split(",");
-  const image = "jpg,jpeg,png,gif,bmp,ico,svg,webp,tif,tiff,cdr,svgz,xbm,eps,pjepg,heic,raw,psd,ai".split(",");
-  const music = "mp3,wav,wma,m4a,ogg,omf,amr,aa3,flac,aac,cda,aif,aiff,mid,ra,ape".split(",");
-  const movie = "mp4,flv,rm,rmvb,avi,mkv,mov,f4v,mpeg,mpg,vob,wmv,ogv,webm,3gp,mts,m2ts,m4v,mpe,3g2,asf,dat,asx,wvx,mpa".split(",");
-  const zip = "zip,gz,rar,iso,tar,7z,ar,bz,bz2,xz,arj".split(",");
-  if (image.includes(ext)) return "image";
-  if (doc.includes(ext)) return "doc";
-  if (music.includes(ext)) return "music";
-  if (movie.includes(ext)) return "movie";
-  if (zip.includes(ext)) return "zip";
-  return "others";
-}
-
 /** 分享者用户信息（落地页 header 显示）。 */
 function shareUserInfo(user: AuthUser): Record<string, unknown> {
   const name = user.nickname || user.username;
@@ -179,13 +163,16 @@ function shareItemInfo(
 ): Record<string, unknown> {
   const root = shareLinkRoot(share.shareHash);
   const rel = o.relPath || "";
-  const path = o.isFolder ? root + rel + "/" : root + rel;
+  // 文件夹: root 本身以 / 结尾, rel 空时不再追加; 文件: root + rel
+  const path = o.isFolder ? root + (rel ? rel.replace(/\/+$/, "") + "/" : "") : root + rel;
   const pathDisplay = sourceName + (rel ? "/" + rel : "") + (o.isFolder ? "/" : "");
+  // type 为基础类型(file/folder, 与 001 IO::info 一致), ext 才是扩展名;
+  // 落地页据此判断文件/文件夹分享, 应用类型(如 doc/image)属于 UI 展示, 不应覆盖 type。
   return {
     name: o.name,
     path,
     pathDisplay,
-    type: o.isFolder ? "folder" : kodFileType(o.name),
+    type: o.isFolder ? "folder" : "file",
     isFolder: o.isFolder,
     ext: o.isFolder ? "folder" : (o.name.includes(".") ? o.name.split(".").pop()!.toLowerCase() : ""),
     size: o.size,
@@ -205,7 +192,16 @@ async function buildSharePageData(
   source: { type: "folder" | "file"; name: string; realPath: string }
 ): Promise<Record<string, unknown>> {
   const canEdit = await shareCanEdit(env, share);
-  return {
+  let size = 0;
+  let modifyTime = share.modifyTime;
+  if (source.type === "file") {
+    const obj = await env.FILES.head(getUserFileKey(owner.username, source.realPath));
+    if (obj) {
+      size = obj.size;
+      if (obj.uploaded) modifyTime = new Date(obj.uploaded).toISOString();
+    }
+  }
+  const info: Record<string, unknown> = {
     shareHash: share.shareHash,
     title: share.title,
     isLink: share.isLink,
@@ -218,12 +214,21 @@ async function buildSharePageData(
       name: source.name,
       relPath: "",
       isFolder: source.type === "folder",
-      size: 0,
-      modifyTime: share.modifyTime,
+      size,
+      modifyTime,
       canEdit,
     }),
     shareUser: shareUserInfo(owner),
   };
+  if (source.type === "file" && shareOptions(share).notDownload !== "1") {
+    const fileOutPath = shareLinkRoot(share.shareHash);
+    info["downloadPath"] =
+      `explorer/share/fileOut?shareID=${encodeURIComponent(share.shareHash)}` +
+      `&path=${encodeURIComponent(fileOutPath)}` +
+      `&name=${encodeURIComponent("/" + source.name)}`;
+    (info.sourceInfo as Record<string, unknown>)["downloadPath"] = info["downloadPath"];
+  }
+  return info;
 }
 
 /** 管理场景分享信息（share 行 + 源信息）。 */
@@ -439,18 +444,20 @@ function extractShareID(item: any): number | null {
 
 /** 分享者空间下真实路径是否可作为分享源。 */
 async function resolveShareSourceForUser(env: Env, username: string, path: string): Promise<{ type: "folder" | "file"; name: string; realPath: string } | null> {
-  const p = normShareSourcePath(path);
-  const isFolder = p.endsWith("/");
-  const name = p.split("/").filter(Boolean).pop() || p;
-  if (isFolder) {
-    const key = getUserFileKey(username, p);
-    const listed = await env.FILES.list({ prefix: key, limit: 1 });
-    if (listed.objects.length > 0 || (listed.delimitedPrefixes || []).length > 0) return { type: "folder", name, realPath: p };
-    return null;
+  // 001 中 sourcePath 对文件夹带尾斜杠; 前端可能不带, 这里统一: 先按文件夹(尾斜杠)查, 再按文件查。
+  const norm = normShareSourcePath(path);
+  const dirPath = norm.endsWith("/") ? norm : norm + "/";
+  const dirKey = getUserFileKey(username, dirPath);
+  const dirListed = await env.FILES.list({ prefix: dirKey, limit: 1 });
+  if (dirListed.objects.length > 0 || (dirListed.delimitedPrefixes || []).length > 0) {
+    const name = dirPath.split("/").filter(Boolean).pop() || dirPath;
+    return { type: "folder", name, realPath: dirPath };
   }
-  const obj = await env.FILES.head(getUserFileKey(username, p));
+  const filePath = norm.replace(/\/+$/, "");
+  const obj = await env.FILES.head(getUserFileKey(username, filePath));
   if (!obj) return null;
-  return { type: "file", name, realPath: p };
+  const name = filePath.split("/").filter(Boolean).pop() || filePath;
+  return { type: "file", name, realPath: filePath };
 }
 
 // ============ 路由 ============
@@ -994,7 +1001,7 @@ shareApi.all("/userShare/add", async (c) => {
     userID: user.id,
     title,
     shareHash,
-    sourcePath: realPath,
+    sourcePath: source.realPath,
     isLink,
     isShareTo: 0,
     password: typeof params.password === "string" ? params.password : "",
@@ -1108,7 +1115,7 @@ export async function listUserShareVirtual(
       name: source.name,
       path: `{shareItem:${share.shareID}}` + (isFolder ? "/" : ""),
       pathDisplay: `{shareItem:${share.shareID}}` + (isFolder ? "/" : ""),
-      type: isFolder ? "folder" : kodFileType(source.name),
+      type: isFolder ? "folder" : "file",
       isFolder,
       isWriteable: true,
       isReadable: true,
@@ -1189,7 +1196,7 @@ export async function listShareItemDir(
           name,
           path: virtualDir + name,
           pathDisplay: virtualDir + name,
-          type: kodFileType(name),
+          type: "file",
           isFolder: false,
           isWriteable: true,
           isReadable: true,
