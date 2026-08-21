@@ -16,12 +16,20 @@ import { getAppHost, getStaticHost } from "../lib/user-system";
 import { detectLang, loadLangPack } from "../lib/i18n-lang";
 import { loadPluginLang } from "../lib/plugins";
 import { getUserFileKey } from "../lib/r2";
+import { getShareByHash } from "../lib/share";
+import { getUserById } from "../lib/db";
+import { parseShareLinkRel, joinShareRealPath } from "./share-api";
 
 type Vars = { currentUser: AuthUser };
 const pluginApi = new Hono<{ Bindings: Env; Variables: Vars }>();
 
-// All plugin routes require auth
-pluginApi.use("*", authRequired);
+// 分享落地页(guest)打开 PDF/Office 等文件时, 插件预览页面需要公开访问;
+// 其余场景(主应用登录态)仍要求登录。
+pluginApi.use("*", async (c, next) => {
+  const rawPath = c.req.query("path") || "";
+  if (rawPath.indexOf("{shareItemLink:") === 0) return next();
+  return authRequired(c, next);
+});
 
 // ---------- helpers ----------
 
@@ -56,9 +64,36 @@ function replaceAll(tpl: string, pairs: Array<[string, string]>): string {
   return out;
 }
 
-/** Build the authenticated file content URL used by pdf.js / weboffice fetch. */
+/** Build the file content URL used by pdf.js / weboffice fetch. */
 function fileOutUrl(appHost: string, rawPath: string): string {
+  const m = rawPath.match(/\{shareItemLink:([-\w]+)\}/);
+  if (m) {
+    // 分享落地页 guest 场景: 走公开的 share/fileOut, 无需登录。
+    return `${appHost}index.php?explorer/share/fileOut&shareID=${encodeURIComponent(m[1])}&path=${encodeURIComponent(rawPath)}`;
+  }
   return `${appHost}index.php?explorer/index/fileOut&path=${encodeURIComponent(rawPath)}`;
+}
+
+/** 分享路径解析分享者真实 R2 key（仅文件）；非分享路径或目录返回 null。 */
+async function shareFileKeyOf(env: Env, rawPath: string): Promise<string | null> {
+  const m = rawPath.match(/\{shareItemLink:([-\w]+)\}/);
+  if (!m) return null;
+  const share = await getShareByHash(env.DB, m[1]);
+  if (!share) return null;
+  const rel = parseShareLinkRel(share, rawPath);
+  if (rel === null || rel.endsWith("/")) return null;
+  const owner = (await getUserById(env.DB, share.userID)) as { username: string } | null;
+  if (!owner) return null;
+  return getUserFileKey(owner.username, joinShareRealPath(share.sourcePath, rel));
+}
+
+/** 解析插件预览目标文件 R2 key：分享路径走分享者，普通路径走登录用户。 */
+async function resolveFileKey(c: any, rawPath: string): Promise<string | null> {
+  if (rawPath.indexOf("{shareItemLink:") === 0) {
+    return shareFileKeyOf(c.env, rawPath);
+  }
+  const user = c.get("currentUser") as { username: string } | undefined;
+  return user ? getUserFileKey(user.username, realPathOf(rawPath)) : null;
 }
 
 /** Resolve a frontend virtual path (e.g. {source:home}/桌面/) to its real R2 path (/桌面/). */
@@ -196,9 +231,8 @@ async function renderOfficeViewer(c: any, params: { rawPath: string; fileName: s
   }
 
   // 文件检查：不存在或空文件直接报错，避免前端解析器死循环
-  const user = c.get("currentUser") as { username: string };
-  const key = getUserFileKey(user.username, realPathOf(rawPath));
-  const obj = await c.env.FILES.head(key).catch(() => null);
+  const key = await resolveFileKey(c, rawPath);
+  const obj = key ? await c.env.FILES.head(key).catch(() => null) : null;
   if (!obj) {
     const global = await loadLangPack(c.env.ASSETS, lang);
     const msg = (global && global["common.pathNotExists"]) || "文件不存在";
@@ -249,9 +283,8 @@ async function renderWebodf(c: any, params: { rawPath: string; fileName: string;
   const title = "Opendocument Viewer";
 
   // 文件检查：不存在或空文件直接报错
-  const user = c.get("currentUser") as { username: string };
-  const key = getUserFileKey(user.username, realPathOf(rawPath));
-  const obj = await c.env.FILES.head(key).catch(() => null);
+  const key = await resolveFileKey(c, rawPath);
+  const obj = key ? await c.env.FILES.head(key).catch(() => null) : null;
   if (!obj) {
     const global = await loadLangPack(c.env.ASSETS, lang);
     const msg = (global && global["common.pathNotExists"]) || "文件不存在";

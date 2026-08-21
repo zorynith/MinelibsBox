@@ -110,14 +110,14 @@ function parseShareID(params: Record<string, any>): string {
 }
 
 /** 校验并解析外链路径为相对分享根的路径；不匹配返回 null。 */
-function parseShareLinkRel(share: ShareRow, path: string): string | null {
+export function parseShareLinkRel(share: ShareRow, path: string): string | null {
   const prefix = `{shareItemLink:${share.shareHash}}`;
   if (typeof path !== "string" || !path.startsWith(prefix)) return null;
   return path.slice(prefix.length).replace(/^\/+/, "");
 }
 
 /** 分享根真实路径 + 相对子路径 → 真实路径（目录保留尾斜杠）。 */
-function joinShareRealPath(sourcePath: string, rel: string, isDir = false): string {
+export function joinShareRealPath(sourcePath: string, rel: string, isDir = false): string {
   const base = normShareSourcePath(sourcePath).replace(/\/+$/, "");
   if (!rel) return isDir ? base + "/" : base;
   return isDir ? base + "/" + rel.replace(/\/+$/, "") + "/" : base + "/" + rel;
@@ -284,7 +284,7 @@ async function initShare(c: AppContext, params: Record<string, any>): Promise<In
   const share = await getShareByHash(c.env.DB, hash);
   if (!share || share.isLink !== 1) return shareError(c, 30100, L.notExist);
 
-  const owner = await getUserById(c.env.DB, share.userID);
+  const owner = (await getUserById(c.env.DB, share.userID)) as AuthUser | null;
   if (!owner || (owner.status ?? 1) !== 1) return shareError(c, 30100, L.notExist);
 
   const source = await resolveShareSource(c.env, owner, share);
@@ -1162,7 +1162,7 @@ export async function listShareItemDir(
 ): Promise<Record<string, unknown> | null> {
   const share = await getShareById(env.DB, shareID);
   if (!share || share.userID !== user.id) return null;
-  const owner = await getUserById(env.DB, share.userID);
+  const owner = (await getUserById(env.DB, share.userID)) as { username: string } | null;
   if (!owner) return null;
 
   const realDir = joinShareRealPath(share.sourcePath, rel, true);

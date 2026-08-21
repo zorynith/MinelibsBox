@@ -10,7 +10,6 @@
  *    列表项点击后进入 {shareItem:<shareID>}/ 目录。
  *  - 外链落地页根路径 {shareItemLink:<shareHash>}/。
  */
-import type { D1Database } from "@cloudflare/workers-types";
 import { md5, mcryptDecode } from "./mcrypt";
 
 export interface ShareRow {
