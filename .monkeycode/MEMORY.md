@@ -37,8 +37,9 @@ Entries discovered by the Agent during task execution should follow this format:
 - Instructions:
   - static/app/dist/dev/ 存放的永远是反混淆版文件，禁止改动。
   - static/app/dist/orig/ 存放的永远是原版混淆文件，禁止改动。
-  - 只改动 static/app/dist/ 根目录的文件：已完成反混淆的文件用 dev 版，未完成反混淆的文件用 orig 原版。
-  - 替换时从 dev/ 或 orig/ 复制到 dist 根目录，dev 和 orig 目录内容保持不变。
+  - dev/ 与 orig/ 目录比备份文件还重要，绝不可轻易改动。
+  - 只允许改动 static/app/dist/ 根目录的文件：替换时从 dev/ 或 orig/ 复制到 dist 根目录。
+  - dist 根目录文件「该用 dev 版还是 orig 版」由用户决定（只有用户知道哪些文件好坏），Agent 不得自行判断好坏、不得擅自替换任何 dist 根目录文件，必须等用户明确指示。
 
 [Project Knowledge Summary]
 - Date: 2026-08-15

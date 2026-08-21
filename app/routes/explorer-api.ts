@@ -1202,18 +1202,43 @@ async function readUploadId(bucket: R2Bucket, uploadIdKey: string): Promise<stri
 
 explorerApi.post("/upload/fileUpload", async (c) => {
   const user = c.get("currentUser");
-  // parseBody 同时支持 multipart/form-data 与 application/x-www-form-urlencoded(预检请求)
-  const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, unknown>;
-  const str = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : "");
+  const contentType = c.req.header("Content-Type") || "";
 
-  const path = str("path") || "/";
-  const name = str("name");
-  const size = parseInt(str("size") || "0", 10);
-  const chunk = parseInt(str("chunk") || "0", 10);
-  const chunks = parseInt(str("chunks") || "1", 10);
-  const checkType = str("checkType");
-  const fileInfo = str("fileInfo");
-  const file = body["file"] instanceof File ? (body["file"] as File) : null;
+  let path = "/", name = "", size = 0, chunk = 0, chunks = 1, chunkSizeParam = 0;
+  let checkType = "", fileInfo = "";
+  let file: File | null = null;
+
+  if (contentType.includes("application/octet-stream")) {
+    // sendAsBinary 模式: webuploader 将表单参数拼入 URL query, 请求体为文件二进制流
+    const q = c.req.query();
+    path = q.path || "/";
+    name = q.name || "";
+    size = parseInt(q.size || "0", 10);
+    chunk = parseInt(q.chunk || "0", 10);
+    chunks = parseInt(q.chunks || "1", 10);
+    chunkSizeParam = parseInt(q.chunkSize || "0", 10);
+    checkType = q.checkType || "";
+    fileInfo = q.fileInfo || "";
+    if (name) {
+      const buf = await c.req.arrayBuffer();
+      file = new File([buf], name, { type: q.type || "application/octet-stream" });
+    }
+  } else {
+    // parseBody 同时支持 multipart/form-data 与 application/x-www-form-urlencoded(预检请求)
+    const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, unknown>;
+    const str = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : "");
+    path = str("path") || "/";
+    name = str("name");
+    size = parseInt(str("size") || "0", 10);
+    chunk = parseInt(str("chunk") || "0", 10);
+    chunks = parseInt(str("chunks") || "1", 10);
+    chunkSizeParam = parseInt(str("chunkSize") || "0", 10);
+    checkType = str("checkType");
+    fileInfo = str("fileInfo");
+    file = body["file"] instanceof File ? (body["file"] as File) : null;
+  }
+  // 对齐 001 逻辑: 分片大小不小于文件大小时视为不分片, 避免小文件触发 R2 multipart 最小 5MiB 限制
+  if (chunkSizeParam > 0 && size > 0 && chunkSizeParam >= size) chunks = 1;
 
   // 上传预检(秒传/断点续传): 返回 uploadToKod=true + kodDriverType=Local, 使前端直接走后端上传
   if (checkType) {
