@@ -334,11 +334,20 @@ function rootDisabledActions(source: SourceRef, relPath: string, action: string)
   return disabled.has(action);
 }
 
-/** 计算 source 空间已用大小 (R2 前缀扫描)。 */
+/** 空间用量统计缓存: 避免每次上传/打开部门根目录都全量扫描 R2 (高频时易触发 Worker 超时)。 */
+const sizeCache = new Map<string, { size: number; ts: number }>();
+const SIZE_CACHE_TTL_MS = 10_000;
+
+/** 计算 source 空间已用大小 (R2 前缀扫描, 带短期缓存)。 */
 async function sourceUsedSize(env: Env, source: SourceRef): Promise<number> {
+  const key = source.baseKey;
+  const hit = sizeCache.get(key);
+  if (hit && Date.now() - hit.ts < SIZE_CACHE_TTL_MS) return hit.size;
+
   const prefix = keyFromBase(source.baseKey, "/");
   let size = 0;
   let cursor: string | undefined;
+  let scanned = 0;
   try {
     do {
       const listed = await env.FILES.list({ prefix, cursor, limit: 1000 });
@@ -346,10 +355,16 @@ async function sourceUsedSize(env: Env, source: SourceRef): Promise<number> {
         const name = o.key.split("/").pop() || "";
         if (!name || name.startsWith(".")) continue;
         size += o.size;
+        scanned++;
+        // 扫描上限兜底: 超大量对象时停止近似统计, 防止单请求耗时过长
+        if (scanned >= 50_000) break;
       }
+      if (scanned >= 50_000) break;
       cursor = listed.truncated ? listed.cursor : undefined;
     } while (cursor);
   } catch { /* R2 不可用时按 0 处理 */ }
+
+  sizeCache.set(key, { size, ts: Date.now() });
   return size;
 }
 
@@ -1168,6 +1183,7 @@ explorerApi.all("/index/mkdir", async (c) => {
     const key = keyFromBase(src.source.baseKey, fullPath + ".keep");
     await c.env.FILES.put(key, "");
     await addAuditLog(c.env.DB, "mkdir", user.id, fullPath, null, null, null);
+    sizeCache.delete(src.source.baseKey);
     return c.json({ code: true, data: "ok", info: fullPath });
   } catch (err: any) {
     return c.json({ code: false, data: err.message });
@@ -1196,6 +1212,7 @@ explorerApi.all("/index/mkfile", async (c) => {
     const key = keyFromBase(src.source.baseKey, fullPath);
     await c.env.FILES.put(key, content);
     await addAuditLog(c.env.DB, "mkfile", user.id, fullPath, null, null, null);
+    sizeCache.delete(src.source.baseKey);
     return c.json({ code: true, data: "ok", info: fullPath });
   } catch (err: any) {
     return c.json({ code: false, data: err.message });
@@ -1289,6 +1306,7 @@ explorerApi.all("/index/pathDelete", async (c) => {
         await c.env.FILES.delete(key);
       }
       await addAuditLog(c.env.DB, "delete", user.id, path, null, null, null);
+      sizeCache.delete(src.source.baseKey);
     }
     return c.json({ code: true, data: "ok" });
   } catch (err: any) {
@@ -1414,6 +1432,8 @@ explorerApi.all("/index/pathPast", async (c) => {
     if (!srcAuth.ok) return c.json({ code: false, data: srcAuth.error });
     if (type === "cut") await movePath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
     else await copyPath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
+    sizeCache.delete(src.source.baseKey);
+    sizeCache.delete(targetSrc.source.baseKey);
   }
   return c.json({ code: true, data: "ok", info: target });
 });
@@ -1439,6 +1459,8 @@ explorerApi.all("/index/pathCopyTo", async (c) => {
     const srcAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD);
     if (!srcAuth.ok) return c.json({ code: false, data: srcAuth.error });
     await copyPath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
+    sizeCache.delete(src.source.baseKey);
+    sizeCache.delete(targetSrc.source.baseKey);
   }
   return c.json({ code: true, data: "ok", info: target });
 });
@@ -1464,6 +1486,8 @@ explorerApi.all("/index/pathCuteTo", async (c) => {
     const srcAuth = await requireSourceAuth(c.env, user, src.source, AUTH_REMOVE);
     if (!srcAuth.ok) return c.json({ code: false, data: srcAuth.error });
     await movePath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
+    sizeCache.delete(src.source.baseKey);
+    sizeCache.delete(targetSrc.source.baseKey);
   }
   return c.json({ code: true, data: "ok", info: target });
 });
@@ -1530,6 +1554,7 @@ explorerApi.all("/index/fileSave", async (c) => {
   const key = keyFromBase(src.source.baseKey, src.relPath);
   await c.env.FILES.put(key, content);
   await addAuditLog(c.env.DB, "fileSave", user.id, path, null, null, null);
+  sizeCache.delete(src.source.baseKey);
   return c.json({ code: true, data: "ok" });
 });
 
@@ -1591,6 +1616,7 @@ explorerApi.all("/editor/fileSave", async (c) => {
   const key = keyFromBase(src.source.baseKey, src.relPath);
   await c.env.FILES.put(key, content);
   await addAuditLog(c.env.DB, "editorSave", user.id, path, null, null, null);
+  sizeCache.delete(src.source.baseKey);
   return c.json({ code: true, data: "ok" });
 });
 
@@ -1842,6 +1868,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
     }
 
     await addAuditLog(c.env.DB, "upload", user.id, realDir + fileName, null, null, `Size: ${size || file.size}`);
+    sizeCache.delete(src.source.baseKey);
     return c.json({ code: true, data: "上传成功", info: uploadInfoJson(virtualDir, fileName, size || file.size, fileInfo) });
   } catch (err: any) {
     return c.json({ code: false, data: err.message });
