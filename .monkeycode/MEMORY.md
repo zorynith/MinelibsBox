@@ -199,4 +199,5 @@ Entries discovered by the Agent during task execution should follow this format:
   - 本地 R2 对象核验：`npx wrangler r2 object get "minelibsbox-files/{key}" --local`；或读 `.wrangler/state/v3/r2/miniflare-R2BucketObject/*.sqlite`（python3 sqlite3 查 `_mf_objects.key`）。
   - curl 测试登录：`curl -c <cookie> -X POST /api/user/index/loginSubmit -d "name=admin&password=admin123"`（明文即可，不带 salt）；`-c` 会整体覆盖 cookie 文件，多用户并发测试必须用独立 cookie 文件（-c/-b 指向不同路径），否则后登录覆盖前 session，后续请求全以最后登录用户身份。
   - 上传测试文件到指定用户空间：`curl -b cookie -X POST /api/explorer/upload/fileUpload -F "path={source:home}/桌面/" -F "name=x.txt" -F "size=N" -F "chunks=1" -F "chunk=0" -F "file=@f"`。
+  - curl 测 GET/query 里含 `{source:home}`/`{userRecycle}` 等虚拟路径必须 URL 编码花括号（`%7B...%7D`），否则服务器端收到丢 `{}` 的路径被当 real 路径解析；POST 表单体（dataArr 等 JSON）无需编码。回收站/压缩验证用 `pathDelete`（无 shiftDelete 进回收站）、`recycleRestore`/`recycleDelete`、`index/zip`/`index/unzip`/`index/unzipList`/`index/zipDownload`（经 share/fileDownloadRemove 下载并自删临时 zip）。
   - 001 新用户默认初始化三件套（settingDefault 32 项 user_option + folderDefault 我的文档/图片/音乐 + lightAppDefault 桌面高德地图/icloud.oexe）在 `app/lib/user-init.ts`，member/add 与 regist 创建用户后调用。
