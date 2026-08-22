@@ -13,7 +13,8 @@ import { Hono } from "hono";
 import { authOptional, authRequired } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
 import { getUserById, addAuditLog, getSetting } from "../lib/db";
-import { getUserFileKey, listDirectory, getFileMimeType } from "../lib/r2";
+import { getUserFileKey, listDirectory, getFileMimeType, keyFromBase } from "../lib/r2";
+import { resolveFileSource } from "../lib/source";
 import { md5, mcryptDecode } from "../lib/mcrypt";
 import type { ShareRow } from "../lib/share";
 import {
@@ -942,7 +943,26 @@ shareApi.all("/share/report", async (c) => {
 shareApi.all("/share/zipDownload", (c) => c.json({ code: false, data: "暂不支持" }));
 shareApi.all("/share/unzipList", (c) => c.json({ code: false, data: "暂不支持" }));
 shareApi.all("/share/unzipListHash", (c) => c.json({ code: false, data: "暂不支持" }));
-shareApi.all("/share/fileDownloadRemove", (c) => c.json({ code: true, data: "ok" }));
+// fileDownloadRemove - 下载 explorer/index/zipDownload 生成的临时 zip (带登录态), 下载后删除
+shareApi.all("/share/fileDownloadRemove", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = typeof params.path === "string" ? params.path : "";
+  if (!user || !path) return c.json({ code: false, data: L.pathNotExists });
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const key = keyFromBase(src.source.baseKey, src.relPath);
+  const obj = await c.env.FILES.get(key).catch(() => null);
+  if (!obj) return c.json({ code: false, data: L.pathNotExists });
+  const name = path.split("/").filter(Boolean).pop() || "archive.zip";
+  await c.env.FILES.delete(key).catch(() => undefined);
+  const headers = new Headers();
+  headers.set("Content-Type", "application/zip");
+  headers.set("Content-Disposition", `attachment; filename="${encodeURIComponent(name)}"`);
+  headers.set("Cache-Control", "no-store");
+  obj.writeHttpMetadata(headers);
+  return new Response(obj.body, { headers });
+});
 
 // ---------- 分享管理（需登录） ----------
 

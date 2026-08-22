@@ -11,6 +11,7 @@
  *  - `fileDownload` / `fileOut` are GET links built via `urlMake` (params in query).
  */
 import { Hono } from "hono";
+import JSZip from "jszip";
 import { authRequired } from "../lib/auth";
 import { keyFromBase, listDirectory, listAllFiles, deleteDirectory, getFileMimeType } from "../lib/r2";
 import { resolveFileSource, userSource, toRealPath, groupChainMeta } from "../lib/source";
@@ -366,6 +367,142 @@ async function sourceUsedSize(env: Env, source: SourceRef): Promise<number> {
 
   sizeCache.set(key, { size, ts: Date.now() });
   return size;
+}
+
+// ============ recycle bin (对齐 001 recycleDriver: 删除进回收站, 记录用户映射) ============
+
+const RECYCLE_FOLDER = ".recycle";
+
+type RecycleMap = Record<string, string>; // recycleVirtualPath -> originalVirtualPath
+
+async function readRecycleList(db: D1Database, userId: number): Promise<RecycleMap> {
+  const raw = await getUserOption(db, userId, "recycleList", "recycle");
+  if (!raw) return {};
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" ? (obj as RecycleMap) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeRecycleList(db: D1Database, userId: number, list: RecycleMap) {
+  const json = JSON.stringify(list);
+  if (json.length > 65536) throw new Error("explorer.recycleClearForce");
+  await setUserOption(db, userId, "recycleList", json, "recycle");
+}
+
+/** 回收站虚拟目录根: {source:home}/.recycle/ 或 {source:ID}/.recycle/ */
+function recycleRootVPath(source: SourceRef): string {
+  return `{source:${source.sourceId}}/${RECYCLE_FOLDER}/`;
+}
+
+/** 文件重命名: 序号插入扩展名前 (archive.zip -> archive_1.zip); 无扩展名直接追加。 */
+function renameWithExt(name: string, i: number): string {
+  const dot = name.lastIndexOf(".");
+  if (dot > 0) return name.slice(0, dot) + "_" + i + name.slice(dot);
+  return name + "_" + i;
+}
+
+/** 计算目标目录内不冲突名: name, name_1, name_2, ... */
+async function uniqueNameInDir(bucket: R2Bucket, baseKey: string, destDir: string, name: string): Promise<string> {
+  const isFolder = name.endsWith("/");
+  const clean = isFolder ? name.slice(0, -1) : name;
+  let candidate = clean;
+  let i = 1;
+  for (;;) {
+    const key = keyFromBase(baseKey, destDir + candidate + (isFolder ? "/" : ""));
+    const exists = await bucket.head(key).catch(() => null);
+    if (!exists) return candidate + (isFolder ? "/" : "");
+    candidate = isFolder ? `${clean}_${i}` : renameWithExt(clean, i);
+    i++;
+  }
+}
+
+/** 将文件/文件夹移入回收站并记录映射。 */
+async function moveToRecycle(c: AppContext, user: Vars["currentUser"], source: SourceRef, relPath: string, originalVPath: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const movedName = await movePathSafe(c.env.FILES, source.baseKey, relPath, source.baseKey, `/${RECYCLE_FOLDER}/`);
+  if (!movedName) return { ok: false, error: "移动失败" };
+
+  const recycleVPath = recycleRootVPath(source) + movedName;
+  const list = await readRecycleList(c.env.DB, user.id);
+  list[recycleVPath] = originalVPath;
+  try {
+    await writeRecycleList(c.env.DB, user.id, list);
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
+  return { ok: true };
+}
+
+/** 回收站列表项: 以回收站路径访问, 展示删除前位置/名称。 */
+async function listRecycleData(c: AppContext, user: Vars["currentUser"], thisPath: string): Promise<Record<string, unknown>> {
+  const list = await readRecycleList(c.env.DB, user.id);
+  const folderList: Record<string, unknown>[] = [];
+  const fileList: Record<string, unknown>[] = [];
+  const removeKeys: string[] = [];
+
+  for (const [recycleVPath, originalVPath] of Object.entries(list)) {
+    const src = await resolveFileSource(c.env, user, recycleVPath);
+    if (!src.ok) {
+      removeKeys.push(recycleVPath);
+      continue;
+    }
+    const key = keyFromBase(src.source.baseKey, src.relPath);
+    const isFolder = src.relPath.endsWith("/");
+    let exists = true;
+    let objSize = 0;
+    let objTime: Date | null = null;
+    if (isFolder) {
+      const listed = await c.env.FILES.list({ prefix: key.endsWith("/") ? key : key + "/", limit: 1 }).catch(() => null);
+      if (!listed || listed.objects.length === 0) exists = false;
+    } else {
+      const obj = await c.env.FILES.head(key).catch(() => null);
+      if (!obj) exists = false;
+      else {
+        objSize = obj.size;
+        objTime = obj.uploaded;
+      }
+    }
+    if (!exists) {
+      removeKeys.push(recycleVPath);
+      continue;
+    }
+    const name = originalVPath.split("/").filter(Boolean).pop() || src.relPath.split("/").filter(Boolean).pop() || "";
+    const base: Record<string, unknown> = {
+      name,
+      path: recycleVPath,
+      pathDisplay: originalVPath.replace(/\/+$/, ""),
+      type: isFolder ? "folder" : kodFileType(name),
+      isFolder,
+      isWriteable: true,
+      isReadable: true,
+      isTruePath: true,
+      ext: isFolder ? "" : name.includes(".") ? name.split(".").pop()!.toLowerCase() : "",
+      size: isFolder ? 0 : objSize,
+      modifyTime: objTime ? new Date(objTime).toISOString() : new Date().toISOString(),
+      createTime: new Date().toISOString(),
+    };
+    if (isFolder) folderList.push(base);
+    else fileList.push(base);
+  }
+
+  if (removeKeys.length > 0) {
+    const cleaned: RecycleMap = { ...list };
+    for (const k of removeKeys) delete cleaned[k];
+    await writeRecycleList(c.env.DB, user.id, cleaned).catch(() => undefined);
+  }
+
+  const totalNum = folderList.length + fileList.length;
+  return {
+    current: { name: "回收站", path: thisPath, pathDisplay: "回收站", type: "folder", isFolder: true, isWriteable: true, isReadable: true, isTruePath: true },
+    folderList,
+    fileList,
+    groupList: [],
+    pageInfo: { totalNum, pageNum: 500, page: 1, pageTotal: Math.max(1, Math.ceil(totalNum / 500)) },
+    thisPath,
+    targetSpace: { sizeMax: 0, sizeUse: 0 },
+  };
 }
 
 /** 部门空间配额检测: 写入类操作前检查 size_max 上限 (对齐 001 checkSpaceOnCreate)。 */
@@ -734,7 +871,7 @@ explorerApi.all("/list/path", async (c) => {
   }
 
   if (parsed.kind === "recycle") {
-    return c.json({ code: true, data: emptyListData(parsed.thisPath, "回收站", user.id) });
+    return c.json({ code: true, data: await listRecycleData(c, user, parsed.thisPath) });
   }
   if (parsed.kind === "fav") {
     return listFav(c, user, parsed.thisPath);
@@ -1280,12 +1417,17 @@ explorerApi.all("/index/pathRename", async (c) => {
   }
 });
 
-// pathDelete - delete files/folders
+// pathDelete - delete files/folders (default: move to recycle bin; shiftDelete: hard delete)
 explorerApi.all("/index/pathDelete", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
   const items = parseDataArr(params.dataArr);
   if (items.length === 0) return c.json({ code: false, data: "参数错误" });
+
+  // 001: Shift+删除 硬删; 否则按用户配置 recycleOpen 决定是否进回收站 (默认进回收站)
+  const shiftDelete = params.shiftDelete === "1" || params.shiftDelete === true;
+  const recycleOpen = (await getUserOption(c.env.DB, user.id, "recycleOpen", "config")) !== "0";
+  const toRecycle = !shiftDelete && recycleOpen;
 
   try {
     for (const item of items) {
@@ -1299,13 +1441,24 @@ explorerApi.all("/index/pathDelete", async (c) => {
       // 001 auth: 删除需 remove 权限
       const delAuth = await requireSourceAuth(c.env, user, src.source, AUTH_REMOVE);
       if (!delAuth.ok) return c.json({ code: false, data: delAuth.error });
-      const key = keyFromBase(src.source.baseKey, path);
-      if (path.endsWith("/")) {
-        await deleteDirectory(c.env.FILES, key.endsWith("/") ? key : key + "/");
-      } else {
-        await c.env.FILES.delete(key);
+
+      // 回收站内删除 / 硬删: 直接删除
+      if (!toRecycle || path.startsWith(`/${RECYCLE_FOLDER}/`)) {
+        const key = keyFromBase(src.source.baseKey, path);
+        if (path.endsWith("/")) {
+          await deleteDirectory(c.env.FILES, key.endsWith("/") ? key : key + "/");
+        } else {
+          await c.env.FILES.delete(key);
+        }
+        await addAuditLog(c.env.DB, "delete", user.id, path, null, null, null);
+        sizeCache.delete(src.source.baseKey);
+        continue;
       }
-      await addAuditLog(c.env.DB, "delete", user.id, path, null, null, null);
+
+      // 进回收站: 移动 + 记录映射
+      const mv = await moveToRecycle(c, user, src.source, path, item.path);
+      if (!mv.ok) return c.json({ code: false, data: mv.error });
+      await addAuditLog(c.env.DB, "recycle", user.id, path, null, null, null);
       sizeCache.delete(src.source.baseKey);
     }
     return c.json({ code: true, data: "ok" });
@@ -1313,6 +1466,119 @@ explorerApi.all("/index/pathDelete", async (c) => {
     return c.json({ code: false, data: err.message });
   }
 });
+
+// recycleDelete - permanently delete from recycle bin (params: dataArr of original paths)
+explorerApi.all("/index/recycleDelete", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const items = parseDataArr(params.dataArr);
+  if (items.length === 0) return c.json({ code: false, data: "参数错误" });
+
+  const list = await readRecycleList(c.env.DB, user.id);
+  const listNew: RecycleMap = { ...list };
+  try {
+    for (const item of items) {
+      // 匹配: 传入回收站路径或原路径
+      const matchKey = findRecycleEntry(list, item.path);
+      if (!matchKey) continue;
+      const recycleVPath = matchKey;
+      const src = await resolveFileSource(c.env, user, recycleVPath);
+      if (!src.ok) continue;
+      const key = keyFromBase(src.source.baseKey, src.relPath);
+      if (src.relPath.endsWith("/")) {
+        await deleteDirectory(c.env.FILES, key.endsWith("/") ? key : key + "/");
+      } else {
+        await c.env.FILES.delete(key);
+      }
+      delete listNew[recycleVPath];
+      sizeCache.delete(src.source.baseKey);
+    }
+    await writeRecycleList(c.env.DB, user.id, listNew);
+    return c.json({ code: true, data: "ok" });
+  } catch (err: any) {
+    return c.json({ code: false, data: err.message });
+  }
+});
+
+// recycleRestore - restore from recycle bin (params: dataArr of original paths)
+explorerApi.all("/index/recycleRestore", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const items = parseDataArr(params.dataArr);
+  if (items.length === 0) return c.json({ code: false, data: "参数错误" });
+
+  const list = await readRecycleList(c.env.DB, user.id);
+  const listNew: RecycleMap = { ...list };
+  try {
+    for (const item of items) {
+      const matchKey = findRecycleEntry(list, item.path);
+      if (!matchKey) continue;
+      const recycleVPath = matchKey;
+      const originalVPath = list[recycleVPath];
+      const rsrc = await resolveFileSource(c.env, user, recycleVPath);
+      const osrc = await resolveFileSource(c.env, user, originalVPath);
+      if (!rsrc.ok || !osrc.ok) continue;
+      // 001 auth: 还原目标需 upload 权限
+      const tarAuth = await requireSourceAuth(c.env, user, osrc.source, AUTH_UPLOAD);
+      if (!tarAuth.ok) return c.json({ code: false, data: tarAuth.error });
+      // 原位置已存在同名时自动重命名
+      const moved = await movePathSafe(c.env.FILES, rsrc.source.baseKey, rsrc.relPath, osrc.source.baseKey, relDirOf(osrc.relPath));
+      if (!moved) continue;
+      delete listNew[recycleVPath];
+      sizeCache.delete(rsrc.source.baseKey);
+      sizeCache.delete(osrc.source.baseKey);
+    }
+    await writeRecycleList(c.env.DB, user.id, listNew);
+    return c.json({ code: true, data: "ok" });
+  } catch (err: any) {
+    return c.json({ code: false, data: err.message });
+  }
+});
+
+/** 在回收站映射中查找条目: 传入路径匹配回收站路径或原路径, 返回回收站路径。 */
+function findRecycleEntry(list: RecycleMap, path: string): string | null {
+  const p = (path || "").replace(/\/+$/, "");
+  for (const [rv, ov] of Object.entries(list)) {
+    if (rv.replace(/\/+$/, "") === p || ov.replace(/\/+$/, "") === p) return rv;
+  }
+  return null;
+}
+
+/** 相对路径的父目录 (保留尾斜杠)。 */
+function relDirOf(relPath: string): string {
+  const rest = (relPath || "").replace(/\/+$/, "");
+  const idx = rest.lastIndexOf("/");
+  return idx >= 0 ? rest.slice(0, idx + 1) : "/";
+}
+
+/** 移动并处理目标重名 (避免覆盖); 返回实际落盘目标名或 null。 */
+async function movePathSafe(bucket: R2Bucket, srcBaseKey: string, srcPath: string, destBaseKey: string, destDir: string): Promise<string | null> {
+  const srcKey = keyFromBase(srcBaseKey, srcPath);
+  const srcName = srcPath.split("/").filter(Boolean).pop() || srcPath;
+  const isFolder = srcPath.endsWith("/");
+  const targetName = await uniqueNameInDir(bucket, destBaseKey, destDir, srcName + (isFolder ? "/" : ""));
+  const destKey = keyFromBase(destBaseKey, destDir + targetName);
+
+  if (isFolder) {
+    if (destKey.startsWith(srcKey.endsWith("/") ? srcKey : srcKey + "/")) return null; // 移入自身子树
+    const prefix = srcKey.endsWith("/") ? srcKey : srcKey + "/";
+    const destPrefix = destKey.endsWith("/") ? destKey : destKey + "/";
+    let cursor: string | undefined;
+    do {
+      const batch = await bucket.list({ prefix, cursor });
+      for (const o of batch.objects) {
+        const rel = o.key.slice(prefix.length);
+        await copyObject(bucket, o.key, destPrefix + rel);
+        await bucket.delete(o.key);
+      }
+      cursor = batch.truncated ? batch.cursor : undefined;
+    } while (cursor);
+    return targetName;
+  }
+  const ok = await copyObject(bucket, srcKey, destKey);
+  if (ok) await bucket.delete(srcKey);
+  return ok ? targetName : null;
+}
 
 // ============ copy / cut / paste ============
 
@@ -1531,6 +1797,288 @@ async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment
 explorerApi.all("/index/fileDownload", (c) => fileOutHandler(c, "attachment"));
 explorerApi.all("/index/fileOut", (c) => fileOutHandler(c, "inline"));
 explorerApi.all("/index/fileOutBy", (c) => fileOutHandler(c, "inline"));
+
+// ============ zip / unzip (对齐 001 IOArchive) ============
+
+type ZipContext = { zip: JSZip; total: number; error?: string };
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+  if (bytes >= 1024) return (bytes / 1024).toFixed(2) + " KB";
+  return bytes + " B";
+}
+
+/** 虚拟路径的父目录 (带 source 前缀, 保留尾斜杠)。 */
+function dirOfVPath(vPath: string): string {
+  const m = vPath.match(/^(\{[^}]+\}\/)/);
+  const prefix = m ? m[1] : "";
+  const rest = vPath.slice(prefix.length).replace(/\/+$/, "");
+  const idx = rest.lastIndexOf("/");
+  return prefix + (idx >= 0 ? rest.slice(0, idx + 1) : "/");
+}
+
+/** 去除 zip 条目中的危险路径段 (.. / . / 反斜杠)。 */
+function safeZipEntryName(name: string): string {
+  const n = (name || "").replace(/\\/g, "/");
+  const parts = n.split("/").filter((s) => s && s !== "." && s !== "..");
+  return parts.join("/");
+}
+
+/** 解析 unzipPart: "-1" 或空返回 null(全部解压); JSON 数组返回部分解压的 index 集合。 */
+function parseUnzipPart(raw: any): Set<number> | null {
+  if (raw === "-1" || raw == null || raw === "") return null;
+  let arr = raw;
+  if (typeof arr === "string") {
+    try {
+      arr = JSON.parse(arr);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(arr)) return null;
+  const set = new Set<number>();
+  for (const it of arr) {
+    if (it && typeof it === "object" && "index" in it) {
+      const idx = Number((it as any).index);
+      if (Number.isInteger(idx)) set.add(idx);
+    } else {
+      const n = Number(it);
+      if (Number.isInteger(n)) set.add(n);
+    }
+  }
+  return set;
+}
+
+/** 把一个 item (文件/文件夹) 收集进 zip, zip 内以 item.name 为根。 */
+async function zipAddItem(c: AppContext, user: Vars["currentUser"], ctx: ZipContext, item: { path: string; name?: string; type?: string }): Promise<void> {
+  const src = await resolveFileSource(c.env, user, item.path);
+  if (!src.ok) {
+    ctx.error = src.error;
+    return;
+  }
+  const dlAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD);
+  if (!dlAuth.ok) {
+    ctx.error = dlAuth.error;
+    return;
+  }
+  if (rootDisabledActions(src.source, src.relPath, "zipDownload")) {
+    ctx.error = "explorer.pathNotSupport";
+    return;
+  }
+  const isFolder = item.type === "folder" || src.relPath.endsWith("/");
+  const baseName = (item.name || src.relPath.split("/").filter(Boolean).pop() || "item").replace(/\/+$/, "");
+  const key = keyFromBase(src.source.baseKey, src.relPath);
+
+  if (isFolder) {
+    const prefix = key.endsWith("/") ? key : key + "/";
+    const zipPrefix = baseName.endsWith("/") ? baseName : baseName + "/";
+    let cursor: string | undefined;
+    let cnt = 0;
+    do {
+      const listed = await c.env.FILES.list({ prefix, cursor });
+      for (const o of listed.objects) {
+        const rel = o.key.slice(prefix.length);
+        if (!rel || rel.split("/").some((seg: string) => seg.startsWith("."))) continue;
+        const obj = await c.env.FILES.get(o.key).catch(() => null);
+        if (!obj) continue;
+        const buf = await obj.arrayBuffer().catch(() => null);
+        if (buf) {
+          ctx.zip.file(zipPrefix + rel, buf);
+          ctx.total += buf.byteLength;
+        }
+        cnt++;
+        if (cnt > 100000) break;
+      }
+      cursor = listed.truncated ? listed.cursor : undefined;
+      if (cnt > 100000) cursor = undefined;
+    } while (cursor);
+  } else {
+    const obj = await c.env.FILES.get(key).catch(() => null);
+    if (!obj) {
+      ctx.error = "common.pathNotExists";
+      return;
+    }
+    const buf = await obj.arrayBuffer().catch(() => null);
+    if (!buf) {
+      ctx.error = "读取文件失败";
+      return;
+    }
+    ctx.zip.file(baseName, buf);
+    ctx.total += buf.byteLength;
+  }
+}
+
+// zip - 将选中项压缩为 zip 存到目标目录
+explorerApi.all("/index/zip", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const items = parseDataArr(params.dataArr);
+  if (items.length === 0) return c.json({ code: false, data: "参数错误" });
+  const type = params.type === "tar" || params.type === "tgz" ? params.type : "zip";
+  if (type !== "zip") return c.json({ code: false, data: "仅支持 zip 格式" });
+
+  try {
+    const zip = new JSZip();
+    const ctx: ZipContext = { zip, total: 0 };
+    for (const it of items) {
+      await zipAddItem(c, user, ctx, it);
+      if (ctx.error) return c.json({ code: false, data: ctx.error });
+    }
+
+    // 目标目录: zipPath 给定用其目录; 否则用第一个 item 的父目录
+    let targetVPath = "";
+    let zipName = "archive.zip";
+    if (typeof params.zipPath === "string" && params.zipPath) {
+      targetVPath = dirOfVPath(params.zipPath);
+      const b = params.zipPath.split("/").filter(Boolean).pop() || "";
+      if (b) zipName = b.endsWith(".zip") ? b : b + ".zip";
+    } else {
+      targetVPath = dirOfVPath(items[0].path);
+    }
+    const tsrc = await resolveFileSource(c.env, user, normDirPath(targetVPath));
+    if (!tsrc.ok) return c.json({ code: false, data: tsrc.error });
+    const upAuth = await requireSourceAuth(c.env, user, tsrc.source, AUTH_UPLOAD);
+    if (!upAuth.ok) return c.json({ code: false, data: upAuth.error });
+    const quota = await checkSpaceQuota(c.env, tsrc.source, ctx.total, toRealPath(targetVPath));
+    if (!quota.ok) return c.json({ code: false, data: quota.error });
+
+    const blob = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+    if (blob.byteLength > 1024 * 1024 * 1024) return c.json({ code: false, data: "压缩文件过大" });
+    const destRel = toRealPath(targetVPath);
+    const outName = await uniqueNameInDir(c.env.FILES, tsrc.source.baseKey, destRel, zipName);
+    const finalKey = keyFromBase(tsrc.source.baseKey, destRel + outName);
+    await c.env.FILES.put(finalKey, blob);
+    sizeCache.delete(tsrc.source.baseKey);
+    const outVPath = targetVPath + outName;
+    return c.json({ code: true, data: "压缩成功。文件大小:" + formatSize(blob.byteLength), info: outVPath });
+  } catch (err: any) {
+    return c.json({ code: false, data: err.message });
+  }
+});
+
+// unzip - 解压 zip 到 pathTo
+explorerApi.all("/index/unzip", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const zipPath = typeof params.path === "string" ? params.path : "";
+  const pathTo = typeof params.pathTo === "string" ? params.pathTo : "";
+  if (!zipPath || !pathTo) return c.json({ code: false, data: "参数错误" });
+  const unzipPart = params.unzipPart ?? "-1";
+
+  try {
+    const zsrc = await resolveFileSource(c.env, user, zipPath);
+    if (!zsrc.ok) return c.json({ code: false, data: zsrc.error });
+    const zAuth = await requireSourceAuth(c.env, user, zsrc.source, AUTH_VIEW);
+    if (!zAuth.ok) return c.json({ code: false, data: zAuth.error });
+    if (rootDisabledActions(zsrc.source, zsrc.relPath, "unzip")) return c.json({ code: false, data: "explorer.pathNotSupport" });
+
+    const tsrc = await resolveFileSource(c.env, user, normDirPath(pathTo));
+    if (!tsrc.ok) return c.json({ code: false, data: tsrc.error });
+    const upAuth = await requireSourceAuth(c.env, user, tsrc.source, AUTH_UPLOAD);
+    if (!upAuth.ok) return c.json({ code: false, data: upAuth.error });
+    if (rootDisabledActions(tsrc.source, toRealPath(pathTo), "unzip")) return c.json({ code: false, data: "explorer.pathNotSupport" });
+
+    const zkey = keyFromBase(zsrc.source.baseKey, zsrc.relPath);
+    const obj = await c.env.FILES.get(zkey).catch(() => null);
+    if (!obj) return c.json({ code: false, data: "common.pathNotExists" });
+    const buf = await obj.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+
+    const partSet = parseUnzipPart(unzipPart);
+    const toDir = toRealPath(pathTo).replace(/\/$/, "") + "/";
+
+    const entries = Object.values(zip.files);
+    let written = 0;
+    let totalBytes = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      if (e.dir) continue;
+      if (partSet && !partSet.has(i)) continue;
+      const rel = safeZipEntryName(e.name);
+      if (!rel) continue;
+      const content = await e.async("uint8array").catch(() => null);
+      if (!content) continue;
+      totalBytes += content.byteLength;
+      if (totalBytes > 2 * 1024 * 1024 * 1024) return c.json({ code: false, data: "解压文件过大" });
+      const quota = await checkSpaceQuota(c.env, tsrc.source, totalBytes, toDir);
+      if (!quota.ok) return c.json({ code: false, data: quota.error });
+      const destKey = keyFromBase(tsrc.source.baseKey, toDir + rel);
+      await c.env.FILES.put(destKey, content);
+      written++;
+    }
+    sizeCache.delete(tsrc.source.baseKey);
+    return c.json({ code: true, data: "解压成功。共解压 " + written + " 个文件", info: written });
+  } catch (err: any) {
+    return c.json({ code: false, data: err.message });
+  }
+});
+
+// unzipList - 返回压缩包内文件列表 (扁平数组, 对齐前端 makeTree)
+explorerApi.all("/index/unzipList", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = typeof params.path === "string" ? params.path : "";
+  if (!path) return c.json({ code: false, data: "参数错误" });
+
+  try {
+    const src = await resolveFileSource(c.env, user, path);
+    if (!src.ok) return c.json({ code: false, data: src.error });
+    const zAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+    if (!zAuth.ok) return c.json({ code: false, data: zAuth.error });
+    const key = keyFromBase(src.source.baseKey, src.relPath);
+    const obj = await c.env.FILES.get(key).catch(() => null);
+    if (!obj) return c.json({ code: false, data: "common.pathNotExists" });
+    const buf = await obj.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const list: Record<string, unknown>[] = [];
+    const entries = Object.values(zip.files);
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const filename = safeZipEntryName(e.name);
+      if (!filename) continue;
+      list.push({
+        filename,
+        stored_filename: filename,
+        folder: e.dir,
+        index: i,
+        mtime: e.date ? Math.floor(e.date.getTime() / 1000) : 0,
+        size: e.dir ? 0 : ((e as any)._data?.uncompressedSize ?? 0),
+      });
+    }
+    return c.json({ code: true, data: list });
+  } catch (err: any) {
+    return c.json({ code: false, data: err.message });
+  }
+});
+
+// zipDownload - 多文件/文件夹压缩下载: 生成临时 zip, 前端随后经 share/fileDownloadRemove 下载
+explorerApi.all("/index/zipDownload", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const items = parseDataArr(params.dataArr);
+  if (items.length === 0) return c.json({ code: false, data: "参数错误" });
+
+  try {
+    const zip = new JSZip();
+    const ctx: ZipContext = { zip, total: 0 };
+    for (const it of items) {
+      await zipAddItem(c, user, ctx, it);
+      if (ctx.error) return c.json({ code: false, data: ctx.error });
+    }
+    const blob = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+    const first = await resolveFileSource(c.env, user, items[0].path);
+    if (!first.ok) return c.json({ code: false, data: first.error });
+    const token = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const tempName = `archive_${token}.zip`;
+    const tempKey = keyFromBase(first.source.baseKey, `/.temp/${tempName}`);
+    await c.env.FILES.put(tempKey, blob);
+    const tempVPath = `{source:${first.source.sourceId}}/.temp/${tempName}`;
+    return c.json({ code: true, data: "压缩成功", info: tempVPath });
+  } catch (err: any) {
+    return c.json({ code: false, data: err.message });
+  }
+});
 
 // fileSave - save text content to file
 explorerApi.all("/index/fileSave", async (c) => {
