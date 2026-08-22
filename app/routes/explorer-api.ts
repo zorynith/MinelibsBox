@@ -212,6 +212,37 @@ function emptyListData(thisPath: string, name?: string, targetID?: string | numb
   };
 }
 
+/**
+ * 追加 oexe 应用内容(001 pathParseOexe): 读取 <=1MB 的 oexe 文件内容解析为 oexeContent,
+ * 使前端可识别桌面轻应用(.oexe)并双击打开; 内容非法/过大时跳过。
+ */
+async function pathParseOexe(bucket: R2Bucket, username: string, item: any): Promise<void> {
+  if (item.ext !== "oexe" || !item.size || item.size > 1024 * 1024) return;
+  const key = getUserFileKey(username, toRealPath(item.path));
+  let obj: R2ObjectBody | null;
+  try {
+    obj = await bucket.get(key);
+  } catch {
+    return;
+  }
+  if (!obj) return;
+  let text: string;
+  try {
+    text = await obj.text();
+  } catch {
+    return;
+  }
+  if (!text) return;
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return;
+  }
+  if (!parsed || typeof parsed !== "object") return;
+  item.oexeContent = parsed;
+}
+
 /** Parse `dataArr` param (JSON string or array) into {path,name,type}[] */
 function parseDataArr(dataArr: any): { path: string; name?: string; type?: string }[] {
   let arr = dataArr;
@@ -644,12 +675,14 @@ explorerApi.all("/list/path", async (c) => {
       .filter((name) => name && !name.startsWith("."))
       .map((name) => folderItem(name, virtualDir, user.id));
 
-    const fileList = files
-      .filter((f) => {
-        const n = f.key.split("/").pop() || "";
-        return n !== ".keep" && !n.startsWith(".");
-      })
-      .map((f) => fileItem(f, virtualDir, user.id));
+    const fileList: any[] = [];
+    for (const f of files) {
+      const n = f.key.split("/").pop() || "";
+      if (n === ".keep" || n.startsWith(".")) continue;
+      const item = fileItem(f, virtualDir, user.id);
+      await pathParseOexe(c.env.FILES, user.username, item);
+      fileList.push(item);
+    }
 
     const currentName = dirPath === "/" ? rootName(user) : dirPath.split("/").filter(Boolean).pop() || rootName(user);
     const current = {
@@ -1073,6 +1106,9 @@ async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment
   if (!obj) return c.json({ code: false, data: "Not found" });
 
   const name = (typeof params.name === "string" && params.name) ? params.name : path.split("/").filter(Boolean).pop() || "file";
+  if (disposition === "attachment") {
+    await addAuditLog(c.env.DB, "download", user.id, path, null, null, null);
+  }
   return fileStreamResponse(c, obj, name, disposition);
 }
 

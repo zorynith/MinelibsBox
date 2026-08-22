@@ -56,6 +56,9 @@ export async function initDatabase(db: D1Database): Promise<void> {
       status INTEGER NOT NULL DEFAULT 1,
       sort INTEGER NOT NULL DEFAULT 0,
       parent_level TEXT NOT NULL DEFAULT ',',
+      io_driver INTEGER NOT NULL DEFAULT 0,
+      auth_show_type TEXT NOT NULL DEFAULT 'all',
+      auth_show_group TEXT NOT NULL DEFAULT '',
       created_at TEXT DEFAULT (datetime('now'))
     )`,
 
@@ -88,6 +91,26 @@ export async function initDatabase(db: D1Database): Promise<void> {
       group_id INTEGER NOT NULL,
       role_id INTEGER NOT NULL,
       PRIMARY KEY (group_id, role_id)
+    )`,
+
+    // Jobs (职位, replaces system_job.php)
+    `CREATE TABLE IF NOT EXISTS jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      display INTEGER NOT NULL DEFAULT 1,
+      sort INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
+
+    // Permission groups (权限组, replaces system_auth.php; auth is an int bitmask)
+    `CREATE TABLE IF NOT EXISTS auths (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      display INTEGER NOT NULL DEFAULT 1,
+      sort INTEGER NOT NULL DEFAULT 0,
+      auth INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
     )`,
 
     // Sessions table
@@ -218,6 +241,9 @@ export async function initDatabase(db: D1Database): Promise<void> {
   await addColumnIfMissing("groups", "status", "status INTEGER NOT NULL DEFAULT 1");
   await addColumnIfMissing("groups", "sort", "sort INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("groups", "parent_level", "parent_level TEXT NOT NULL DEFAULT ','");
+  await addColumnIfMissing("groups", "io_driver", "io_driver INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("groups", "auth_show_type", "auth_show_type TEXT NOT NULL DEFAULT 'all'");
+  await addColumnIfMissing("groups", "auth_show_group", "auth_show_group TEXT NOT NULL DEFAULT ''");
   await addColumnIfMissing("roles", "label", "label TEXT NOT NULL DEFAULT ''");
   await addColumnIfMissing("roles", "display", "display INTEGER NOT NULL DEFAULT 1");
   await addColumnIfMissing("roles", "sort", "sort INTEGER NOT NULL DEFAULT 0");

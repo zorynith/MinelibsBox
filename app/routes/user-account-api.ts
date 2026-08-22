@@ -12,6 +12,7 @@ import {
 } from "../lib/user-system";
 import { getUserFileKey, getFileMimeType } from "../lib/r2";
 import { t } from "../lib/i18n";
+import { userDefaultInit } from "../lib/user-init";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const accountApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -479,6 +480,7 @@ accountApi.post("/regist/regist", async (c) => {
   const meta = result.meta as any;
   const userID = meta?.last_row_id ?? 0;
   await addAuditLog(c.env.DB, "user.regist", userID, null, null, null, `regist by ${type}`);
+  await userDefaultInit(c.env.DB, c.env.FILES, userID, name);
   let groupInfo: Record<string, any> = {};
   try {
     groupInfo = JSON.parse(regist.groupInfo || "{}");

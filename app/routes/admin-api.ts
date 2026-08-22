@@ -7,6 +7,7 @@ import { authRequired, hashPassword, isAdmin } from "../lib/auth";
 import { getUserByUsername, userSearch, setSetting, addAuditLog } from "../lib/db";
 import { parseKodPassword } from "../lib/mcrypt";
 import { t } from "../lib/i18n";
+import { userDefaultInit } from "../lib/user-init";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const adminApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -94,7 +95,12 @@ adminApi.all("/group/get", async (c) => {
       status: g.status ?? 1,
       hasChildren: (childCount?.cnt || 0) > 0,
       isParent: (childCount?.cnt || 0) > 0,
-      metaInfo: { status: String(metaInfo?.status ?? g.status ?? 1) },
+      metaInfo: {
+        status: String(metaInfo?.status ?? g.status ?? 1),
+        ioDriver: g.io_driver ?? 0,
+        authShowType: g.auth_show_type || "all",
+        authShowGroup: g.auth_show_group || "",
+      },
       nodeData: { groupID: g.id, parentID: g.parent_id, name: g.name },
     });
   }
@@ -122,6 +128,12 @@ adminApi.all("/group/getByID", async (c) => {
     sizeUse: g.size_use || 0,
     sort: g.sort || 0,
     status: g.status ?? 1,
+    metaInfo: {
+      status: String(g.status ?? 1),
+      ioDriver: g.io_driver ?? 0,
+      authShowType: g.auth_show_type || "all",
+      authShowGroup: g.auth_show_group || "",
+    },
   }));
   return c.json(ok(list));
 });
@@ -163,6 +175,9 @@ adminApi.all("/group/add", async (c) => {
   const parentID = parseInt(query.parentID || "0", 10) || 0;
   const sizeMax = parseFloat(query.sizeMax || "0") || 0;
   const sort = parseInt(query.sort || "0", 10) || 0;
+  const ioDriver = parseInt(query.ioDriver || "0", 10) || 0;
+  const authShowType = (query.authShowType || "all").trim() || "all";
+  const authShowGroup = (query.authShowGroup || "").trim();
 
   let parentLevel = ",";
   if (parentID > 0) {
@@ -173,8 +188,8 @@ adminApi.all("/group/add", async (c) => {
   }
 
   const result = await c.env.DB.prepare(
-    "INSERT INTO groups (name, parent_id, size_max, size_use, status, sort, parent_level) VALUES (?, ?, ?, 0, 1, ?, '')"
-  ).bind(name, parentID, sizeMax, sort).run();
+    "INSERT INTO groups (name, parent_id, size_max, size_use, status, sort, parent_level, io_driver, auth_show_type, auth_show_group) VALUES (?, ?, ?, 0, 1, ?, '', ?, ?, ?)"
+  ).bind(name, parentID, sizeMax, sort, ioDriver, authShowType, authShowGroup).run();
   const meta = result.meta as any;
   const groupID = meta?.last_row_id ?? 0;
   if (!groupID) return c.json({ code: false, data: "添加失败" });
@@ -220,6 +235,18 @@ adminApi.all("/group/edit", async (c) => {
     args.push(newParent);
     updates.push("parent_level = ?");
     args.push(parentLevel + groupID + ",");
+  }
+  if (query.ioDriver !== undefined && query.ioDriver !== null && query.ioDriver !== "") {
+    updates.push("io_driver = ?");
+    args.push(parseInt(query.ioDriver, 10) || 0);
+  }
+  if (query.authShowType !== undefined && query.authShowType !== null && query.authShowType !== "") {
+    updates.push("auth_show_type = ?");
+    args.push((query.authShowType || "").trim() || "all");
+  }
+  if (query.authShowGroup !== undefined && query.authShowGroup !== null) {
+    updates.push("auth_show_group = ?");
+    args.push((query.authShowGroup || "").trim());
   }
   if (!updates.length) return c.json(ok("explorer.success", groupID));
   await c.env.DB.prepare(`UPDATE groups SET ${updates.join(", ")} WHERE id = ?`).bind(...args, groupID).run();
@@ -455,6 +482,8 @@ adminApi.all("/member/add", async (c) => {
   const groupInfo = parseGroupInfo(q.groupInfo || "");
   const groupMap = Object.keys(groupInfo).length ? groupInfo : { "1": roleID || 3 };
   await userGroupSet(c, userID, groupMap);
+
+  await userDefaultInit(c.env.DB, c.env.FILES, userID, name);
 
   await addAuditLog(c.env.DB, "user.regist", userID, null, null, null, "admin add user");
   return c.json(ok("explorer.success", userID));
@@ -788,37 +817,171 @@ adminApi.all("/role/sort", async (c) => {
 
 /**
  * 职位列表 - admin/job/get
- * 无 job 表, 返回空数组
+ * 001: adminJob get -> listData()
  */
 adminApi.all("/job/get", async (c) => {
-  return c.json(ok([]));
+  const result = await c.env.DB.prepare("SELECT * FROM jobs ORDER BY sort ASC, id ASC").all();
+  return c.json(ok(result.results));
 });
 
 /**
- * 职位管理写接口 - 无 job 表, 返回成功桩(职位功能已裁剪, get 恒为空)
+ * 添加职位 - admin/job/add
+ * 参数: name(必填), display(默认1)
  */
-adminApi.all("/job/add", async (c) => c.json(ok("explorer.success")));
-adminApi.all("/job/edit", async (c) => c.json(ok("explorer.success")));
-adminApi.all("/job/remove", async (c) => c.json(ok("explorer.success")));
-adminApi.all("/job/sort", async (c) => c.json(ok("explorer.success")));
+adminApi.all("/job/add", async (c) => {
+  const q = await allParams(c);
+  const name = (q.name || "").trim();
+  if (!name) return c.json(fail("explorer.error"));
+  const display = q.display === "0" ? 0 : 1;
+  const maxRow = await c.env.DB.prepare("SELECT COALESCE(MAX(sort), 0) + 1 AS nextSort FROM jobs").first<{ nextSort: number }>();
+  const result = await c.env.DB.prepare("INSERT INTO jobs (name, display, sort) VALUES (?, ?, ?)")
+    .bind(name, display, maxRow?.nextSort ?? 0).run();
+  const meta = result.meta as any;
+  const id = meta?.last_row_id ?? 0;
+  return c.json(ok("explorer.success", id));
+});
+
+/**
+ * 编辑职位 - admin/job/edit
+ * 参数: id(必填), name/display(可选)
+ */
+adminApi.all("/job/edit", async (c) => {
+  const q = await allParams(c);
+  const id = parseInt(q.id || "0", 10);
+  if (!id) return c.json(fail("explorer.error"));
+  const updates: string[] = [];
+  const args: any[] = [];
+  if (q.name !== undefined && q.name !== "") {
+    updates.push("name = ?");
+    args.push((q.name || "").trim());
+  }
+  if (q.display !== undefined && q.display !== "") {
+    updates.push("display = ?");
+    args.push(q.display === "0" ? 0 : 1);
+  }
+  if (updates.length) {
+    await c.env.DB.prepare(`UPDATE jobs SET ${updates.join(", ")} WHERE id = ?`).bind(...args, id).run();
+  }
+  return c.json(ok("explorer.success", id));
+});
+
+/**
+ * 删除职位 - admin/job/remove
+ * 参数: id
+ */
+adminApi.all("/job/remove", async (c) => {
+  const q = await allParams(c);
+  const id = parseInt(q.id || "0", 10);
+  if (!id) return c.json(fail("explorer.error"));
+  await c.env.DB.prepare("DELETE FROM jobs WHERE id = ?").bind(id).run();
+  return c.json(ok("explorer.success"));
+});
+
+/**
+ * 职位排序 - admin/job/sort
+ * 参数: ids(逗号分隔)
+ */
+adminApi.all("/job/sort", async (c) => {
+  const q = await allParams(c);
+  const ids = (q.ids || "").split(",").filter((x) => /^\d+$/.test(x)).map(Number);
+  for (let i = 0; i < ids.length; i++) {
+    await c.env.DB.prepare("UPDATE jobs SET sort = ? WHERE id = ?").bind(i, ids[i]).run();
+  }
+  return c.json(ok("explorer.success"));
+});
 
 // ============ admin/auth ============
 
 /**
- * 权限列表 - admin/auth/get
- * 无 auth 表, 返回空数组
+ * 权限组列表 - admin/auth/get
+ * 001: adminAuth get -> listData(); 权限组 auth 为位掩码(show:1,view:2,download:4,upload:8,edit:16,remove:32,share:64,comment:128,event:256,root:33554432)
  */
 adminApi.all("/auth/get", async (c) => {
-  return c.json(ok([]));
+  const result = await c.env.DB.prepare("SELECT * FROM auths ORDER BY sort ASC, id ASC").all();
+  return c.json(ok(result.results));
 });
 
 /**
- * 权限管理写接口 - 无 auth 表, 返回成功桩(权限功能已裁剪, get 恒为空)
+ * 添加权限组 - admin/auth/add
+ * 参数: name(必填), label, display(默认0), auth(位掩码, 默认0)
+ * 001: auth add -> model->add($data)
  */
-adminApi.all("/auth/add", async (c) => c.json(ok("explorer.success")));
-adminApi.all("/auth/edit", async (c) => c.json(ok("explorer.success")));
-adminApi.all("/auth/remove", async (c) => c.json(ok("explorer.success")));
-adminApi.all("/auth/sort", async (c) => c.json(ok("explorer.success")));
+adminApi.all("/auth/add", async (c) => {
+  const q = await allParams(c);
+  const name = (q.name || "").trim();
+  if (!name) return c.json(fail("explorer.error"));
+  const label = q.label || "label-blue-normal";
+  const display = q.display === "1" ? 1 : 0;
+  const auth = parseInt(q.auth || "0", 10) || 0;
+  const maxRow = await c.env.DB.prepare("SELECT COALESCE(MAX(sort), 0) + 1 AS nextSort FROM auths").first<{ nextSort: number }>();
+  const result = await c.env.DB.prepare("INSERT INTO auths (name, label, display, sort, auth) VALUES (?, ?, ?, ?, ?)")
+    .bind(name, label, display, maxRow?.nextSort ?? 0, auth).run();
+  const meta = result.meta as any;
+  const id = meta?.last_row_id ?? 0;
+  return c.json(ok("explorer.success", id));
+});
+
+/**
+ * 编辑权限组 - admin/auth/edit
+ * 参数: id(必填), name/label/display/auth(可选)
+ */
+adminApi.all("/auth/edit", async (c) => {
+  const q = await allParams(c);
+  const id = parseInt(q.id || "0", 10);
+  if (!id) return c.json(fail("explorer.error"));
+  const updates: string[] = [];
+  const args: any[] = [];
+  if (q.name !== undefined && q.name !== "") {
+    updates.push("name = ?");
+    args.push((q.name || "").trim());
+  }
+  if (q.label !== undefined && q.label !== "") {
+    updates.push("label = ?");
+    args.push(q.label);
+  }
+  if (q.display !== undefined && q.display !== "") {
+    updates.push("display = ?");
+    args.push(q.display === "1" ? 1 : 0);
+  }
+  if (q.auth !== undefined && q.auth !== "") {
+    updates.push("auth = ?");
+    args.push(parseInt(q.auth, 10) || 0);
+  }
+  if (updates.length) {
+    await c.env.DB.prepare(`UPDATE auths SET ${updates.join(", ")} WHERE id = ?`).bind(...args, id).run();
+  }
+  return c.json(ok("explorer.success", id));
+});
+
+/**
+ * 删除权限组 - admin/auth/remove
+ * 参数: id, force(1=强制删除, 跳过使用检查)
+ * 001: 检查 SourceAuth.authID 与 user_group.authID 使用情况, 提示 admin.auth.delErrTips
+ */
+adminApi.all("/auth/remove", async (c) => {
+  const q = await allParams(c);
+  const id = parseInt(q.id || "0", 10);
+  if (!id) return c.json(fail("explorer.error"));
+  if (q.force !== "1") {
+    const used = await c.env.DB.prepare("SELECT COUNT(*) AS c FROM user_groups WHERE authID = ?").bind(id).first<{ c: number }>();
+    if ((used?.c ?? 0) > 0) return c.json(fail("admin.auth.delErrTips"));
+  }
+  await c.env.DB.prepare("DELETE FROM auths WHERE id = ?").bind(id).run();
+  return c.json(ok("explorer.success"));
+});
+
+/**
+ * 权限组排序 - admin/auth/sort
+ * 参数: ids(逗号分隔)
+ */
+adminApi.all("/auth/sort", async (c) => {
+  const q = await allParams(c);
+  const ids = (q.ids || "").split(",").filter((x) => /^\d+$/.test(x)).map(Number);
+  for (let i = 0; i < ids.length; i++) {
+    await c.env.DB.prepare("UPDATE auths SET sort = ? WHERE id = ?").bind(i, ids[i]).run();
+  }
+  return c.json(ok("explorer.success"));
+});
 
 // ============ admin/analysis (首页数据看板) ============
 
@@ -831,6 +994,86 @@ function isoToUnix(iso: string | null | undefined): number {
 async function countWhere(db: D1Database, table: string, where: string, args: any[] = []): Promise<number> {
   const row = await db.prepare(`SELECT COUNT(*) AS c FROM ${table} ${where}`).bind(...args).first<{ c: number }>();
   return row?.c ?? 0;
+}
+
+/** 按扩展名分类文件类型(与 explorer kodFileType 一致) */
+function analysisFileType(name: string): string {
+  const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
+  const image = "jpg,jpeg,png,gif,bmp,ico,svg,webp,tif,tiff,cdr,svgz,xbm,eps,pjepg,heic,raw,psd,ai".split(",");
+  const doc = "txt,md,pdf,ofd,doc,docx,xls,xlsx,ppt,pptx,xps,pps,ppsx,ods,odt,odp,docm,dot,dotm,xlsb,xlsm,mht,djvu,wps,dpt,csv,et,ett,pages,numbers,key,dotx,vsd,vsdx,mpp".split(",");
+  const music = "mp3,wav,wma,m4a,ogg,omf,amr,aa3,flac,aac,cda,aif,aiff,mid,ra,ape".split(",");
+  const movie = "mp4,flv,rm,rmvb,avi,mkv,mov,f4v,mpeg,mpg,vob,wmv,ogv,webm,3gp,mts,m2ts,m4v,mpe,3g2,asf,dat,asx,wvx,mpa".split(",");
+  const zip = "zip,gz,rar,iso,tar,7z,ar,bz,bz2,xz,arj".split(",");
+  if (image.includes(ext)) return "image";
+  if (doc.includes(ext)) return "doc";
+  if (music.includes(ext)) return "music";
+  if (movie.includes(ext)) return "movie";
+  if (zip.includes(ext)) return "zip";
+  return "others";
+}
+
+const ANALYSIS_TYPE_TITLES: Record<string, string> = {
+  image: "图片",
+  doc: "文档",
+  music: "音乐",
+  movie: "视频",
+  zip: "压缩包",
+  others: "其他",
+};
+
+/** R2 全量扫描统计: 总大小/总数/今日新增/按用户(username)汇总 */
+async function scanBucketStats(bucket: R2Bucket) {
+  let totalSize = 0;
+  let totalCnt = 0;
+  let todaySize = 0;
+  const perUser: Record<string, { size: number; cnt: number }> = {};
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  let cursor: string | undefined;
+  try {
+    do {
+      const listed = await bucket.list({ cursor, limit: 1000 });
+      for (const o of listed.objects) {
+        const name = (o.key.split("/").pop() || "").toLowerCase();
+        if (!name || name.startsWith(".")) continue;
+        const owner = o.key.split("/")[0];
+        if (!owner) continue;
+        totalSize += o.size;
+        totalCnt++;
+        if (o.uploaded && o.uploaded.getTime() >= todayStart.getTime()) todaySize += o.size;
+        if (!perUser[owner]) perUser[owner] = { size: 0, cnt: 0 };
+        perUser[owner].size += o.size;
+        perUser[owner].cnt++;
+      }
+      cursor = listed.truncated ? listed.cursor : undefined;
+    } while (cursor);
+  } catch {
+    // R2 不可用时返回全 0, 不阻塞看板
+  }
+  return { totalSize, totalCnt, todaySize, perUser };
+}
+
+/** 扫描指定前缀下对象, 按文件类型分类统计 */
+async function scanUserFileTypes(bucket: R2Bucket, prefix: string) {
+  const byType: Record<string, { size: number; cnt: number }> = {};
+  let cursor: string | undefined;
+  try {
+    do {
+      const listed = await bucket.list({ prefix, cursor, limit: 1000 });
+      for (const o of listed.objects) {
+        const name = (o.key.split("/").pop() || "").toLowerCase();
+        if (!name || name.startsWith(".")) continue;
+        const t = analysisFileType(name);
+        if (!byType[t]) byType[t] = { size: 0, cnt: 0 };
+        byType[t].size += o.size;
+        byType[t].cnt++;
+      }
+      cursor = listed.truncated ? listed.cursor : undefined;
+    } while (cursor);
+  } catch {
+    // ignore
+  }
+  return byType;
 }
 
 /**
@@ -851,18 +1094,39 @@ adminApi.all("/analysis/option", async (c) => {
   }
 
   if (type === "file") {
-    // 文件存储在 R2，D1 无文件元数据，返回 0（占位）
-    return c.json(ok({ sizeTotal: 0, sizeActual: 0, sizeSave: 0, cntTotal: 0, sizeToday: 0 }));
+    const stats = await scanBucketStats(c.env.FILES);
+    return c.json(ok({
+      sizeTotal: stats.totalSize,
+      sizeActual: stats.totalSize,
+      sizeSave: 0,
+      cntTotal: stats.totalCnt,
+      sizeToday: stats.todaySize,
+    }));
   }
 
   if (type === "access") {
-    return c.json(ok({ upload: 0, down: 0, remove: 0, edit: 0, total: 0, user: 0 }));
+    const rows = await DB.prepare(
+      "SELECT action, COUNT(*) AS c FROM audit_logs WHERE action IN ('upload','delete','fileSave','editorSave','download') GROUP BY action"
+    ).all();
+    const cnt: Record<string, number> = { upload: 0, down: 0, remove: 0, edit: 0 };
+    for (const r of rows.results as any[]) {
+      if (r.action === "upload") cnt.upload = r.c;
+      else if (r.action === "delete") cnt.remove = r.c;
+      else if (r.action === "download") cnt.down = r.c;
+      else if (r.action === "fileSave" || r.action === "editorSave") cnt.edit += r.c;
+    }
+    const totalRow = await DB.prepare("SELECT COUNT(*) AS c FROM audit_logs").first<{ c: number }>();
+    const userRow = await DB.prepare("SELECT COUNT(DISTINCT user_id) AS c FROM audit_logs WHERE user_id IS NOT NULL").first<{ c: number }>();
+    return c.json(ok({ ...cnt, total: totalRow?.c ?? 0, user: userRow?.c ?? 0 }));
   }
 
   if (type === "server") {
+    const stats = await scanBucketStats(c.env.FILES);
     return c.json(ok({
-      diskSizeUse: 0, diskSizeMax: 0,
-      systemSizeUse: 0, systemSizeMax: 0,
+      diskSizeUse: stats.totalSize,
+      diskSizeMax: 0,
+      systemSizeUse: 0,
+      systemSizeMax: 0,
       phpBit: 64,
       php: "PHP/8.2",
       cache: "Redis",
@@ -878,45 +1142,81 @@ adminApi.all("/analysis/option", async (c) => {
 
 /**
  * 空间占比/文件类型图 - admin/analysis/chart
- * 无参数: 返回 sizeUser/sizeTotal/sizeGroup
- * 带 userID/groupID: 返回 fileTypeAll + 各类型 {size,count}
+ * 无参数: 返回 sizeUser/sizeGroup/sizeTotal
+ * 带 userID/groupID: 返回 fileTypeAll + 各类型 {title,size}
  */
 adminApi.all("/analysis/chart", async (c) => {
   const q = await allParams(c);
+
   if (q.userID || q.groupID) {
-    return c.json(ok({ fileTypeAll: { size: 0, count: 0 } }));
+    let prefix: string | undefined;
+    if (q.userID) {
+      const user = await c.env.DB.prepare("SELECT username FROM users WHERE id = ?").bind(parseInt(q.userID, 10)).first<{ username: string }>();
+      if (user) prefix = `${user.username}/`;
+      else return c.json(ok({ fileTypeAll: { size: 0, count: 0 }, others: { title: "其他", size: 0 } }));
+    } else {
+      return c.json(ok({ fileTypeAll: { size: 0, count: 0 }, others: { title: "其他", size: 0 } }));
+    }
+    const byType = await scanUserFileTypes(c.env.FILES, prefix);
+    let totalSize = 0;
+    const data: Record<string, any> = {};
+    for (const t of ["image", "doc", "music", "movie", "zip", "others"]) {
+      const v = byType[t] || { size: 0, cnt: 0 };
+      totalSize += v.size;
+      data[t] = { title: ANALYSIS_TYPE_TITLES[t], size: v.size };
+    }
+    return c.json(ok({ fileTypeAll: { size: totalSize, count: 0 }, ...data }));
   }
-  return c.json(ok({ sizeUser: 0, sizeGroup: 0, sizeTotal: 0 }));
+
+  const stats = await scanBucketStats(c.env.FILES);
+  const sizeUser = stats.totalSize;
+  return c.json(ok({ sizeUser, sizeGroup: 0, sizeTotal: stats.totalSize }));
 });
 
 /**
  * 趋势图 - admin/analysis/trend
- * type: user(用户增长, date*cnt) | store(空间增长, date*size); time: week|month
+ * type: user(用户增长, date*cnt) | store(空间增长, date*size); time: day|week|month|year
  */
 adminApi.all("/analysis/trend", async (c) => {
   const q = await allParams(c);
   const type = q.type || "user";
-  const days = q.time === "month" ? 30 : 7;
-  const since = new Date(Date.now() - days * 86400 * 1000).toISOString();
+  const days = q.time === "day" ? 1 : q.time === "month" ? 30 : q.time === "year" ? 365 : 7;
+  const since = new Date(Date.now() - days * 86400 * 1000);
 
   if (type === "store") {
-    return c.json(ok([]));
+    const stats = await scanBucketStats(c.env.FILES);
+    const today = new Date().toISOString().slice(0, 10);
+    const daysList: any[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const dt = new Date(Date.now() - i * 86400 * 1000);
+      daysList.push({ date: dt.toISOString().slice(0, 10), size: 0, title: "空间占用" });
+    }
+    daysList[daysList.length - 1].size = stats.totalSize;
+    return c.json(ok(daysList));
   }
 
-  // 用户增长：按日统计真实注册数，缺失日期补 0
-  const rows = await c.env.DB.prepare(
-    "SELECT substr(created_at, 1, 10) AS d, COUNT(*) AS c FROM users WHERE created_at >= ? GROUP BY d ORDER BY d ASC"
-  ).bind(since).all();
-  const byDay: Record<string, number> = {};
-  for (const r of rows.results as any[]) byDay[r.d] = r.c;
+  // 用户趋势: 注册(created_at) + 登录(last_login)
+  const regRows = await c.env.DB.prepare(
+    "SELECT substr(created_at, 1, 10) AS d, COUNT(*) AS c FROM users WHERE created_at >= ? GROUP BY d"
+  ).bind(since.toISOString()).all();
+  const loginRows = await c.env.DB.prepare(
+    "SELECT datetime(last_login, 'unixepoch') AS d, COUNT(*) AS c FROM users WHERE last_login > ? GROUP BY d"
+  ).bind(Math.floor(since.getTime() / 1000)).all();
+  const regMap: Record<string, number> = {};
+  const loginMap: Record<string, number> = {};
+  for (const r of regRows.results as any[]) regMap[r.d] = r.c;
+  for (const r of loginRows.results as any[]) loginMap[(r.d || "").slice(0, 10)] = r.c;
 
-  const list: any[] = [];
+  const out: any[] = [];
   for (let i = days - 1; i >= 0; i--) {
-    const dt = new Date(Date.now() - i * 86400 * 1000);
-    const key = dt.toISOString().slice(0, 10);
-    list.push({ date: key, cnt: byDay[key] || 0, title: "新增用户" });
+    const key = new Date(Date.now() - i * 86400 * 1000).toISOString().slice(0, 10);
+    out.push({ date: key, cnt: regMap[key] || 0, title: "用户注册" });
   }
-  return c.json(ok(list));
+  for (let i = days - 1; i >= 0; i--) {
+    const key = new Date(Date.now() - i * 86400 * 1000).toISOString().slice(0, 10);
+    out.push({ date: key, cnt: loginMap[key] || 0, title: "用户登录" });
+  }
+  return c.json(ok(out));
 });
 
 /**
@@ -940,13 +1240,14 @@ adminApi.all("/analysis/table", async (c) => {
     return c.json(ok({ list, pageInfo: { page: 1, pageNum: list.length, total: list.length } }));
   }
 
+  const stats = await scanBucketStats(c.env.FILES);
   const result = await c.env.DB.prepare(
     "SELECT id, username, nickname, last_login, created_at FROM users ORDER BY last_login DESC, id ASC LIMIT 500"
   ).all();
   const list = (result.results as any[]).map((u) => ({
     userID: u.id,
     nickName: u.nickname || u.username,
-    sizeUse: 0,
+    sizeUse: stats.perUser[u.username]?.size || 0,
     lastLogin: u.last_login || 0,
     createTime: isoToUnix(u.created_at),
   }));

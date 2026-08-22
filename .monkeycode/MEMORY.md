@@ -189,3 +189,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - `G.user.role`（user/view/options 注入）契约是扁平 `{权限点: 0|1}` 对象：前端 `allow(e)=G.user.isRoot==1 || !!G.user.role[e]==1`、`adminAuth/initAuth` 直接按 key 取。严禁把嵌套 `{info, allowAction, roleList}` 塞给前端（全 undefined → 一切操作判失败）。权限点来源：普通用户 `user_groups.authID` → `roles.auth`（逗号分隔权限点），admin 固定角色 1；缺省权限点必须补 0。
   - 前端 `parseSourceAuth`（KOD_SOURCE/{source:home} 权限）对非 root 用户要求 item 满足 `targetType=="user" && targetID==G.user.userID`，否则返回空 auth（「没有权限」）。explorer list 的 current/folderItem/fileItem/emptyListData/fav 项必须带 `targetType:"user"`、`targetID: user.id`（fileItem/folderItem 需透传 userID 参数）；回收站/相册走 pathAuthList 不依赖 targetType。
   - 前端 `authCheck` 是无条件 `e!="unzip"` 的 stub；`parsePathAuth` 返回 `{auth, errorMsg, sourceInfo}`，errorMsg 仅在 auth 为空时弹「无权限/不支持」提示。
+
+[Project Knowledge Summary]
+- Date: 2026-08-22
+- Context: Discovered by Agent while performing 后台 job/auth/analysis 实现与本地验证
+- Category: Testing Methods
+- Instructions:
+  - 本地 D1 查改：`npx wrangler d1 execute minelibsbox --local --command "SQL"`（用 database 名 `minelibsbox`，非 binding `local-dev`）。
+  - 本地 R2 对象核验：`npx wrangler r2 object get "minelibsbox-files/{key}" --local`；或读 `.wrangler/state/v3/r2/miniflare-R2BucketObject/*.sqlite`（python3 sqlite3 查 `_mf_objects.key`）。
+  - curl 测试登录：`curl -c <cookie> -X POST /api/user/index/loginSubmit -d "name=admin&password=admin123"`（明文即可，不带 salt）；`-c` 会整体覆盖 cookie 文件，多用户并发测试必须用独立 cookie 文件（-c/-b 指向不同路径），否则后登录覆盖前 session，后续请求全以最后登录用户身份。
+  - 上传测试文件到指定用户空间：`curl -b cookie -X POST /api/explorer/upload/fileUpload -F "path={source:home}/桌面/" -F "name=x.txt" -F "size=N" -F "chunks=1" -F "chunk=0" -F "file=@f"`。
+  - 001 新用户默认初始化三件套（settingDefault 32 项 user_option + folderDefault 我的文档/图片/音乐 + lightAppDefault 桌面高德地图/icloud.oexe）在 `app/lib/user-init.ts`，member/add 与 regist 创建用户后调用。
