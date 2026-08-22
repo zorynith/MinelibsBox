@@ -674,13 +674,14 @@ async function buildMemberItem(c: any, u: any) {
   ).bind(u.id as number).all();
   const groupInfo: any[] = [];
   for (const grp of groups.results as any[]) {
-    const role = await c.env.DB.prepare("SELECT * FROM roles WHERE id = ?").bind(grp.authID ?? 0).first();
+    // 001: user_groups.authID 指向 auths 表 (部门权限组), 非 roles
+    const auth = await c.env.DB.prepare("SELECT * FROM auths WHERE id = ?").bind(grp.authID ?? 0).first();
     groupInfo.push({
       groupID: grp.groupID,
       groupName: grp.groupName,
       authID: grp.authID ?? 0,
-      auth: role
-        ? { label: role.label || "", name: role.name || "" }
+      auth: auth
+        ? { label: (auth as any).label || "", name: (auth as any).name || "" }
         : { label: "", name: "" },
     });
   }

@@ -15,7 +15,8 @@ import { authRequired } from "../lib/auth";
 import { keyFromBase, listDirectory, listAllFiles, deleteDirectory, getFileMimeType } from "../lib/r2";
 import { resolveFileSource, userSource, toRealPath, groupChainMeta } from "../lib/source";
 import type { SourceRef } from "../lib/source";
-import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources } from "../lib/db";
+import { getGroupAuthValue, getPersonalAuthValue, hasAuth, AUTH_SHOW, AUTH_VIEW, AUTH_DOWNLOAD, AUTH_UPLOAD, AUTH_EDIT, AUTH_REMOVE, AUTH_SHARE, AUTH_ROOT } from "../lib/source-auth";
+import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources, getSetting } from "../lib/db";
 import { getStaticHost } from "../lib/user-system";
 import { parseShareItemPath, listUserShareVirtual, listShareItemDir } from "./share-api";
 
@@ -295,6 +296,79 @@ async function groupChain(env: Env, groupID: number): Promise<{ id: number; name
     cur = g.parent_id;
   }
   return chain;
+}
+
+// ============ 部门空间权限检测 (对齐 001 SourceAuth / auth.class.php autoCheck) ============
+
+/** 用户在指定 source 上的权限位掩码。个人空间=全权限; 部门空间=按 auths.auth 位掩码。 */
+async function sourceAuthValue(env: Env, user: Vars["currentUser"], source: SourceRef): Promise<number> {
+  if (source.type === "user") return getPersonalAuthValue();
+  return getGroupAuthValue(env, user, source.targetID);
+}
+
+/** 检测操作是否被授权; 否则返回 {ok:false,error}, 可附带 msg 覆盖默认错误提示。 */
+async function requireSourceAuth(
+  env: Env,
+  user: Vars["currentUser"],
+  source: SourceRef,
+  bit: number,
+  error = "common.noPermission",
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const authValue = await sourceAuthValue(env, user, source);
+  if (!hasAuth(authValue, bit)) return { ok: false, error };
+  return { ok: true };
+}
+
+/** 001 pathRootCheck: 部门根/用户个人空间根禁止 重命名/删除/复制/剪切/下载/分享/压缩下载。 */
+function isSourceRootPath(source: SourceRef, relPath: string): boolean {
+  return relPath === "/";
+}
+
+/** 禁止作用于 source 根目录的操作 (对齐 001 pathRootCheck disable 列表)。 */
+function rootDisabledActions(source: SourceRef, relPath: string, action: string): boolean {
+  if (!isSourceRootPath(source, relPath)) return false;
+  const disabled = new Set([
+    "pathRename", "pathDelete", "pathCopy", "pathCute", "pathCopyTo", "pathCuteTo",
+    "fileDownload", "fileOut", "zipDownload", "pathInfo", "shareAdd", "userShare",
+  ]);
+  return disabled.has(action);
+}
+
+/** 计算 source 空间已用大小 (R2 前缀扫描)。 */
+async function sourceUsedSize(env: Env, source: SourceRef): Promise<number> {
+  const prefix = keyFromBase(source.baseKey, "/");
+  let size = 0;
+  let cursor: string | undefined;
+  try {
+    do {
+      const listed = await env.FILES.list({ prefix, cursor, limit: 1000 });
+      for (const o of listed.objects) {
+        const name = o.key.split("/").pop() || "";
+        if (!name || name.startsWith(".")) continue;
+        size += o.size;
+      }
+      cursor = listed.truncated ? listed.cursor : undefined;
+    } while (cursor);
+  } catch { /* R2 不可用时按 0 处理 */ }
+  return size;
+}
+
+/** 部门空间配额检测: 写入类操作前检查 size_max 上限 (对齐 001 checkSpaceOnCreate)。 */
+async function checkSpaceQuota(env: Env, source: SourceRef, extraBytes: number, dirPath: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (source.type !== "group") return { ok: true };
+  const group: any = await env.DB.prepare("SELECT size_max, size_use FROM groups WHERE id = ?")
+    .bind(source.targetID)
+    .first()
+    .catch(() => null);
+  if (!group) return { ok: true };
+  const sizeMax = parseInt(group.size_max || "0", 10);
+  if (sizeMax <= 0) return { ok: true }; // 0 表示不限制
+  const used = await sourceUsedSize(env, source);
+  if (used + extraBytes > sizeMax) {
+    return { ok: false, error: "空间不足" };
+  }
+  void dirPath;
+  return { ok: true };
 }
 
 // ============ 左侧栏 (listBlock: 位置/工具/文件类型/个人标签/挂载) ============
@@ -692,6 +766,13 @@ explorerApi.all("/list/path", async (c) => {
   const src = await resolveFileSource(c.env, user, rawPath);
   if (!src.ok) return c.json({ code: false, data: src.error });
   const source = src.source;
+
+  // 部门空间列出需 show 权限 (001: 无权限时静默不显示, 返回 pathNotExists)
+  if (source.type === "group") {
+    const authCheck = await requireSourceAuth(c.env, user, source, AUTH_SHOW, "common.pathNotExists");
+    if (!authCheck.ok) return c.json({ code: false, data: authCheck.error });
+  }
+
   const dirPath = normDirPath(src.relPath);
   // 前端依赖虚拟路径（如 {source:home}/桌面/）进行导航；真实路径仅用于 R2 访问。
   const virtualDir = parsed.thisPath.endsWith("/") ? parsed.thisPath : parsed.thisPath + "/";
@@ -743,7 +824,7 @@ explorerApi.all("/list/path", async (c) => {
       current.groupPathDisplay = groupMeta.groupPathDisplay;
       current.hasFolder = true;
       current.hasFile = true;
-      current.ioDriver = 0;
+      current.ioDriver = source.ioDriver ?? 0;
       if (src.relPath === "/") {
         // 部门根目录才有 sourceID/parentID(父部门), 供前端根图标与重命名判定
         current.sourceID = source.targetID;
@@ -755,16 +836,80 @@ explorerApi.all("/list/path", async (c) => {
     const totalNum = folderList.length + fileList.length;
     const pageTotal = Math.max(1, Math.ceil(totalNum / pageNum));
 
+    // 001 appendChildren: 部门根目录罗列子部门 (对齐 groupArray),
+    // 受 enableListGroup / groupListChild 配置控制
+    let groupList: Record<string, unknown>[] = [];
+    let groupShow: Record<string, unknown>[] | undefined;
+    const enableListGroup = await getSetting(c.env.DB, "enableListGroup");
+    const groupListChild = await getSetting(c.env.DB, "groupListChild");
+    // 001: groupListChild 未配置时默认罗列; '0'/'2' 不罗列 (2 仅树目录罗列)
+    const showChildren = source.type === "group" && dirPath === "/" && enableListGroup !== "0" && groupListChild !== "0" && groupListChild !== "2";
+    if (showChildren) {
+      const children: any = await c.env.DB.prepare(
+        "SELECT id, name, parent_id, sort, status FROM groups WHERE parent_id = ? AND status = 1 ORDER BY sort, id"
+      ).bind(source.targetID).all();
+      for (const child of children.results) {
+        const cchain = await groupChain(c.env, child.id);
+        const cmeta = groupChainMeta(cchain);
+        groupList.push({
+          name: child.name,
+          path: `{source:${child.id}}/`,
+          pathDisplay: cmeta.groupPathDisplay + "/",
+          pathFather: parsed.thisPath,
+          type: "folder",
+          isFolder: true,
+          isParent: true,
+          hasChildren: true,
+          hasFolder: true,
+          hasFile: true,
+          isWriteable: true,
+          isReadable: true,
+          isTruePath: true,
+          targetType: "group",
+          targetID: child.id,
+          sourceID: child.id,
+          parentID: child.parent_id,
+          sourceRoot: "groupPath",
+          ioDriver: 0,
+          groupPathRoot: cmeta.groupPathRoot,
+          groupPathDisplay: cmeta.groupPathDisplay,
+          ext: "",
+          size: 0,
+          modifyTime: new Date().toISOString(),
+          createTime: new Date().toISOString(),
+        });
+      }
+      if (groupList.length > 0) {
+        groupShow = [
+          { type: "childGroup", title: "子部门", filter: { sourceRoot: "groupPath" } },
+          { type: "childContent", title: "部门内容", filter: { sourceRoot: "!=groupPath" } },
+        ];
+      }
+    }
+
+    // 001 groupSpaceLimit: 部门空间配额展示 (size_max 0 表示不限制)
+    let targetSpace = { sizeMax: 0, sizeUse: 0 };
+    if (source.type === "group") {
+      const gSize = await c.env.DB.prepare(
+        "SELECT size_max, size_use FROM groups WHERE id = ?"
+      ).bind(source.targetID).first<{ size_max: number; size_use: number }>();
+      if (gSize) {
+        const used = await sourceUsedSize(c.env, source);
+        targetSpace = { sizeMax: gSize.size_max ?? 0, sizeUse: used };
+      }
+    }
+
     return c.json({
       code: true,
       data: {
         current,
         folderList,
         fileList,
-        groupList: [],
-        pageInfo: { totalNum, pageNum, page, pageTotal },
+        groupList,
+        groupShow,
+        pageInfo: { totalNum: totalNum + groupList.length, pageNum, page, pageTotal },
         thisPath: parsed.thisPath,
-        targetSpace: { sizeMax: 0, sizeUse: 0 },
+        targetSpace,
       },
     });
   } catch (err: any) {
@@ -855,15 +1000,64 @@ async function listGroupSelf(env: Env, user: Vars["currentUser"], thisPath: stri
     });
   }
 
+  // 001 groupSelfAppendAllow: 罗列自己所在部门的上级部门通路 (有权限访问的祖先部门),
+  // 使组织结构可见。用 sourceRootSelf!="self" 区分于直接所在部门。
+  const seen = new Set<number>(groupList.map((x) => x.targetID as number));
+  const appendList: Record<string, unknown>[] = [];
+  for (const g of rows.results) {
+    const chain = await groupChain(env, g.id);
+    for (const anc of chain) {
+      if (anc.id === g.id || seen.has(anc.id)) continue;
+      const ancAuth = await getGroupAuthValue(env, user, anc.id);
+      if (ancAuth <= 0) continue;
+      seen.add(anc.id);
+      const achain = await groupChain(env, anc.id);
+      const ameta = groupChainMeta(achain);
+      appendList.push({
+        name: anc.name,
+        path: `{source:${anc.id}}/`,
+        pathDisplay: ameta.groupPathDisplay + "/",
+        pathFather: thisPath,
+        type: "folder",
+        isFolder: true,
+        isParent: true,
+        hasChildren: true,
+        hasFolder: true,
+        hasFile: true,
+        isWriteable: true,
+        isReadable: true,
+        isTruePath: true,
+        targetType: "group",
+        targetID: anc.id,
+        sourceID: anc.id,
+        parentID: (await env.DB.prepare("SELECT parent_id FROM groups WHERE id = ?").bind(anc.id).first<{ parent_id: number }>())?.parent_id ?? 0,
+        sourceRoot: "groupPath",
+        sourceRootSelf: "!=self",
+        ioDriver: 0,
+        groupPathRoot: ameta.groupPathRoot,
+        groupPathDisplay: ameta.groupPathDisplay,
+        ext: "",
+        size: 0,
+        modifyTime: new Date().toISOString(),
+        createTime: new Date().toISOString(),
+      });
+    }
+  }
+
+  const groupShow: Record<string, unknown>[] = [
+    { type: "childGroupSelf", title: "我所在部门", filter: { sourceRootSelf: "self" } },
+  ];
+  if (appendList.length > 0) {
+    groupShow.push({ type: "childGroupAllow", title: "部门通路", desc: "(有权限访问的上级部门)", filter: { sourceRootSelf: "!=self" } });
+  }
+
   return {
     current: { name: "我的部门", path: thisPath, pathDisplay: "我的部门", type: "folder", isFolder: true, isWriteable: true, isReadable: true, isTruePath: true },
     folderList: [],
     fileList: [],
-    groupList,
-    groupShow: [
-      { type: "childGroupSelf", title: "我所在部门", filter: { sourceRootSelf: "self" } },
-    ],
-    pageInfo: { totalNum: groupList.length, pageNum: 500, page: 1, pageTotal: Math.max(1, Math.ceil(groupList.length / 500)) },
+    groupList: groupList.concat(appendList),
+    groupShow,
+    pageInfo: { totalNum: groupList.length + appendList.length, pageNum: 500, page: 1, pageTotal: Math.max(1, Math.ceil((groupList.length + appendList.length) / 500)) },
     thisPath,
     targetSpace: { sizeMax: 0, sizeUse: 0 },
   };
@@ -902,6 +1096,13 @@ explorerApi.all("/index/pathInfo", async (c) => {
     const name = path.split("/").filter(Boolean).pop() || path;
 
     if (isFolder) {
+      const src = await resolveFileSource(c.env, user, path);
+      if (!src.ok) continue;
+      if (rootDisabledActions(src.source, src.relPath, "pathInfo")) {
+        continue;
+      }
+      const infoAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+      if (!infoAuth.ok) continue;
       result.push({
         name,
         path,
@@ -921,6 +1122,8 @@ explorerApi.all("/index/pathInfo", async (c) => {
     } else {
       const src = await resolveFileSource(c.env, user, path);
       if (!src.ok) continue;
+      const infoAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+      if (!infoAuth.ok) continue;
       const key = keyFromBase(src.source.baseKey, src.relPath);
       const obj = await c.env.FILES.head(key).catch(() => null);
       if (obj) {
@@ -957,6 +1160,10 @@ explorerApi.all("/index/mkdir", async (c) => {
   if (!src.ok) return c.json({ code: false, data: src.error });
   const fullPath = normDirPath(src.relPath);
 
+  // 001 auth: 新建文件夹需 edit 权限
+  const mkAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  if (!mkAuth.ok) return c.json({ code: false, data: mkAuth.error });
+
   try {
     const key = keyFromBase(src.source.baseKey, fullPath + ".keep");
     await c.env.FILES.put(key, "");
@@ -976,6 +1183,10 @@ explorerApi.all("/index/mkfile", async (c) => {
   const src = await resolveFileSource(c.env, user, rawPath);
   if (!src.ok) return c.json({ code: false, data: src.error });
   const fullPath = src.relPath;
+
+  // 001 auth: 新建文件需 edit 权限
+  const mkAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  if (!mkAuth.ok) return c.json({ code: false, data: mkAuth.error });
 
   try {
     let content = typeof params.content === "string" ? params.content : "";
@@ -1007,6 +1218,14 @@ explorerApi.all("/index/pathRename", async (c) => {
   const isFolder = realPath.endsWith("/");
   const parentPath = realPath.substring(0, realPath.lastIndexOf("/") + 1);
   const newPath = parentPath + newName + (isFolder ? "/" : "");
+
+  // 001 pathRootCheck: 根目录禁止重命名
+  if (rootDisabledActions(src.source, realPath, "pathRename")) {
+    return c.json({ code: false, data: "explorer.pathNotSupport" });
+  }
+  // 001 auth: 重命名需 edit 权限
+  const renameAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  if (!renameAuth.ok) return c.json({ code: false, data: renameAuth.error });
 
   try {
     const oldKey = keyFromBase(baseKey, realPath);
@@ -1056,6 +1275,13 @@ explorerApi.all("/index/pathDelete", async (c) => {
       const src = await resolveFileSource(c.env, user, item.path);
       if (!src.ok) continue;
       const path = src.relPath;
+      // 001 pathRootCheck: 根目录禁止删除
+      if (rootDisabledActions(src.source, path, "pathDelete")) {
+        return c.json({ code: false, data: "explorer.pathNotSupport" });
+      }
+      // 001 auth: 删除需 remove 权限
+      const delAuth = await requireSourceAuth(c.env, user, src.source, AUTH_REMOVE);
+      if (!delAuth.ok) return c.json({ code: false, data: delAuth.error });
       const key = keyFromBase(src.source.baseKey, path);
       if (path.endsWith("/")) {
         await deleteDirectory(c.env.FILES, key.endsWith("/") ? key : key + "/");
@@ -1172,12 +1398,20 @@ explorerApi.all("/index/pathPast", async (c) => {
   const targetSrc = await resolveFileSource(c.env, user, typeof params.path === "string" ? params.path : "/");
   if (!targetSrc.ok) return c.json({ code: false, data: targetSrc.error });
   const target = normDirPath(targetSrc.relPath);
+  // 001 auth: 粘贴目标需 upload 权限
+  const targetAuth = await requireSourceAuth(c.env, user, targetSrc.source, AUTH_UPLOAD);
+  if (!targetAuth.ok) return c.json({ code: false, data: targetAuth.error });
   const raw = await getUserOption(c.env.DB, user.id, "pathCopy", "clipboard");
   const type = await getUserOption(c.env.DB, user.id, "pathCopyType", "clipboard");
   const paths: string[] = raw ? JSON.parse(raw) : [];
   for (const p of paths) {
     const src = await resolveFileSource(c.env, user, p);
     if (!src.ok) continue;
+    if (rootDisabledActions(src.source, src.relPath, type === "cut" ? "pathCute" : "pathCopy")) {
+      return c.json({ code: false, data: "explorer.pathNotSupport" });
+    }
+    const srcAuth = await requireSourceAuth(c.env, user, src.source, type === "cut" ? AUTH_REMOVE : AUTH_DOWNLOAD);
+    if (!srcAuth.ok) return c.json({ code: false, data: srcAuth.error });
     if (type === "cut") await movePath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
     else await copyPath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
   }
@@ -1192,9 +1426,18 @@ explorerApi.all("/index/pathCopyTo", async (c) => {
   const targetSrc = await resolveFileSource(c.env, user, typeof params.path === "string" ? params.path : "/");
   if (!targetSrc.ok) return c.json({ code: false, data: targetSrc.error });
   const target = normDirPath(targetSrc.relPath);
+  // 001 auth: 复制到目标需目标空间 upload 权限
+  const targetAuth = await requireSourceAuth(c.env, user, targetSrc.source, AUTH_UPLOAD);
+  if (!targetAuth.ok) return c.json({ code: false, data: targetAuth.error });
   for (const it of items) {
     const src = await resolveFileSource(c.env, user, it.path);
     if (!src.ok) continue;
+    if (rootDisabledActions(src.source, src.relPath, "pathCopyTo")) {
+      return c.json({ code: false, data: "explorer.pathNotSupport" });
+    }
+    // 001 auth: 复制来源需 download 权限
+    const srcAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD);
+    if (!srcAuth.ok) return c.json({ code: false, data: srcAuth.error });
     await copyPath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
   }
   return c.json({ code: true, data: "ok", info: target });
@@ -1208,9 +1451,18 @@ explorerApi.all("/index/pathCuteTo", async (c) => {
   const targetSrc = await resolveFileSource(c.env, user, typeof params.path === "string" ? params.path : "/");
   if (!targetSrc.ok) return c.json({ code: false, data: targetSrc.error });
   const target = normDirPath(targetSrc.relPath);
+  // 001 auth: 移动目标需目标空间 upload 权限
+  const targetAuth = await requireSourceAuth(c.env, user, targetSrc.source, AUTH_UPLOAD);
+  if (!targetAuth.ok) return c.json({ code: false, data: targetAuth.error });
   for (const it of items) {
     const src = await resolveFileSource(c.env, user, it.path);
     if (!src.ok) continue;
+    if (rootDisabledActions(src.source, src.relPath, "pathCuteTo")) {
+      return c.json({ code: false, data: "explorer.pathNotSupport" });
+    }
+    // 001 auth: 移动来源需 remove 权限
+    const srcAuth = await requireSourceAuth(c.env, user, src.source, AUTH_REMOVE);
+    if (!srcAuth.ok) return c.json({ code: false, data: srcAuth.error });
     await movePath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
   }
   return c.json({ code: true, data: "ok", info: target });
@@ -1235,6 +1487,12 @@ async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment
 
   const src = await resolveFileSource(c.env, user, path);
   if (!src.ok) return c.json({ code: false, data: src.error });
+  if (rootDisabledActions(src.source, src.relPath, disposition === "attachment" ? "fileDownload" : "fileOut")) {
+    return c.json({ code: false, data: "explorer.pathNotSupport" });
+  }
+  // 001 auth: 下载/预览需 download 权限
+  const dlAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD);
+  if (!dlAuth.ok) return c.json({ code: false, data: dlAuth.error });
   const key = keyFromBase(src.source.baseKey, src.relPath);
   const obj = await c.env.FILES.get(key).catch(() => null);
   if (!obj) return c.json({ code: false, data: "Not found" });
@@ -1263,6 +1521,12 @@ explorerApi.all("/index/fileSave", async (c) => {
   }
   const src = await resolveFileSource(c.env, user, path);
   if (!src.ok) return c.json({ code: false, data: src.error });
+  if (rootDisabledActions(src.source, src.relPath, "fileSave")) {
+    return c.json({ code: false, data: "explorer.pathNotSupport" });
+  }
+  // 001 auth: 保存文件需 edit 权限
+  const saveAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  if (!saveAuth.ok) return c.json({ code: false, data: saveAuth.error });
   const key = keyFromBase(src.source.baseKey, src.relPath);
   await c.env.FILES.put(key, content);
   await addAuditLog(c.env.DB, "fileSave", user.id, path, null, null, null);
@@ -1280,6 +1544,9 @@ explorerApi.all("/editor/fileGet", async (c) => {
 
   const src = await resolveFileSource(c.env, user, path);
   if (!src.ok) return c.json({ code: false, data: src.error });
+  // 001 auth: 读取文件需 view 权限
+  const getAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+  if (!getAuth.ok) return c.json({ code: false, data: getAuth.error });
   const key = keyFromBase(src.source.baseKey, src.relPath);
   const obj = await c.env.FILES.get(key).catch(() => null);
   if (!obj) return c.json({ code: false, data: "common.pathNotExists" });
@@ -1315,6 +1582,12 @@ explorerApi.all("/editor/fileSave", async (c) => {
   }
   const src = await resolveFileSource(c.env, user, path);
   if (!src.ok) return c.json({ code: false, data: src.error });
+  if (rootDisabledActions(src.source, src.relPath, "fileSave")) {
+    return c.json({ code: false, data: "explorer.pathNotSupport" });
+  }
+  // 001 auth: 编辑器保存需 edit 权限
+  const editAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  if (!editAuth.ok) return c.json({ code: false, data: editAuth.error });
   const key = keyFromBase(src.source.baseKey, src.relPath);
   await c.env.FILES.put(key, content);
   await addAuditLog(c.env.DB, "editorSave", user.id, path, null, null, null);
@@ -1334,6 +1607,9 @@ explorerApi.all("/index/search", async (c) => {
   try {
     const src = await resolveFileSource(c.env, user, path);
     if (!src.ok) return c.json({ code: true, data: [] });
+    // 001 auth: 搜索需 view 权限
+    const searchAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+    if (!searchAuth.ok) return c.json({ code: true, data: [] });
     const prefix = keyFromBase(src.source.baseKey, src.relPath);
     const results: Array<Record<string, unknown>> = [];
     let cursor: string | undefined;
@@ -1501,6 +1777,14 @@ explorerApi.post("/upload/fileUpload", async (c) => {
   const src = await resolveFileSource(c.env, user, path);
   if (!src.ok) return c.json({ code: false, data: src.error });
   const realDir = normDirPath(src.relPath);
+
+  // 001 auth: 上传需 upload 权限
+  const upAuth = await requireSourceAuth(c.env, user, src.source, AUTH_UPLOAD);
+  if (!upAuth.ok) return c.json({ code: false, data: upAuth.error });
+  // 001 checkSpace: 部门配额检测 (按文件总大小)
+  const quota = await checkSpaceQuota(c.env, src.source, size || file.size, realDir);
+  if (!quota.ok) return c.json({ code: false, data: quota.error });
+
   const virtualDir = normDirPath(path);
   const fileName = name || file.name;
   const key = keyFromBase(src.source.baseKey, realDir + fileName);

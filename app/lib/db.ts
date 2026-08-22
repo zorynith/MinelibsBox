@@ -277,6 +277,27 @@ export async function initDatabase(db: D1Database): Promise<void> {
     `INSERT OR IGNORE INTO user_groups (user_id, group_id, authID, sort)
      SELECT id, 1, 1, 0 FROM users WHERE username = 'admin'`
   ).run();
+
+  // Seed default auth groups (部门权限组, auth 为位掩码: show:1 view:2 download:4 upload:8
+  // edit:16 remove:32 share:64 comment:128 event:256 root:33554432).
+  // id 与迁移兼容: 1=完全控制(对齐旧 Administrator), 3=可读写(对齐旧 默认用户)。
+  await db.prepare(
+    `INSERT OR IGNORE INTO auths (id, name, label, display, sort, auth)
+     VALUES
+       (1, '完全控制', 'label-green-deep', 1, 2, 33554943),
+       (2, '只读', 'label-blue-normal', 1, 0, 391),
+       (3, '可读写', 'label-blue-deep', 1, 1, 511)`
+  ).run();
+
+  // 迁移旧数据: 旧 authID 指向 roles.id, 现统一为 auths.id (部门权限组)。
+  // roles.id=1(Administrator)/2(部门管理员) -> 完全控制(1); 其余(3默认用户/0/其他) -> 可读写(3)。
+  await db.prepare(
+    `UPDATE user_groups SET authID = CASE
+       WHEN authID IN (1, 2) THEN 1
+       WHEN authID = 3 THEN 3
+       ELSE 3 END
+     WHERE authID IS NOT NULL`
+  ).run();
 }
 
 // User helpers

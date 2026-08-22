@@ -16,6 +16,9 @@ export interface SourceRef {
   baseKey: string;
   targetID: number;
   displayName: string;
+  ioDriver?: number;
+  authShowType?: string;
+  authShowGroup?: string;
 }
 
 export type SourceResolve =
@@ -65,7 +68,7 @@ export async function resolveFileSource(env: Env, user: AuthUser, raw: string): 
   const groupID = parseInt(srcId, 10);
   if (!Number.isInteger(groupID) || groupID <= 0) return { ok: false, error: "common.pathNotExists" };
 
-  const group = await env.DB.prepare("SELECT id, name, status FROM groups WHERE id = ?")
+  const group = await env.DB.prepare("SELECT id, name, status, io_driver, auth_show_type, auth_show_group FROM groups WHERE id = ?")
     .bind(groupID)
     .first()
     .catch(() => null);
@@ -87,6 +90,9 @@ export async function resolveFileSource(env: Env, user: AuthUser, raw: string): 
       baseKey: `__group__/${groupID}/`,
       targetID: groupID,
       displayName: (group as any).name as string,
+      ioDriver: (group as any).io_driver ?? 0,
+      authShowType: (group as any).auth_show_type || "all",
+      authShowGroup: (group as any).auth_show_group || "",
     },
     relPath,
   };
