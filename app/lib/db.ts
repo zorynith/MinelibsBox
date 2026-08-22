@@ -259,6 +259,13 @@ export async function initDatabase(db: D1Database): Promise<void> {
      VALUES (1, '根部门', 0, ',1,', 0, 0, 1, 0)`
   ).run();
 
+  // Seed default admin user (密码 admin123), 幂等重建: 部署重置清空数据后自动恢复登录。
+  // mirrors migrations/0002_seed.sql
+  await db.prepare(
+    `INSERT OR IGNORE INTO users (username, password_hash, nickname, role, status)
+     VALUES ('admin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'Administrator', 'admin', 1)`
+  ).run();
+
   // Seed default roles, mirrors 001 install roleDefault()
   await db.prepare(
     `INSERT OR IGNORE INTO roles (id, name, label, display, sort, administrator, "system", auth)

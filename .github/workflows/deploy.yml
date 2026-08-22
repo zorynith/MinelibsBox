@@ -105,7 +105,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           npx wrangler d1 execute ${{ vars.D1_DATABASE_NAME }} --remote --config wrangler.jsonc \
-            --command "DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS favorites; DROP TABLE IF EXISTS shares; DROP TABLE IF EXISTS groups; DROP TABLE IF EXISTS roles; DROP TABLE IF EXISTS user_groups; DROP TABLE IF EXISTS group_roles; DROP TABLE IF EXISTS settings; DROP TABLE IF EXISTS audit_logs;"
+            --command "DELETE FROM user_groups; DELETE FROM group_roles; DELETE FROM user_fav; DELETE FROM user_tag_source; DELETE FROM user_tag; DELETE FROM user_option; DELETE FROM favorites; DELETE FROM shares; DELETE FROM share; DELETE FROM sessions; DELETE FROM settings; DELETE FROM audit_logs; DELETE FROM verify_code; DELETE FROM jobs; DELETE FROM users; DELETE FROM groups; DELETE FROM roles; DELETE FROM auths;"
 
       - name: Deploy
         env:
