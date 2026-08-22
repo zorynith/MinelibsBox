@@ -436,18 +436,15 @@ function parseGroupInfo(raw: string): Record<string, any> {
 }
 
 /** 将用户分配到指定部门(先清空再写入), 对齐 001 userGroupSet */
-async function userGroupSet(c: any, userID: number, groupInfo: Record<string, any>) {
-  const hasValidAuth = Object.values(groupInfo).some((auth) => {
-    const rawAuth = auth && typeof auth === "object" && "authID" in auth ? auth.authID : auth;
-    return parseInt(String(rawAuth ?? 0), 10) > 0;
-  });
-  const target = hasValidAuth ? groupInfo : { "1": 3 };
+async function userGroupSet(c: any, userID: number, groupInfo: Record<string, any>, defaultAuth = 3) {
+  const target = Object.keys(groupInfo).length ? groupInfo : { "1": defaultAuth };
   await c.env.DB.prepare("DELETE FROM user_groups WHERE user_id = ?").bind(userID).run();
   for (const [gid, auth] of Object.entries(target)) {
     const groupID = parseInt(gid, 10);
     if (!groupID) continue;
     const rawAuth = auth && typeof auth === "object" && "authID" in auth ? auth.authID : auth;
-    const authID = parseInt(String(rawAuth ?? 0), 10) || 0;
+    let authID = parseInt(String(rawAuth ?? 0), 10) || 0;
+    if (!authID) authID = defaultAuth;
     await c.env.DB.prepare(
       "INSERT INTO user_groups (user_id, group_id, authID, sort) VALUES (?, ?, ?, 0)"
     ).bind(userID, groupID, authID).run();
@@ -492,7 +489,7 @@ adminApi.all("/member/add", async (c) => {
 
   const groupInfo = parseGroupInfo(q.groupInfo || "");
   const groupMap = Object.keys(groupInfo).length ? groupInfo : { "1": roleID || 3 };
-  await userGroupSet(c, userID, groupMap);
+  await userGroupSet(c, userID, groupMap, roleID || 3);
 
   await userDefaultInit(c.env.DB, c.env.FILES, userID, name);
 
