@@ -104,8 +104,17 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          npx wrangler d1 execute ${{ vars.D1_DATABASE_NAME }} --remote --config wrangler.jsonc \
-            --command "DELETE FROM user_groups; DELETE FROM group_roles; DELETE FROM user_fav; DELETE FROM user_tag_source; DELETE FROM user_tag; DELETE FROM user_option; DELETE FROM favorites; DELETE FROM shares; DELETE FROM share; DELETE FROM sessions; DELETE FROM settings; DELETE FROM audit_logs; DELETE FROM verify_code; DELETE FROM jobs; DELETE FROM users; DELETE FROM groups; DELETE FROM roles; DELETE FROM auths;"
+          # 逐表 DELETE 保留表结构(避免 DROP 窗口期 524); 单表缺失(user_fav/user_tag/auths/jobs/share 等仅由 initDatabase 创建)
+          # 不中断流程, 否则 Deploy 被跳过导致线上一直跑旧代码
+          TABLES="user_groups group_roles user_fav user_tag_source user_tag user_option favorites shares share sessions settings audit_logs verify_code jobs users groups roles auths"
+          for T in $TABLES; do
+            if npx wrangler d1 execute ${{ vars.D1_DATABASE_NAME }} --remote --config wrangler.jsonc \
+              --command "DELETE FROM ${T};" >/dev/null 2>&1; then
+              echo "cleared ${T}"
+            else
+              echo "skip ${T} (table missing or failed)"
+            fi
+          done
 
       - name: Deploy
         env:
