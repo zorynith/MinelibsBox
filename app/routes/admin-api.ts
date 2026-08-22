@@ -399,8 +399,13 @@ function parseGroupInfo(raw: string): Record<string, any> {
 
 /** 将用户分配到指定部门(先清空再写入), 对齐 001 userGroupSet */
 async function userGroupSet(c: any, userID: number, groupInfo: Record<string, any>) {
+  const hasValidAuth = Object.values(groupInfo).some((auth) => {
+    const rawAuth = auth && typeof auth === "object" && "authID" in auth ? auth.authID : auth;
+    return parseInt(String(rawAuth ?? 0), 10) > 0;
+  });
+  const target = hasValidAuth ? groupInfo : { "1": 3 };
   await c.env.DB.prepare("DELETE FROM user_groups WHERE user_id = ?").bind(userID).run();
-  for (const [gid, auth] of Object.entries(groupInfo)) {
+  for (const [gid, auth] of Object.entries(target)) {
     const groupID = parseInt(gid, 10);
     if (!groupID) continue;
     const rawAuth = auth && typeof auth === "object" && "authID" in auth ? auth.authID : auth;

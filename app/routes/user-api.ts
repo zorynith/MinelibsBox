@@ -299,6 +299,7 @@ userApi.get("/view/options", async (c) => {
             if (id > 0 && !authIDs.includes(id)) authIDs.push(id);
           }
         }
+        if (!authIDs.length) authIDs.push(3);
         if (authIDs.length) {
           const ph = authIDs.map(() => "?").join(",");
           const roles = await c.env.DB.prepare(`SELECT auth FROM roles WHERE id IN (${ph})`).bind(...authIDs).all<{ auth: string }>();

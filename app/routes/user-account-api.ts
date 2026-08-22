@@ -479,6 +479,24 @@ accountApi.post("/regist/regist", async (c) => {
   const meta = result.meta as any;
   const userID = meta?.last_row_id ?? 0;
   await addAuditLog(c.env.DB, "user.regist", userID, null, null, null, `regist by ${type}`);
+  let groupInfo: Record<string, any> = {};
+  try {
+    groupInfo = JSON.parse(regist.groupInfo || "{}");
+  } catch { /* ignore */ }
+  const hasValidAuth = Object.values(groupInfo).some((a) => {
+    const ra = a && typeof a === "object" && "authID" in a ? a.authID : a;
+    return parseInt(String(ra ?? 0), 10) > 0;
+  });
+  const target = hasValidAuth ? groupInfo : { "1": 3 };
+  for (const [gid, auth] of Object.entries(target)) {
+    const groupID = parseInt(gid, 10);
+    if (!groupID) continue;
+    const rawAuth = auth && typeof auth === "object" && "authID" in auth ? auth.authID : auth;
+    const authID = parseInt(String(rawAuth ?? 0), 10) || 0;
+    await c.env.DB.prepare(
+      "INSERT INTO user_groups (user_id, group_id, authID, sort) VALUES (?, ?, ?, 0)"
+    ).bind(userID, groupID, authID).run();
+  }
   const code = regist.checkRegist === "1" ? false : true;
   const msg = regist.checkRegist === "1" ? "user.registSuccessuser.waitCheck" : "user.registSuccess";
   return c.json({ code, data: msg, info: userID });
