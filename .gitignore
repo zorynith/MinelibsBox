@@ -9,6 +9,9 @@ wrangler.jsonc
 # Cloudflare
 .mf
 .wrangler
+
+# 本地测试遗留目录
+/init_test/
 .dev.vars*
 worker-configuration.d.ts
 

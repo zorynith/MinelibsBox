@@ -8,6 +8,7 @@ import { getUserByUsername, userSearch, setSetting, addAuditLog } from "../lib/d
 import { parseKodPassword } from "../lib/mcrypt";
 import { t } from "../lib/i18n";
 import { userDefaultInit } from "../lib/user-init";
+import { deleteDirectory } from "../lib/r2";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const adminApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -196,6 +197,13 @@ adminApi.all("/group/add", async (c) => {
 
   const fullLevel = parentLevel + groupID + ",";
   await c.env.DB.prepare("UPDATE groups SET parent_level = ? WHERE id = ?").bind(fullLevel, groupID).run();
+
+  // 001 group.class.php folderDefault: 新建部门默认创建共享目录
+  const groupDefaultFolders = ["共享资源", "文档", "其他"];
+  for (const dir of groupDefaultFolders) {
+    await c.env.FILES.put(`__group__/${groupID}/${dir}/.keep`, "").catch(() => {});
+  }
+
   return c.json(ok("explorer.success", groupID));
 });
 
@@ -293,6 +301,9 @@ adminApi.all("/group/remove", async (c) => {
   const placeholders = allIds.map(() => "?").join(",");
   await c.env.DB.prepare(`DELETE FROM user_groups WHERE group_id IN (${placeholders})`).bind(...allIds).run();
   await c.env.DB.prepare(`DELETE FROM groups WHERE id IN (${placeholders})`).bind(...allIds).run();
+  for (const id of allIds) {
+    await deleteDirectory(c.env.FILES, `__group__/${id}/`).catch(() => {});
+  }
   return c.json(ok("explorer.success"));
 });
 
@@ -1155,7 +1166,7 @@ adminApi.all("/analysis/chart", async (c) => {
       if (user) prefix = `${user.username}/`;
       else return c.json(ok({ fileTypeAll: { size: 0, count: 0 }, others: { title: "其他", size: 0 } }));
     } else {
-      return c.json(ok({ fileTypeAll: { size: 0, count: 0 }, others: { title: "其他", size: 0 } }));
+      prefix = `__group__/${parseInt(q.groupID, 10)}/`;
     }
     const byType = await scanUserFileTypes(c.env.FILES, prefix);
     let totalSize = 0;
@@ -1169,8 +1180,9 @@ adminApi.all("/analysis/chart", async (c) => {
   }
 
   const stats = await scanBucketStats(c.env.FILES);
-  const sizeUser = stats.totalSize;
-  return c.json(ok({ sizeUser, sizeGroup: 0, sizeTotal: stats.totalSize }));
+  const sizeGroup = stats.perUser["__group__"]?.size || 0;
+  const sizeUser = stats.totalSize - sizeGroup;
+  return c.json(ok({ sizeUser, sizeGroup, sizeTotal: stats.totalSize }));
 });
 
 /**
@@ -1229,11 +1241,26 @@ adminApi.all("/analysis/table", async (c) => {
 
   if (type === "group") {
     const result = await c.env.DB.prepare("SELECT * FROM groups ORDER BY sort ASC, id ASC").all();
+    // 按 R2 `__group__/{id}/` 前缀聚合各部门空间实际占用
+    const groupSizes: Record<number, number> = {};
+    let cursor: string | undefined;
+    try {
+      do {
+        const listed = await c.env.FILES.list({ prefix: "__group__/", cursor, limit: 1000 });
+        for (const o of listed.objects) {
+          const gid = parseInt(o.key.split("/")[1] || "0", 10);
+          if (gid) groupSizes[gid] = (groupSizes[gid] || 0) + o.size;
+        }
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor);
+    } catch {
+      // R2 不可用时 fallback 到 DB 的 size_use
+    }
     const list = (result.results as any[]).map((g) => ({
       groupID: g.id,
       name: g.name,
       groupPath: g.parent_level || `,${g.id},`,
-      sizeUse: g.size_use || 0,
+      sizeUse: groupSizes[g.id] ?? (g.size_use || 0),
       sizeMax: g.size_max || 0,
       createTime: isoToUnix(g.created_at),
     }));

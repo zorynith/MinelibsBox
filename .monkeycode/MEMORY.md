@@ -66,11 +66,11 @@ Entries discovered by the Agent during task execution should follow this format:
   - 插件 i18n 存 `static/plugins/i18n/{name}.{lang}.json`（从 001 `{name}/i18n/{lang}.php` 转换），语言检测复用 i18n-lang 的 detectLang。
 
 [User Instruction Summary]
-- Date: 2026-08-15
-- Context: 用户要求以后提交代码时同时推送到两个远程仓库
+- Date: 2026-08-22
+- Context: 用户明确推送范围（覆盖 2026-08-15 的双仓库约定）
 - Instructions:
-  - 每次 `git push` 需同时推送到 GitHub（https://github.com/zorynith/MinelibsBox，用户名 zorynith）与 Gitee（https://gitee.com/minelibs/mbesbox）两个仓库。
-  - origin 已配置双 push 地址（`git remote set-url --add --push origin <url>`），push 时自动同时推送两个仓库。
+  - 每次 `git push` 只推送到 GitHub（https://github.com/zorynith/MinelibsBox），不再推送 Gitee。
+  - origin 的 push 地址只有 GitHub 一个，不要添加 gitee.com/minelibs/mbesbox 作为 push 目标。
   - GitHub 认证凭据由 `/root/.local/bin/git-cred-wrapper` 按 host 分发（github.com 返回 zorynith token，其余转发给系统 agent credential helper），token 严禁泄露、严禁写入仓库或聊天输出。
 
 [Project Knowledge Summary]

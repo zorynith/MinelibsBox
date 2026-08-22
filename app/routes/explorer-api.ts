@@ -12,7 +12,9 @@
  */
 import { Hono } from "hono";
 import { authRequired } from "../lib/auth";
-import { getUserFileKey, listDirectory, listAllFiles, deleteDirectory, getFileMimeType } from "../lib/r2";
+import { keyFromBase, listDirectory, listAllFiles, deleteDirectory, getFileMimeType } from "../lib/r2";
+import { resolveFileSource, userSource, toRealPath, groupChainMeta } from "../lib/source";
+import type { SourceRef } from "../lib/source";
 import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources } from "../lib/db";
 import { getStaticHost } from "../lib/user-system";
 import { parseShareItemPath, listUserShareVirtual, listShareItemDir } from "./share-api";
@@ -111,17 +113,12 @@ function parseExplorerPath(raw: string): ExplorerPath {
   return { kind: "real", realPath: p, thisPath: p };
 }
 
-/** Convert a frontend path (which may be virtual, e.g. {source:home}/桌面/) to its real relative path (/桌面/). */
-function toRealPath(p: string): string {
-  return parseExplorerPath(p).realPath;
-}
-
 /** MbesBox standard file category id (matches options.documentType). */
 const DESKTOP_FOLDER = "桌面";
 
-/** Ensure the user's desktop folder placeholder exists under their root. */
-async function ensureDesktopFolder(env: Env, username: string): Promise<void> {
-  const key = getUserFileKey(username, "/" + DESKTOP_FOLDER + "/.keep");
+/** Ensure the user's desktop folder placeholder exists under the given storage root. */
+async function ensureDesktopFolder(env: Env, baseKey: string): Promise<void> {
+  const key = keyFromBase(baseKey, "/" + DESKTOP_FOLDER + "/.keep");
   try {
     const existing = await env.FILES.head(key);
     if (!existing) await env.FILES.put(key, "");
@@ -145,12 +142,21 @@ function kodFileType(name: string): string {
   return "others";
 }
 
-function folderItem(name: string, dirPath: string, targetID?: string | number): Record<string, unknown> {
+/** 组装列表项的 pathDisplay: 传入源显示名链(pathDisplayBase)时替换 `{source:...}` 前缀; 否则用 displayPath 兜底。 */
+function itemPathDisplay(path: string, pathDisplayBase?: string): string {
+  if (pathDisplayBase) {
+    const rel = path.replace(/^\{source:[^}]+\}/, "");
+    return pathDisplayBase + rel;
+  }
+  return displayPath(path);
+}
+
+function folderItem(name: string, dirPath: string, targetID?: string | number, pathDisplayBase?: string, targetType: string = "user"): Record<string, unknown> {
   const path = dirPath + name + "/";
   return {
     name,
     path,
-    pathDisplay: displayPath(path),
+    pathDisplay: itemPathDisplay(path, pathDisplayBase),
     type: "folder",
     isFolder: true,
     isParent: true,
@@ -158,7 +164,7 @@ function folderItem(name: string, dirPath: string, targetID?: string | number): 
     isWriteable: true,
     isReadable: true,
     isTruePath: true,
-    targetType: "user",
+    targetType,
     targetID,
     ext: "",
     size: 0,
@@ -167,20 +173,20 @@ function folderItem(name: string, dirPath: string, targetID?: string | number): 
   };
 }
 
-function fileItem(obj: R2Object, dirPath: string, targetID?: string | number): Record<string, unknown> {
+function fileItem(obj: R2Object, dirPath: string, targetID?: string | number, pathDisplayBase?: string, targetType: string = "user"): Record<string, unknown> {
   const name = obj.key.split("/").pop() || obj.key;
   const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
   const path = dirPath + name;
   return {
     name,
     path,
-    pathDisplay: displayPath(path),
+    pathDisplay: itemPathDisplay(path, pathDisplayBase),
     type: kodFileType(name),
     isFolder: false,
     isWriteable: true,
     isReadable: true,
     isTruePath: true,
-    targetType: "user",
+    targetType,
     targetID,
     ext,
     size: obj.size,
@@ -216,9 +222,9 @@ function emptyListData(thisPath: string, name?: string, targetID?: string | numb
  * 追加 oexe 应用内容(001 pathParseOexe): 读取 <=1MB 的 oexe 文件内容解析为 oexeContent,
  * 使前端可识别桌面轻应用(.oexe)并双击打开; 内容非法/过大时跳过。
  */
-async function pathParseOexe(bucket: R2Bucket, username: string, item: any): Promise<void> {
+async function pathParseOexe(bucket: R2Bucket, baseKey: string, item: any): Promise<void> {
   if (item.ext !== "oexe" || !item.size || item.size > 1024 * 1024) return;
-  const key = getUserFileKey(username, toRealPath(item.path));
+  const key = keyFromBase(baseKey, toRealPath(item.path));
   let obj: R2ObjectBody | null;
   try {
     obj = await bucket.get(key);
@@ -272,6 +278,23 @@ function displayPath(virtualPath: string): string {
     return virtualPath.replace("{source:home}", "个人空间");
   }
   return virtualPath;
+}
+
+/** 从根到当前部门的父级链 (用于 groupPathRoot/groupPathDisplay 面包屑)。 */
+async function groupChain(env: Env, groupID: number): Promise<{ id: number; name: string }[]> {
+  const chain: { id: number; name: string }[] = [];
+  let cur: number | null = groupID;
+  let guard = 0;
+  while (cur && guard++ < 20) {
+    const g: any = await env.DB.prepare("SELECT id, name, parent_id FROM groups WHERE id = ?")
+      .bind(cur)
+      .first()
+      .catch(() => null);
+    if (!g) break;
+    chain.unshift({ id: g.id, name: g.name });
+    cur = g.parent_id;
+  }
+  return chain;
 }
 
 // ============ 左侧栏 (listBlock: 位置/工具/文件类型/个人标签/挂载) ============
@@ -406,7 +429,7 @@ async function listBlockData(c: AppContext, user: Vars["currentUser"], parsed: E
 /** 按文件类型分类列出用户空间内所有匹配的文件。 */
 async function listFilesByType(c: AppContext, user: Vars["currentUser"], parsed: ExplorerPath): Promise<Record<string, unknown>> {
   const typeId = parsed.typeId || "";
-  const all = await listAllFiles(c.env.FILES, user.username).catch(() => [] as R2Object[]);
+  const all = await listAllFiles(c.env.FILES, userSource(user).baseKey).catch(() => [] as R2Object[]);
   const fileList: Record<string, unknown>[] = [];
   for (const o of all) {
     const rel = o.key.slice(o.key.indexOf("/") + 1);
@@ -446,11 +469,11 @@ async function listFilesByType(c: AppContext, user: Vars["currentUser"], parsed:
 }
 
 /** 判断一个前端路径（虚拟或真实）是否为文件夹，依据 R2 中是否存在该目录前缀的对象。 */
-async function isFolderVirtualPath(env: Env, username: string, p: string): Promise<boolean> {
+async function isFolderVirtualPath(env: Env, baseKey: string, p: string): Promise<boolean> {
   const realPath = toRealPath(p).replace(/\/+$/, "");
   const rel = realPath.replace(/^\/+/, "");
   if (!rel) return false;
-  const prefix = getUserFileKey(username, rel + "/");
+  const prefix = keyFromBase(baseKey, rel + "/");
   const listed = await env.FILES.list({ prefix, limit: 1 }).catch(() => null);
   return !!listed && listed.objects.length > 0;
 }
@@ -465,7 +488,7 @@ async function listTagSourcesData(c: AppContext, user: Vars["currentUser"], pars
   const fileList: Record<string, unknown>[] = [];
   for (const s of sources as any[]) {
     const rawPath = (s.path || "").replace(/\/+$/, "");
-    const isFolder = await isFolderVirtualPath(c.env, user.username, rawPath);
+    const isFolder = await isFolderVirtualPath(c.env, userSource(user).baseKey, rawPath);
     const name = rawPath.split("/").filter(Boolean).pop() || rawPath;
     if (isFolder) {
       folderList.push({
@@ -659,44 +682,75 @@ explorerApi.all("/list/path", async (c) => {
       const data = await listUserShareVirtual(c.env, user, parsed.thisPath, true);
       return c.json({ code: true, data });
     }
+    if (cleanPath === "{groupRootSelf}") {
+      return c.json({ code: true, data: await listGroupSelf(c.env, user, parsed.thisPath) });
+    }
     const vname = virtualNames[cleanPath] || "";
     return c.json({ code: true, data: emptyListData(parsed.thisPath, vname, user.id) });
   }
 
-  const dirPath = normDirPath(parsed.realPath);
+  const src = await resolveFileSource(c.env, user, rawPath);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const source = src.source;
+  const dirPath = normDirPath(src.relPath);
   // 前端依赖虚拟路径（如 {source:home}/桌面/）进行导航；真实路径仅用于 R2 访问。
   const virtualDir = parsed.thisPath.endsWith("/") ? parsed.thisPath : parsed.thisPath + "/";
+
+  // 部门空间的面包屑链显示 (个人空间显示 "个人空间")
+  let pathDisplayBase = "个人空间";
+  let groupMeta: { groupPathRoot: string; groupPathDisplay: string; parentLevel: string } | null = null;
+  let groupParentID: number | string = 0;
+  if (source.type === "group") {
+    const chain = await groupChain(c.env, source.targetID);
+    groupMeta = groupChainMeta(chain);
+    pathDisplayBase = groupMeta.groupPathDisplay;
+    groupParentID = chain.length > 1 ? chain[chain.length - 2].id : 0;
+  }
+
   try {
-    if (dirPath === "/") await ensureDesktopFolder(c.env, user.username);
-    const { folders, files } = await listDirectory(c.env.FILES, user.username, dirPath);
+    if (dirPath === "/" && source.type === "user") await ensureDesktopFolder(c.env, source.baseKey);
+    const { folders, files } = await listDirectory(c.env.FILES, source.baseKey, dirPath);
 
     const folderList = folders
       .map((f) => f.key.split("/").filter(Boolean).pop() || "")
       .filter((name) => name && !name.startsWith("."))
-      .map((name) => folderItem(name, virtualDir, user.id));
+      .map((name) => folderItem(name, virtualDir, user.id, pathDisplayBase));
 
     const fileList: any[] = [];
     for (const f of files) {
       const n = f.key.split("/").pop() || "";
       if (n === ".keep" || n.startsWith(".")) continue;
-      const item = fileItem(f, virtualDir, user.id);
-      await pathParseOexe(c.env.FILES, user.username, item);
+      const item = fileItem(f, virtualDir, user.id, pathDisplayBase);
+      await pathParseOexe(c.env.FILES, source.baseKey, item);
       fileList.push(item);
     }
 
-    const currentName = dirPath === "/" ? rootName(user) : dirPath.split("/").filter(Boolean).pop() || rootName(user);
-    const current = {
+    const currentName = dirPath === "/" ? (source.type === "group" ? source.displayName : rootName(user)) : dirPath.split("/").filter(Boolean).pop() || rootName(user);
+    const current: Record<string, unknown> = {
       name: currentName,
       path: parsed.thisPath,
-      pathDisplay: displayPath(parsed.thisPath),
+      pathDisplay: itemPathDisplay(parsed.thisPath, pathDisplayBase),
       type: "folder",
       isFolder: true,
       isWriteable: true,
       isReadable: true,
       isTruePath: true,
-      targetType: "user",
-      targetID: user.id,
+      targetType: source.type,
+      targetID: source.type === "group" ? source.targetID : user.id,
     };
+    if (source.type === "group" && groupMeta) {
+      current.groupPathRoot = groupMeta.groupPathRoot;
+      current.groupPathDisplay = groupMeta.groupPathDisplay;
+      current.hasFolder = true;
+      current.hasFile = true;
+      current.ioDriver = 0;
+      if (src.relPath === "/") {
+        // 部门根目录才有 sourceID/parentID(父部门), 供前端根图标与重命名判定
+        current.sourceID = source.targetID;
+        current.sourceRoot = "groupPath";
+        current.parentID = groupParentID;
+      }
+    }
 
     const totalNum = folderList.length + fileList.length;
     const pageTotal = Math.max(1, Math.ceil(totalNum / pageNum));
@@ -760,6 +814,61 @@ async function listFav(c: AppContext, user: Vars["currentUser"], thisPath: strin
   });
 }
 
+/** "我的部门" ({groupRootSelf}): 罗列当前用户所在部门 (部门根目录项, path 为 {source:ID}/)。 */
+async function listGroupSelf(env: Env, user: Vars["currentUser"], thisPath: string): Promise<Record<string, unknown>> {
+  const rows: any = await env.DB.prepare(
+    "SELECT g.id, g.name, g.parent_id, g.sort, g.status, g.io_driver, g.size_max, g.size_use FROM groups g JOIN user_groups ug ON ug.group_id = g.id WHERE ug.user_id = ? AND g.status = 1 ORDER BY g.sort, g.id"
+  ).bind(user.id).all();
+
+  const groupList: Record<string, unknown>[] = [];
+  for (const g of rows.results) {
+    const chain = await groupChain(env, g.id);
+    const meta = groupChainMeta(chain);
+    groupList.push({
+      name: g.name,
+      path: `{source:${g.id}}/`,
+      pathDisplay: meta.groupPathDisplay + "/",
+      pathFather: thisPath,
+      type: "folder",
+      isFolder: true,
+      isParent: true,
+      hasChildren: true,
+      hasFolder: true,
+      hasFile: true,
+      isWriteable: true,
+      isReadable: true,
+      isTruePath: true,
+      targetType: "group",
+      targetID: g.id,
+      sourceID: g.id,
+      parentID: g.parent_id,
+      sourceRoot: "groupPath",
+      sourceRootSelf: "self",
+      ioDriver: g.io_driver,
+      groupPathRoot: meta.groupPathRoot,
+      groupPathDisplay: meta.groupPathDisplay,
+      ext: "",
+      size: 0,
+      modifyTime: new Date().toISOString(),
+      createTime: new Date().toISOString(),
+      sourceInfo: { sourceID: g.id, sourceRoot: "groupPath", authValue: 63 },
+    });
+  }
+
+  return {
+    current: { name: "我的部门", path: thisPath, pathDisplay: "我的部门", type: "folder", isFolder: true, isWriteable: true, isReadable: true, isTruePath: true },
+    folderList: [],
+    fileList: [],
+    groupList,
+    groupShow: [
+      { type: "childGroupSelf", title: "我所在部门", filter: { sourceRootSelf: "self" } },
+    ],
+    pageInfo: { totalNum: groupList.length, pageNum: 500, page: 1, pageTotal: Math.max(1, Math.ceil(groupList.length / 500)) },
+    thisPath,
+    targetSpace: { sizeMax: 0, sizeUse: 0 },
+  };
+}
+
 // treeList - legacy sidebar folder tree (frontend actually uses /list/path)
 explorerApi.all("/list/tree", async (c) => {
   const user = c.get("currentUser");
@@ -767,7 +876,7 @@ explorerApi.all("/list/tree", async (c) => {
   const path = normDirPath(typeof params.path === "string" ? params.path : "/");
 
   try {
-    const { folders } = await listDirectory(c.env.FILES, user.username, path);
+    const { folders } = await listDirectory(c.env.FILES, userSource(user).baseKey, path);
     const dirs = folders.map((p) => {
       const name = p.key.split("/").filter(Boolean).pop() || "";
       return folderItem(name, path, user.id);
@@ -810,7 +919,9 @@ explorerApi.all("/index/pathInfo", async (c) => {
         createTime: new Date().toISOString(),
       });
     } else {
-      const key = getUserFileKey(user.username, toRealPath(path));
+      const src = await resolveFileSource(c.env, user, path);
+      if (!src.ok) continue;
+      const key = keyFromBase(src.source.baseKey, src.relPath);
       const obj = await c.env.FILES.head(key).catch(() => null);
       if (obj) {
         const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
@@ -841,10 +952,13 @@ explorerApi.all("/index/pathInfo", async (c) => {
 explorerApi.all("/index/mkdir", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
-  const fullPath = normDirPath(toRealPath(typeof params.path === "string" ? params.path : "/"));
+  const rawPath = typeof params.path === "string" ? params.path : "/";
+  const src = await resolveFileSource(c.env, user, rawPath);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const fullPath = normDirPath(src.relPath);
 
   try {
-    const key = getUserFileKey(user.username, fullPath + ".keep");
+    const key = keyFromBase(src.source.baseKey, fullPath + ".keep");
     await c.env.FILES.put(key, "");
     await addAuditLog(c.env.DB, "mkdir", user.id, fullPath, null, null, null);
     return c.json({ code: true, data: "ok", info: fullPath });
@@ -859,14 +973,16 @@ explorerApi.all("/index/mkfile", async (c) => {
   const params = await reqParams(c);
   const rawPath = typeof params.path === "string" ? params.path : "";
   if (!rawPath) return c.json({ code: false, data: "参数错误" });
-  const fullPath = toRealPath(rawPath);
+  const src = await resolveFileSource(c.env, user, rawPath);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const fullPath = src.relPath;
 
   try {
     let content = typeof params.content === "string" ? params.content : "";
     if (params.base64 === "1") {
       content = decodeBase64(content);
     }
-    const key = getUserFileKey(user.username, fullPath);
+    const key = keyFromBase(src.source.baseKey, fullPath);
     await c.env.FILES.put(key, content);
     await addAuditLog(c.env.DB, "mkfile", user.id, fullPath, null, null, null);
     return c.json({ code: true, data: "ok", info: fullPath });
@@ -884,14 +1000,17 @@ explorerApi.all("/index/pathRename", async (c) => {
   if (!path || !newName) return c.json({ code: false, data: "common.invalidParam" });
   if (newName.includes("/")) return c.json({ code: false, data: "common.invalidParam" });
 
-  const realPath = toRealPath(path);
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const baseKey = src.source.baseKey;
+  const realPath = src.relPath;
   const isFolder = realPath.endsWith("/");
   const parentPath = realPath.substring(0, realPath.lastIndexOf("/") + 1);
   const newPath = parentPath + newName + (isFolder ? "/" : "");
 
   try {
-    const oldKey = getUserFileKey(user.username, realPath);
-    const newKey = getUserFileKey(user.username, newPath);
+    const oldKey = keyFromBase(baseKey, realPath);
+    const newKey = keyFromBase(baseKey, newPath);
 
     if (isFolder) {
       const prefix = oldKey.endsWith("/") ? oldKey : oldKey + "/";
@@ -934,8 +1053,10 @@ explorerApi.all("/index/pathDelete", async (c) => {
 
   try {
     for (const item of items) {
-      const path = toRealPath(item.path);
-      const key = getUserFileKey(user.username, path);
+      const src = await resolveFileSource(c.env, user, item.path);
+      if (!src.ok) continue;
+      const path = src.relPath;
+      const key = keyFromBase(src.source.baseKey, path);
       if (path.endsWith("/")) {
         await deleteDirectory(c.env.FILES, key.endsWith("/") ? key : key + "/");
       } else {
@@ -958,12 +1079,12 @@ async function copyObject(bucket: R2Bucket, srcKey: string, destKey: string): Pr
   return true;
 }
 
-async function copyPath(bucket: R2Bucket, username: string, srcPath: string, destDir: string): Promise<boolean> {
-  const srcKey = getUserFileKey(username, srcPath);
+async function copyPath(bucket: R2Bucket, srcBaseKey: string, srcPath: string, destBaseKey: string, destDir: string): Promise<boolean> {
+  const srcKey = keyFromBase(srcBaseKey, srcPath);
   const srcName = srcPath.split("/").filter(Boolean).pop() || srcPath;
   const isFolder = srcPath.endsWith("/");
   const destPath = destDir + srcName + (isFolder ? "/" : "");
-  const destKey = getUserFileKey(username, destPath);
+  const destKey = keyFromBase(destBaseKey, destPath);
 
   if (isFolder) {
     const prefix = srcKey.endsWith("/") ? srcKey : srcKey + "/";
@@ -982,12 +1103,12 @@ async function copyPath(bucket: R2Bucket, username: string, srcPath: string, des
   return copyObject(bucket, srcKey, destKey);
 }
 
-async function movePath(bucket: R2Bucket, username: string, srcPath: string, destDir: string): Promise<boolean> {
-  const srcKey = getUserFileKey(username, srcPath);
+async function movePath(bucket: R2Bucket, srcBaseKey: string, srcPath: string, destBaseKey: string, destDir: string): Promise<boolean> {
+  const srcKey = keyFromBase(srcBaseKey, srcPath);
   const srcName = srcPath.split("/").filter(Boolean).pop() || srcPath;
   const isFolder = srcPath.endsWith("/");
   const destPath = destDir + srcName + (isFolder ? "/" : "");
-  const destKey = getUserFileKey(username, destPath);
+  const destKey = keyFromBase(destBaseKey, destPath);
 
   if (isFolder && destKey.startsWith(srcKey.endsWith("/") ? srcKey : srcKey + "/")) {
     return false; // moving a dir into its own subtree
@@ -1048,14 +1169,17 @@ explorerApi.all("/index/clipboard", async (c) => {
 explorerApi.all("/index/pathPast", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
-  const target = normDirPath(toRealPath(typeof params.path === "string" ? params.path : "/"));
+  const targetSrc = await resolveFileSource(c.env, user, typeof params.path === "string" ? params.path : "/");
+  if (!targetSrc.ok) return c.json({ code: false, data: targetSrc.error });
+  const target = normDirPath(targetSrc.relPath);
   const raw = await getUserOption(c.env.DB, user.id, "pathCopy", "clipboard");
   const type = await getUserOption(c.env.DB, user.id, "pathCopyType", "clipboard");
   const paths: string[] = raw ? JSON.parse(raw) : [];
   for (const p of paths) {
-    const rp = toRealPath(p);
-    if (type === "cut") await movePath(c.env.FILES, user.username, rp, target);
-    else await copyPath(c.env.FILES, user.username, rp, target);
+    const src = await resolveFileSource(c.env, user, p);
+    if (!src.ok) continue;
+    if (type === "cut") await movePath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
+    else await copyPath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
   }
   return c.json({ code: true, data: "ok", info: target });
 });
@@ -1065,9 +1189,13 @@ explorerApi.all("/index/pathCopyTo", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
   const items = parseDataArr(params.dataArr);
-  const target = normDirPath(toRealPath(typeof params.path === "string" ? params.path : "/"));
+  const targetSrc = await resolveFileSource(c.env, user, typeof params.path === "string" ? params.path : "/");
+  if (!targetSrc.ok) return c.json({ code: false, data: targetSrc.error });
+  const target = normDirPath(targetSrc.relPath);
   for (const it of items) {
-    await copyPath(c.env.FILES, user.username, toRealPath(it.path), target);
+    const src = await resolveFileSource(c.env, user, it.path);
+    if (!src.ok) continue;
+    await copyPath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
   }
   return c.json({ code: true, data: "ok", info: target });
 });
@@ -1077,9 +1205,13 @@ explorerApi.all("/index/pathCuteTo", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
   const items = parseDataArr(params.dataArr);
-  const target = normDirPath(toRealPath(typeof params.path === "string" ? params.path : "/"));
+  const targetSrc = await resolveFileSource(c.env, user, typeof params.path === "string" ? params.path : "/");
+  if (!targetSrc.ok) return c.json({ code: false, data: targetSrc.error });
+  const target = normDirPath(targetSrc.relPath);
   for (const it of items) {
-    await movePath(c.env.FILES, user.username, toRealPath(it.path), target);
+    const src = await resolveFileSource(c.env, user, it.path);
+    if (!src.ok) continue;
+    await movePath(c.env.FILES, src.source.baseKey, src.relPath, targetSrc.source.baseKey, target);
   }
   return c.json({ code: true, data: "ok", info: target });
 });
@@ -1101,7 +1233,9 @@ async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment
   const path = typeof params.path === "string" ? params.path : "";
   if (!path) return c.json({ code: false, data: "参数错误" });
 
-  const key = getUserFileKey(user.username, toRealPath(path));
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const key = keyFromBase(src.source.baseKey, src.relPath);
   const obj = await c.env.FILES.get(key).catch(() => null);
   if (!obj) return c.json({ code: false, data: "Not found" });
 
@@ -1127,7 +1261,9 @@ explorerApi.all("/index/fileSave", async (c) => {
   if (params.base64 === "1") {
     content = decodeBase64(content);
   }
-  const key = getUserFileKey(user.username, toRealPath(path));
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const key = keyFromBase(src.source.baseKey, src.relPath);
   await c.env.FILES.put(key, content);
   await addAuditLog(c.env.DB, "fileSave", user.id, path, null, null, null);
   return c.json({ code: true, data: "ok" });
@@ -1142,7 +1278,9 @@ explorerApi.all("/editor/fileGet", async (c) => {
   const path = typeof params.path === "string" ? params.path : "";
   if (!path) return c.json({ code: false, data: "参数错误" });
 
-  const key = getUserFileKey(user.username, toRealPath(path));
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const key = keyFromBase(src.source.baseKey, src.relPath);
   const obj = await c.env.FILES.get(key).catch(() => null);
   if (!obj) return c.json({ code: false, data: "common.pathNotExists" });
 
@@ -1175,7 +1313,9 @@ explorerApi.all("/editor/fileSave", async (c) => {
   if (params.base64 === "1") {
     content = decodeBase64(content);
   }
-  const key = getUserFileKey(user.username, toRealPath(path));
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const key = keyFromBase(src.source.baseKey, src.relPath);
   await c.env.FILES.put(key, content);
   await addAuditLog(c.env.DB, "editorSave", user.id, path, null, null, null);
   return c.json({ code: true, data: "ok" });
@@ -1192,7 +1332,9 @@ explorerApi.all("/index/search", async (c) => {
   if (!keyword) return c.json({ code: true, data: [] });
 
   try {
-    const prefix = getUserFileKey(user.username, toRealPath(path));
+    const src = await resolveFileSource(c.env, user, path);
+    if (!src.ok) return c.json({ code: true, data: [] });
+    const prefix = keyFromBase(src.source.baseKey, src.relPath);
     const results: Array<Record<string, unknown>> = [];
     let cursor: string | undefined;
     do {
@@ -1201,9 +1343,10 @@ explorerApi.all("/index/search", async (c) => {
         const name = obj.key.split("/").pop() || "";
         if (name === ".keep") continue;
         if (name.toLowerCase().includes(keyword)) {
+          const rel = obj.key.slice(prefix.length);
           results.push({
             name,
-            path: "/" + obj.key.slice(obj.key.indexOf("/") + 1),
+            path: `{source:${src.source.sourceId}}/${rel}`,
             size: obj.size,
             type: kodFileType(name),
             modifyTime: new Date().toISOString(),
@@ -1355,17 +1498,19 @@ explorerApi.post("/upload/fileUpload", async (c) => {
 
   if (!file) return c.json({ code: false, data: "No file" });
 
-  const realDir = normDirPath(toRealPath(path));
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const realDir = normDirPath(src.relPath);
   const virtualDir = normDirPath(path);
   const fileName = name || file.name;
-  const key = getUserFileKey(user.username, realDir + fileName);
+  const key = keyFromBase(src.source.baseKey, realDir + fileName);
 
   try {
     if (chunks > 1) {
       // 分片上传: 每个分片独立暂存为临时对象, 全部到达后按序流式合并,
       // 规避 R2 multipart 每 part 最小 5MiB 的限制(前端默认分片仅 2MB)。
-      const sessionId = await sha256Hex(`${user.username}|${realDir}|${fileName}|${size}`);
-      const tmpPrefix = getUserFileKey(user.username, `/.upload_tmp/${sessionId}/`);
+      const sessionId = await sha256Hex(`${src.source.baseKey}|${realDir}|${fileName}|${size}`);
+      const tmpPrefix = keyFromBase(src.source.baseKey, `/.upload_tmp/${sessionId}/`);
       const chunkKey = `${tmpPrefix}chunk_${chunk}`;
       const mergedKey = `${tmpPrefix}merged`;
 
@@ -1450,7 +1595,14 @@ explorerApi.all("/fav/get", async (c) => {
     };
     info.sourceInfo = { isFav: 1, favName: name, favID: item.id };
 
-    const key = getUserFileKey(user.username, toRealPath(path));
+    const src = await resolveFileSource(c.env, user, path);
+    let key: string | null = null;
+    if (src.ok) key = keyFromBase(src.source.baseKey, src.relPath);
+    if (!key) {
+      info.exists = false;
+      items.push(info);
+      continue;
+    }
     if (isFolder) {
       const prefix = key.endsWith("/") ? key : key + "/";
       const listed = await c.env.FILES.list({ prefix, limit: 1 });

@@ -3,11 +3,18 @@
  * Files are stored with key format: {username}/{relativePath}
  */
 
-export function getUserFileKey(username: string, path: string): string {
-  // Normalize path
-  let normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/");
+/** 由存储根(baseKey, 含尾斜杠, 如 `username/` 或 `__group__/5/`)与相对路径拼接 R2 key。 */
+export function keyFromBase(baseKey: string, relPath: string): string {
+  let normalized = (relPath || "").replace(/\\/g, "/").replace(/\/+/g, "/");
   if (normalized.startsWith("/")) normalized = normalized.slice(1);
-  return `${username}/${normalized}`;
+  let base = baseKey.replace(/\\/g, "/");
+  if (!base.endsWith("/")) base += "/";
+  return base + normalized;
+}
+
+/** 个人空间 key: {username}/{relativePath} */
+export function getUserFileKey(username: string, path: string): string {
+  return keyFromBase(`${username}/`, path);
 }
 
 export function parseR2Key(key: string): { username: string; path: string } | null {
@@ -21,10 +28,10 @@ export function parseR2Key(key: string): { username: string; path: string } | nu
 
 export async function listDirectory(
   bucket: R2Bucket,
-  username: string,
+  baseKey: string,
   dirPath: string
 ): Promise<{ folders: R2Object[]; files: R2Object[] }> {
-  const prefix = getUserFileKey(username, dirPath);
+  const prefix = keyFromBase(baseKey, dirPath);
   const normalizedPrefix = prefix.endsWith("/") ? prefix : prefix + "/";
 
   const listed = await bucket.list({ prefix: normalizedPrefix, delimiter: "/" });
@@ -57,13 +64,13 @@ export async function fileExists(bucket: R2Bucket, key: string): Promise<boolean
   return obj !== null;
 }
 
-/** Recursively list every file under the user's space (used by file-type category browsing). */
+/** Recursively list every file under the given storage root (used by file-type category browsing). */
 export async function listAllFiles(
   bucket: R2Bucket,
-  username: string,
+  baseKey: string,
   maxRounds = 500
 ): Promise<R2Object[]> {
-  const prefix = getUserFileKey(username, "/");
+  const prefix = keyFromBase(baseKey, "/");
   const all: R2Object[] = [];
   let cursor: string | undefined;
   let rounds = 0;
@@ -72,7 +79,7 @@ export async function listAllFiles(
     for (const o of listed.objects) {
       const name = o.key.split("/").pop() || "";
       if (name === ".keep" || name.startsWith(".")) continue;
-      const rel = o.key.slice(o.key.indexOf("/") + 1);
+      const rel = o.key.slice(prefix.length);
       if (rel.split("/").some((seg) => seg.startsWith("."))) continue;
       all.push(o);
     }
