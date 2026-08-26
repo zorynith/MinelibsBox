@@ -1,0 +1,37 @@
+{
+	"id": "officeViewer",
+	"name": "{{LNG['officeViewer.meta.name']}}",
+	"title": "{{LNG['officeViewer.meta.title']}}",
+	"version": "1.41",
+	"category": "file",
+	"source": {
+		"icon": "{{pluginHost}}static/images/icon.png"
+	},
+	"description": "{{LNG['officeViewer.meta.desc']}}",
+	"auther": {
+		"copyright": "kodcloud",
+		"homePage": "http://kodcloud.com"
+	},
+	"configItem": {
+		"fileExt": {
+			"type": "tags",
+			"value": "docx,doc,xlsx,xls,csv,pptx,ppt"
+		},
+		"fileSort": {
+			"type": "number",
+			"value": 1000
+		},
+		"openWith": {
+			"type": "radio",
+			"value": "dialog"
+		},
+		"openType": {
+			"type": "segment",
+			"value": "wb",
+			"display": "{{LNG['officeViewer.webOffice.name']}}",
+			"info": {
+				"wb": "{{LNG['officeViewer.webOffice.name']}}"
+			}
+		}
+	}
+}

@@ -1,0 +1,19 @@
+{
+	"officeViewer.meta.name": "Office",
+	"officeViewer.meta.title": "Office Reading",
+	"officeViewer.meta.desc": "Online preview of office files. Integrates the WebOffice front-end parsing method to realize basic preview of office files.",
+	"officeViewer.main.error": "File opening failed!",
+	"officeViewer.main.invalidType": "This file cannot be previewed using the current method. Please choose another method to open it!",
+	"officeViewer.main.invalidUrl": "Invalid request address. Please try reopening or choosing another method!",
+	"officeViewer.main.notNetwork": "The request failed. Check whether the server can connect to the network.",
+	"officeViewer.main.invalidExt": "Invalid file format",
+	"officeViewer.main.fileSizeErr": "The file is corrupted (size=0) and cannot be previewed!",
+	"officeViewer.main.typeErr": "There is no effective document editing method.",
+	"officeViewer.webOffice.name": "Auto Parsing",
+	"officeViewer.webOffice.parsing": "Parsing",
+	"officeViewer.webOffice.reqErrPath": "Request failed, check if the file is normal!",
+	"officeViewer.webOffice.reqErrNet": "Loading time is too long, check if the network is normal!",
+	"officeViewer.webOffice.reqErrUrl": "File request failed, please check if the address is normal!",
+	"officeViewer.webOffice.noEditTips": "Content editing is not supported, please choose other methods!",
+	"officeViewer.webOffice.warning": "In the current mode, formulas, charts and other contents may be incomplete or abnormal. Please use other methods to view the complete content."
+}

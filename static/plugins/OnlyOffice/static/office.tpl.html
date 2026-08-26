@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html style="height: 100%;">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <title>ONLYOFFICE Document Server</title>
+</head>
+<body style="height: 100%; margin: 0;">
+    <div id="placeholder" style="height: 100%"></div>
+    <script type="text/javascript" src="@@apiServer@@/web-apps/apps/api/documents/api.js"></script>
+
+    <script type="text/javascript">
+
+        window.docEditor = new DocsAPI.DocEditor("placeholder",
+            {
+                "document": {
+                    "fileType": @@fileType@@,
+                    "key": @@key@@,
+                    "title": @@title@@,
+                    "url": @@url@@,
+                    "permissions": {
+                        "download": @@canDownload@@,
+                        "edit": @@canEdit@@,
+                        "print": @@canPrint@@,
+                    },
+                },
+                "documentType": @@documentType@@,
+                "type": @@type@@,
+                "editorConfig": {
+                    "callbackUrl": @@callbackUrl@@,
+                    "lang": @@lang@@,
+                    "mode": @@mode@@,
+                    "user": {
+                        "id": @@UID@@,
+                        "name": @@user@@
+                    },
+                    "customization": {
+                        "chat": @@chat@@,
+                        "editCommentAuthorOnly": true,
+                        "comments": @@comments@@,
+                        "compactHeader": @@compact@@,
+                        "compactToolbar": false,
+                        "help": @@help@@,
+                        "toolbarNoTabs": false,
+                        "hideRightMenu": @@compact@@,
+                    },
+                },
+                "height": "100%",
+                "width": "100%"
+            });
+
+    </script>
+</body>
+</html>

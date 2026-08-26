@@ -1,0 +1,38 @@
+{
+	"id":"webodf",
+	"name":"Opendocument Viewer",
+	"title":"",
+	"version":"1.28",
+	"source":{
+		"className":"x-item-icon x-odt",
+		"icon":""
+	},
+	"category":"file",
+	"description":"Opendocument Viewer",
+	"keywords":"",
+	"auther":{
+		"copyright":"kodcloud.",
+		"homePage":"http://www.kodcloud.com"
+	},
+	"configItem":{
+		"pluginAuth":{
+			"type":"userSelect",
+			"value":{"all":1},
+			"display":"{{LNG['admin.plugin.auth']}}",
+			"desc":"{{LNG['admin.plugin.authDesc']}}",
+			"require":1
+		},
+		"openWith":{
+			"type":"radio",
+			"value":"dialog"
+		},
+		"fileExt":{
+			"type":"tags",
+			"value":"odf,odt,ods,odp"
+		},
+		"fileSort":{
+			"type":"number",
+			"value":5000
+		}
+	}
+}

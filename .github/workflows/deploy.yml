@@ -1,0 +1,114 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Wrangler config
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ vars.WORKER_NAME }}
+          WORKER_MAIN: ${{ vars.WORKER_MAIN }}
+          COMPATIBILITY_DATE: ${{ vars.COMPATIBILITY_DATE }}
+          D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+          D1_BINDING: ${{ vars.D1_BINDING }}
+          D1_MIGRATIONS_DIR: ${{ vars.D1_MIGRATIONS_DIR }}
+          R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
+          OBSERVABILITY_ENABLED: ${{ vars.OBSERVABILITY_ENABLED }}
+        run: |
+          WORKER_NAME="${WORKER_NAME:-minelibsbox}"
+          WORKER_MAIN="${WORKER_MAIN:-./workers/app.ts}"
+          COMPATIBILITY_DATE="${COMPATIBILITY_DATE:-2025-04-04}"
+          D1_DATABASE_NAME="${D1_DATABASE_NAME:-minelibsbox}"
+          D1_BINDING="${D1_BINDING:-DB}"
+          D1_MIGRATIONS_DIR="${D1_MIGRATIONS_DIR:-./migrations}"
+          R2_BUCKET_NAME="${R2_BUCKET_NAME:-minelibsbox-files}"
+          OBSERVABILITY_ENABLED="${OBSERVABILITY_ENABLED:-true}"
+
+          if [ -z "$D1_DATABASE_ID" ]; then
+            if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+              echo "Missing CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID for D1 lookup." >&2
+              exit 1
+            fi
+            D1_DATABASE_ID="$(npx wrangler d1 list --json | node -e "const fs=require('fs');const data=JSON.parse(fs.readFileSync(0,'utf8'));const name=process.env.D1_DATABASE_NAME;const hit=data.find(d=>d.name===name);if(!hit){process.exit(2)};process.stdout.write(hit.uuid);")"
+            if [ $? -ne 0 ] || [ -z "$D1_DATABASE_ID" ]; then
+              echo "Failed to find D1 database ID for name: $D1_DATABASE_NAME" >&2
+              exit 1
+            fi
+          fi
+          cat > wrangler.jsonc <<EOF
+          {
+            "\$schema": "node_modules/wrangler/config-schema.json",
+            "name": "$WORKER_NAME",
+            "main": "$WORKER_MAIN",
+            "compatibility_date": "$COMPATIBILITY_DATE",
+            "observability": { "enabled": $OBSERVABILITY_ENABLED },
+            "assets": {
+              "directory": "./static",
+              "binding": "ASSETS"
+            },
+            "d1_databases": [
+              {
+                "binding": "$D1_BINDING",
+                "database_name": "$D1_DATABASE_NAME",
+                "database_id": "$D1_DATABASE_ID",
+                "migrations_dir": "$D1_MIGRATIONS_DIR"
+              }
+            ],
+            "r2_buckets": [
+              {
+                "binding": "FILES",
+                "bucket_name": "$R2_BUCKET_NAME"
+              }
+            ]
+          }
+          EOF
+
+      - name: Build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npm run build
+
+      - name: Apply D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler d1 migrations apply ${{ vars.D1_DATABASE_NAME }} --remote --config wrangler.jsonc
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SITE_TITLE: ${{ vars.SITE_TITLE }}
+          CHUNK_SIZE_MB: ${{ vars.CHUNK_SIZE_MB }}
+          STATIC_HOST: ${{ vars.STATIC_HOST }}
+        run: |
+          npx wrangler deploy \
+            --config wrangler.jsonc \
+            --var "SITE_TITLE:${SITE_TITLE:-MinelibsBox}" \
+            --var "CHUNK_SIZE_MB:${CHUNK_SIZE_MB:-10}" \
+            --var "STATIC_HOST:${STATIC_HOST:-https://static.minelibs.eu.org/}"

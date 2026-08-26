@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Basic WebViewer</title>
+<script src="@@pluginHost@@static/lib/webviewer.min.js"></script>
+</head>
+<body>
+  <div id='viewer' style='width: auto; height: 600px; margin: 0 auto;'></div>
+  <script>
+  WebViewer({
+    path: "@@pluginHost@@static/lib", // path to the PDFTron 'lib' folder on your server
+    licenseKey: @@licenseKeyJs@@,
+    initialDoc: "@@fileUrl@@",
+    enableFilePicker: false,
+    enableAnnotations: true,
+    config: "@@configUrl@@",
+    custom: JSON.stringify({
+      lang: "@@lang@@",
+      darktheme: @@darkthemeJs@@,
+      viewOnly: @@isViewOnlyJs@@,
+      canWrite: @@canWriteJs@@,
+      savetofile: @@savetofileJs@@,
+      saveUrl: "@@saveUrl@@",
+      lngSave: "@@lngSave@@",
+      lngSaveSuccess: "@@lngSaveSuccess@@",
+      lngError: "@@lngError@@"
+    }),
+
+    isReadOnly: @@isReadOnlyJs@@,
+    enableMeasurement: @@enableMeasurementJs@@,
+    enableRedaction: @@enableRedactionJs@@,
+
+    annotationUser: @@annotationUserJs@@
+  }, document.getElementById('viewer')).catch(() => {});
+  </script>
+</body>
+</html>
