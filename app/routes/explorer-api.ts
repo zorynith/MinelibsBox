@@ -1823,13 +1823,14 @@ explorerApi.all("/index/mkdir", async (c) => {
   if (!mkAuth.ok) return c.json({ code: false, data: mkAuth.error });
 
   try {
-    const key = keyFromBase(src.source.baseKey, fullPath + ".keep");
+    // 对象存储(含 R2)无目录概念: 创建 `fullPath/` 占位对象 (以 "/" 结尾),
+    // R2/S3 list 用 delimiter="/" 时该 key 会出现在 delimitedPrefixes 中, 前端识别为文件夹。
+    const dirKey = keyFromBase(src.source.baseKey, fullPath + "/");
     const io = externalIoOf(src.source);
     if (io) {
-      // 对象存储无目录概念: 创建 `fullPath/` 占位对象 (delimiter 列表以 CommonPrefix 呈现为空目录)
-      await io.put(keyFromBase(src.source.baseKey, fullPath + "/"), new Uint8Array(0));
+      await io.put(dirKey, new Uint8Array(0));
     } else {
-      await c.env.FILES.put(key, "");
+      await c.env.FILES.put(dirKey, "");
     }
     await addAuditLog(c.env.DB, "mkdir", user.id, fullPath, null, null, null);
     invalidateSpaceUsageByBase(src.source.baseKey);
