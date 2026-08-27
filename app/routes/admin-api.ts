@@ -384,8 +384,11 @@ async function r2TotalUsed(bucket: R2Bucket): Promise<{ size: number; fileNum: n
 /**
  * 存储列表 - admin/storage/get (001 storage get + parseData)
  * 返回 io_source 列表, 字段: id/name/driver/sizeMax(GB)/sizeUse/fileNum/fileUse/default/system/status/groupType
+ * fileUse 语义对齐 001 parseData: 本次是否成功获取文件使用统计(usage=1 时前端才启用删除按钮)
  */
 adminApi.all("/storage/get", async (c) => {
+  const q = await allParams(c);
+  const usage = String(q.usage ?? "") === "1";
   const list = await getIoSourceList(c.env.DB);
   const out: Record<string, unknown>[] = [];
   for (const item of list) {
@@ -425,7 +428,7 @@ adminApi.all("/storage/get", async (c) => {
       sizeMax: parseFloat(String(item.size_max ?? "0")),
       sizeUse,
       fileNum,
-      fileUse: isDefault,
+      fileUse: usage,
       default: parseInt(String(item.is_default ?? "0"), 10),
       system: parseInt(String(item.system ?? "0"), 10),
       status: parseInt(String(item.status ?? "1"), 10),
