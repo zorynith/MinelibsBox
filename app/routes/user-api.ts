@@ -3,7 +3,7 @@
  * These are the critical APIs the 003 SPA needs to bootstrap
  */
 import { Hono } from "hono";
-import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption } from "../lib/db";
+import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions } from "../lib/db";
 import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, authRequired } from "../lib/auth";
 import { parseKodPassword } from "../lib/mcrypt";
 import { DEV_KOD, devLicenseHashes } from "../lib/license";
@@ -159,8 +159,11 @@ userApi.get("/index/loginCheck", async (c) => {
 });
 
 // userInfo
+// 001: 用户配置 = config_json 默认值 合并 user_option(type='') 覆盖项;
+// setConfig 只写 user_option, 此处必须合并, 否则刷新后所有设置"变回"。
 userApi.get("/index/userInfo", authRequired, async (c) => {
   const u = c.get("currentUser");
+  const userOptions = await getAllUserOptions(c.env.DB, u.id);
   return c.json({
     code: true,
     data: {
@@ -168,7 +171,7 @@ userApi.get("/index/userInfo", authRequired, async (c) => {
       name: u.username,
       nickname: u.nickname,
       role: u.role,
-      config: JSON.parse(u.config_json || "{}"),
+      config: { ...JSON.parse(u.config_json || "{}"), ...userOptions },
     },
   });
 });
@@ -375,6 +378,7 @@ userApi.get("/view/options", async (c) => {
         },
         role: roleAuth,
         config: {
+          ...{
           listType: "icon", listSortField: "name", listSortOrder: "up",
           fileIconSize: "80", fileOpenClick: "dbclick", fileShowDesc: "0",
           fileShowRename: "1", animateOpen: "1", soundOpen: "0",
@@ -391,6 +395,9 @@ userApi.get("/view/options", async (c) => {
             filename: 250, filetype: 80, filesize: 80, filetime: 215,
             editorTreeWidth: 220, explorerTreeWidth: 220,
           }),
+        },
+          // 001: 用户配置默认值之上合并 user_option(type='') 覆盖项, 否则刷新后设置全部"变回"默认
+          ...(await getAllUserOptions(c.env.DB, session.user_id)),
         },
         editorConfig: {},
         isRootAllowIO: isAdmin ? 1 : 0,
