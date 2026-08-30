@@ -1009,6 +1009,8 @@ async function listFilesByType(c: AppContext, user: Vars["currentUser"], parsed:
   const all = await listAllFiles(c.env.FILES, userSource(user).baseKey).catch(() => [] as R2Object[]);
   const fileList: Record<string, unknown>[] = [];
   for (const o of all) {
+    // 跳过文件夹占位对象（R2 中以 / 结尾的 key），避免文件夹被当作文件列入类型分类
+    if (o.key.endsWith("/")) continue;
     const rel = o.key.slice(o.key.indexOf("/") + 1);
     const name = rel.split("/").pop() || rel;
     if (!name) continue;

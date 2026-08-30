@@ -136,6 +136,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - R2 免费版额度有限，需防目录自嵌套导致对象指数膨胀：paste/cut 目录到自身子树（如 A 粘贴到 A/B 下）时前端无防护，后端 `/paste` 必须检查 `destKey.startsWith(srcKey+"/")` 并拒绝；`/rename` 同样需拒绝 `newName` 为空/含 `/`/newKey 在 oldKey 子树内。错误码用 001 现成 `explorer.moveSubPathError`（父目录不能移动到子目录）与 `common.invalidParam`。
   - `deleteDirectory`（r2.ts）默认 `maxObjects=100000, maxRounds=1000` 保护，防止活锁/并发写入时游标追着新对象无限删；正常删除大目录不受影响。
    - R2 mkdir 用 `.keep` 占位文件表示空目录，`listDirectory` 的 folders 从 `delimitedPrefixes` 解析；测试时若把 mkdir 的 `path` 与 `name` 合并传入会生成 `undefined` 名称脏对象。
+   - R2 中除 `.keep` 占位外，导入/迁移还可能产生 `{dir}/` 空对象占位（key 以 `/` 结尾、size 0，如 `admin/发布目录/`）。凡遍历 R2 全部对象（`listAllFiles`）再按名归类的接口（`listFilesByType`）必须跳过 `o.key.endsWith("/")`，否则文件夹被当文件：name 带尾斜杠、`kodFileType` 判为 others 落入「其他」分类，点击走文件编辑器打开失败。
 
 [Project Knowledge Summary]
 - Date: 2026-08-16
