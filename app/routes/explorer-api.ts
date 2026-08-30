@@ -2014,8 +2014,13 @@ explorerApi.all("/index/pathDelete", async (c) => {
   if (items.length === 0) return emit(false, "参数错误");
 
   // 001: Shift+删除 硬删; 否则按用户配置 recycleOpen 决定是否进回收站 (默认进回收站)
+  // 写入(setConfig/userDefaultInit)均为 type=''; 读取必须同 type, 否则永远读不到而恒为开启。兼容历史 config 类型数据。
   const shiftDelete = params.shiftDelete === "1" || params.shiftDelete === true;
-  const recycleOpen = (await getUserOption(c.env.DB, user.id, "recycleOpen", "config")) !== "0";
+  let recycleOpenVal = await getUserOption(c.env.DB, user.id, "recycleOpen");
+  if (recycleOpenVal === null) {
+    recycleOpenVal = await getUserOption(c.env.DB, user.id, "recycleOpen", "config");
+  }
+  const recycleOpen = recycleOpenVal !== "0";
   const toRecycle = !shiftDelete && recycleOpen;
 
   try {
