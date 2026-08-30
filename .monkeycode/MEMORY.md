@@ -49,6 +49,8 @@ Entries discovered by the Agent during task execution should follow this format:
   - 本地 dev 必须先用 `npm run build` 生成 dist 产物，再执行 `npm run dev`（即 `wrangler dev`）。此时 wrangler 读取 `dist/ssr/wrangler.json` 并自动绑定本地 D1/R2/ASSETS 环境，API 才能正常响应。
   - 缺少根目录 `wrangler.jsonc` 时 `npm run build` 只生成 dist/client（无 ssr worker bundle），wrangler dev 会 404；必须先 `cp wrangler.jsonc.example wrangler.jsonc` 再 build。
   - 本地 dev 时 ASSETS 绑定指向 `dist/client`，`static/` 源目录内容必须通过 `vite.config.ts` 的 `publicDir: "static"` 复制进 dist/client，否则前端与插件静态资源全部 404（线上部署用 wrangler.jsonc.example 的 assets.directory=./static，与本地机制不同）。
+  - build 生成的 `dist/ssr/wrangler.json` 会自动继承根 `wrangler.jsonc` 的 `compatibility_flags`（含 `nodejs_compat`），重新 build 后无需手动 patch；此前 build 丢失 flag 是改 wrangler.jsonc 之前的旧产物所致。
+  - 后端返回的每个文件列表项 `type` 字段必须保持 001 语义的 `"file"`/`"folder"` 二值（普通文件 `"file"`），不得填扩展名类别；前端大量逻辑（右键菜单类型、路径处理等）依赖 `type == "file"` 判断，填类别会导致文件被当作文件夹处理（如右键无"打开为"）。扩展名类别如需保留，用单独字段（如 `typeCat`）承载。
   - `npx vite dev` 只启动前端静态服务，worker API（/api/...、/index.php?MOD/ST/ACT）全部 404，不能用于后端接口测试。
   - 需要本地 D1/R2 绑定前，先执行 `cp wrangler.jsonc.example wrangler.jsonc`；该文件已被 .gitignore 忽略，测试后可删除。
   - 001 前端接口参数可通过 query（`/index.php?explorer/fav/add&path=...&name=...`）或 JSON body 传递，后端路由需兼容两种方式。
