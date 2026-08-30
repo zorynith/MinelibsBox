@@ -38,11 +38,10 @@ async function hmac(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayB
   return crypto.subtle.sign("HMAC", k, enc.encode(data) as unknown as BufferSource);
 }
 
-/** AWS URI 编码: encodeURIComponent + 小写 hex + 转义 !'()* */
+/** AWS URI 编码: RFC3986 大写 hex。encodeURIComponent 输出即大写, 无需再转小写。
+ *  注意: SigV4 canonical query/path 编码必须用大写 hex (如 %2F), 小写会导致签名不匹配。 */
 function uriEncode(s: string): string {
-  return encodeURIComponent(s)
-    .replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())
-    .replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase());
+  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
 /** 对 URI 路径编码: 每段独立编码, 保留首尾 '/' 分隔符 */
