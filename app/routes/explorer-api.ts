@@ -364,6 +364,24 @@ function fileSourceID(path: string): number {
   return h >>> 0;
 }
 
+/**
+ * 将 sourceID（path 的 FNV-1a hash，前端 filesAddToTag/filesRemoveFromTag 传的是 sourceID）
+ * 反查为用户空间内的真实虚拟路径。仅用于普通数字 sourceID；非数字视为 path 原样返回。
+ */
+async function mapSourceIDToPaths(env: Env, user: Vars["currentUser"], ids: number[]): Promise<Map<number, string>> {
+  const map = new Map<number, string>();
+  if (ids.length === 0) return map;
+  const wanted = new Set(ids);
+  const all = await listAllFiles(env.FILES, userSource(user).baseKey).catch(() => [] as R2Object[]);
+  for (const o of all) {
+    const rel = o.key.slice(o.key.indexOf("/") + 1);
+    const path = "{source:home}/" + rel;
+    const h = fileSourceID(path);
+    if (wanted.has(h)) map.set(h, path.replace(/\/+$/, ""));
+  }
+  return map;
+}
+
 function folderItem(name: string, dirPath: string, targetID?: string | number, pathDisplayBase?: string, targetType: string = "user"): Record<string, unknown> {
   const path = dirPath + name + "/";
   return {
@@ -1065,10 +1083,21 @@ async function listTagSourcesData(c: AppContext, user: Vars["currentUser"], pars
   const tags = await getUserTags(c.env.DB, user.id);
   const tagInfo = (tags as any[]).find((t) => t.id === tagId);
   const sources = Number.isInteger(tagId) && tagId > 0 ? await getTagSources(c.env.DB, user.id, tagId) : [];
+  // 兼容历史脏数据：path 字段可能被写成 sourceID（纯数字），反查为真实路径后再展示
+  const numericSourceIDs = new Set<number>();
+  for (const s of sources as any[]) {
+    const p = String(s.path || "").replace(/\/+$/, "");
+    if (/^\d+$/.test(p)) numericSourceIDs.add(parseInt(p, 10));
+  }
+  const idToPath = numericSourceIDs.size > 0 ? await mapSourceIDToPaths(c.env, user, [...numericSourceIDs]) : new Map<number, string>();
   const folderList: Record<string, unknown>[] = [];
   const fileList: Record<string, unknown>[] = [];
   for (const s of sources as any[]) {
-    const rawPath = (s.path || "").replace(/\/+$/, "");
+    let rawPath = (s.path || "").replace(/\/+$/, "");
+    if (/^\d+$/.test(rawPath)) {
+      const real = idToPath.get(parseInt(rawPath, 10));
+      if (real) rawPath = real;
+    }
     const isFolder = await isFolderVirtualPath(c.env, userSource(user).baseKey, rawPath);
     const name = rawPath.split("/").filter(Boolean).pop() || rawPath;
     if (isFolder) {
@@ -4095,7 +4124,15 @@ explorerApi.all("/tag/filesAddToTag", async (c) => {
   const tagID = parseInt(String(body.tagID ?? ""), 10);
   const files = parseTagFiles(body.files);
   if (!Number.isInteger(tagID) || tagID <= 0 || files.length === 0) return c.json({ code: false, data: "参数错误" });
-  await tagAddSources(c.env.DB, user.id, tagID, files);
+  const numericIds: number[] = [];
+  const plain: string[] = [];
+  for (const f of files) {
+    if (/^\d+$/.test(f)) numericIds.push(parseInt(f, 10));
+    else plain.push(f);
+  }
+  const map = numericIds.length > 0 ? await mapSourceIDToPaths(c.env, user, numericIds) : new Map<number, string>();
+  const resolved = plain.concat(numericIds.map((n) => map.get(n)).filter((p): p is string => !!p));
+  await tagAddSources(c.env.DB, user.id, tagID, resolved);
   return c.json({ code: true, data: "success" });
 });
 
@@ -4105,7 +4142,16 @@ explorerApi.all("/tag/filesRemoveFromTag", async (c) => {
   const tagID = parseInt(String(body.tagID ?? ""), 10);
   const files = parseTagFiles(body.files);
   if (!Number.isInteger(tagID) || tagID <= 0 || files.length === 0) return c.json({ code: false, data: "参数错误" });
-  await tagRemoveSources(c.env.DB, user.id, tagID, files);
+  const numericIds: number[] = [];
+  const plain: string[] = [];
+  for (const f of files) {
+    if (/^\d+$/.test(f)) numericIds.push(parseInt(f, 10));
+    else plain.push(f);
+  }
+  const map = numericIds.length > 0 ? await mapSourceIDToPaths(c.env, user, numericIds) : new Map<number, string>();
+  // 删除时同时按真实 path 与原始 sourceID 处理，兼容历史脏数据（path 被写成 sourceID）
+  const resolved = plain.concat(numericIds.map((n) => map.get(n) || String(n)));
+  await tagRemoveSources(c.env.DB, user.id, tagID, resolved);
   return c.json({ code: true, data: "success" });
 });
 

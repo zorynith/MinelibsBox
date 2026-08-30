@@ -137,6 +137,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - `deleteDirectory`（r2.ts）默认 `maxObjects=100000, maxRounds=1000` 保护，防止活锁/并发写入时游标追着新对象无限删；正常删除大目录不受影响。
    - R2 mkdir 用 `.keep` 占位文件表示空目录，`listDirectory` 的 folders 从 `delimitedPrefixes` 解析；测试时若把 mkdir 的 `path` 与 `name` 合并传入会生成 `undefined` 名称脏对象。
    - R2 中除 `.keep` 占位外，导入/迁移还可能产生 `{dir}/` 空对象占位（key 以 `/` 结尾、size 0，如 `admin/发布目录/`）。凡遍历 R2 全部对象（`listAllFiles`）再按名归类的接口（`listFilesByType`）必须跳过 `o.key.endsWith("/")`，否则文件夹被当文件：name 带尾斜杠、`kodFileType` 判为 others 落入「其他」分类，点击走文件编辑器打开失败。
+   - 个人标签的 `filesAddToTag`/`filesRemoveFromTag`：前端（main.js `tagChangeRequest`）在项有 `sourceID` 时传的是 **sourceID**（= path 的 FNV-1a hash，`fileSourceID` 不可逆），只有无 sourceID 时才传 path。后端必须遍历用户 R2 按 hash 反查真实 path（`mapSourceIDToPaths`）再读写 `user_tag_source.path`，否则把 hash 当 path 存 → 标签列表显示一串数字（如 `2184162075`），点击报 `common.pathNotExists`。读取（`listTagSourcesData`）需对纯数字 path 做反查以兼容历史脏数据；删除时同时按真实 path 与原始 sourceID 删除。
 
 [Project Knowledge Summary]
 - Date: 2026-08-16
