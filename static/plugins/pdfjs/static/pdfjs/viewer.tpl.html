@@ -46,6 +46,8 @@
         cMapPacked: true,
         standardFontDataUrl: staticPath+'pdfjs/web/standard_fonts/',
         workerSrc: staticPath + 'pdfjs/build/pdf.worker.js',
+        // viewer.js 默认 wasmUrl 为相对路径 ../web/wasm/, 在 STATIC_HOST 跨域时 pdf.js 用 blob worker 加载, 相对 URL 无法解析导致 qcms_bg.wasm 加载失败(ICCBased 警告); 显式指定绝对路径
+        wasmUrl: staticPath + 'pdfjs/web/wasm/',
         localeProperties: {lang: '@@lang@@'},
 
         defaultUrl: "@@fileUrl@@",
