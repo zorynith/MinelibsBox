@@ -224,6 +224,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - workerd dev 对无效域名（如 test.example.invalid）fetch 抛 `jsgInternalError`（DNS lookup failed）会绕过 JS try/catch 直接 500 返回 `internal error; reference=...`；本地必须用真实可达的 mock 端点测试，无法用假域名验证 S3 链路。
   - `keyFromBase` 对空 baseKey 不得加前导斜杠（外链存储 basePath 为空时 key 若变 `/x`，uriPath 会拼出 `//bucket/` 双斜杠导致 S3 请求 404/UNHANDLED）。
   - S3 mkdir 用 `fullPath/` 占位对象（delimiter 列表以 CommonPrefix 呈现为空目录），与 R2 的 `.keep` 占位不同；S3 目录 key 必须保留尾斜杠，否则被当成文件列出。
+  - Cloudflare R2 的 SigV4 签名 region **必须为 `auto`**，填 `us-east-1` 等任何 region 都会导致 `SignatureDoesNotMatch` 403（list 报 `S3 list failed: 403`）。`buildS3Config`（app/lib/s3.ts）已对 `.r2.cloudflarestorage.com` 结尾的 endpoint 强制 region=`auto`（覆盖用户填的/默认 us-east-1），其余 S3 兼容服务仍用配置值；所有 S3 请求统一走 `signedFetch`，无需其他签名路径。
 
 [Project Knowledge Summary]
 - Date: 2026-08-23

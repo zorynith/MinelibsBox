@@ -68,10 +68,13 @@ export function buildS3Config(cfg: Record<string, unknown>): S3Config | null {
   const endpoint = String(cfg.domain || cfg.endpoint || "").trim();
   if (!endpoint || !cfg.bucket || !cfg.accessKey || !cfg.secret) return null;
   const { scheme, host } = parseEndpoint(endpoint);
+  // Cloudflare R2: SigV4 签名 region 必须是 "auto", 否则返回 SignatureDoesNotMatch 403
+  const isR2 = /\.r2\.cloudflarestorage\.com$/i.test(host);
+  const region = isR2 ? "auto" : String(cfg.region || "us-east-1");
   return {
     scheme,
     endpoint: host,
-    region: String(cfg.region || "us-east-1"),
+    region,
     bucket: String(cfg.bucket),
     accessKey: String(cfg.accessKey),
     secret: String(cfg.secret),
