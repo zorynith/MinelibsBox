@@ -783,7 +783,10 @@ adminApi.all("/member/status", async (c) => {
  */
 adminApi.all("/member/remove", async (c) => {
   const q = await allParams(c);
-  const ids = (q.userID || "").split(",").filter((x) => /^\d+$/.test(x)).map(Number).filter((id) => id !== 1);
+  // 禁止删除管理员账号：admin 被删后 initDatabase 会按 seed 重建为默认 admin123，导致密码与设置"变回"
+  const adminRows = await c.env.DB.prepare("SELECT id FROM users WHERE role IN ('admin','root')").all<{ id: number }>();
+  const protectedIDs = new Set(adminRows.results.map((r) => r.id));
+  const ids = (q.userID || "").split(",").filter((x) => /^\d+$/.test(x)).map(Number).filter((id) => id !== 1 && !protectedIDs.has(id));
   if (ids.length === 0) return c.json(fail("explorer.error"));
   const placeholders = ids.map(() => "?").join(",");
 

@@ -253,6 +253,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - push 到 main 后必须主动确认 GitHub Actions 部署已触发并检查结果，确保改动真正上线。
   - 仅当用户明确要求创建分支时才创建；不得自行判断或套用外部分支规范。
    - 线上部署的 D1 重置已移除（2026-08-26），数据持久保留；部署仅应用 migration，新表由 worker 冷启动时 initDatabase() 自动建立。
+   - admin 密码/设置"变回默认"排查：后端 initDatabase/seed/migrations 全幂等（INSERT OR IGNORE / CREATE TABLE IF NOT EXISTS），无任何自动重置逻辑；唯一能把 admin 重置为 admin123 的路径是 admin 用户被删除后 seed 重建。`admin/member/remove` 曾只排除 id=1，admin 若 id≠1 可被误删（重建后密码变回 admin123、user_option 因新 id 失效）——已加固为禁止删除 role in ('admin','root') 的用户。线上改密/重置记录在 `audit_logs`（action=user.setUserInfo / user.findPassword / admin edit user），可据此核对时间线。
 
 [Project Knowledge Summary]
 - Date: 2026-08-25
