@@ -2990,6 +2990,17 @@ explorerApi.all("/editor/fileSave", async (c) => {
   return c.json({ code: true, data: "ok" });
 });
 
+// editorConfig - save editor setting (single key/value, mirrored to user_option type='editor')
+explorerApi.all("/editor/setConfig", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const key = typeof params.key === "string" ? params.key.trim() : "";
+  if (!key) return c.json({ code: false, data: "参数错误" });
+  const value = params.value !== undefined ? String(params.value) : "";
+  await setUserOption(c.env.DB, user.id, key, value, "editor");
+  return c.json({ code: true, data: "ok" });
+});
+
 // ============ search ============
 
 /** 在单个存储前缀内按文件名(忽略大小写)搜索, 结果写入 results, 上限 200。 */

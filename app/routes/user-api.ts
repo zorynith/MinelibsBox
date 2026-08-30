@@ -399,7 +399,7 @@ userApi.get("/view/options", async (c) => {
           // 001: 用户配置默认值之上合并 user_option(type='') 覆盖项, 否则刷新后设置全部"变回"默认
           ...(await getAllUserOptions(c.env.DB, session.user_id)),
         },
-        editorConfig: {},
+        editorConfig: await getAllUserOptions(c.env.DB, session.user_id, "editor"),
         isRootAllowIO: isAdmin ? 1 : 0,
         isRootAllowAll: isAdmin ? 1 : 1,
         targetSpace: { sizeMax: defaultSizeMax * 1024 * 1024 * 1024, sizeUse: userSpaceUsedBytes },
