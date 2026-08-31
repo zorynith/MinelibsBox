@@ -15,6 +15,7 @@ export async function initDatabase(db: D1Database): Promise<void> {
       avatar TEXT DEFAULT '',
       sex INTEGER DEFAULT 1,
       role TEXT DEFAULT 'user',
+      roleID INTEGER DEFAULT 0,
       status INTEGER DEFAULT 1,
       size_max INTEGER DEFAULT 0,
       config_json TEXT DEFAULT '{}',
@@ -428,6 +429,9 @@ export async function initDatabase(db: D1Database): Promise<void> {
     ["authID", "authID INTEGER NOT NULL DEFAULT 0"],
     ["sort", "sort INTEGER NOT NULL DEFAULT 0"],
   ]);
+  await ensureColumns("users", [
+    ["roleID", "roleID INTEGER NOT NULL DEFAULT 0"],
+  ]);
 
   // Seed root department (groupID=1), mirrors 001 install addGroup()
   // Seed default admin user (密码 admin123), 幂等重建: 部署重置清空数据后自动恢复登录。
@@ -476,6 +480,12 @@ export async function initDatabase(db: D1Database): Promise<void> {
          ELSE 3 END
        WHERE authID IS NOT NULL`
     ),
+  ]);
+
+  // 老数据回填 roleID 主角色: admin→1, user→3 (roleID 列新增前创建的存量用户)
+  await db.batch([
+    db.prepare(`UPDATE users SET roleID = 1 WHERE role = 'admin' AND roleID = 0`),
+    db.prepare(`UPDATE users SET roleID = 3 WHERE role = 'user' AND roleID = 0`),
   ]);
 }
 
@@ -632,7 +642,7 @@ export async function createSession(db: D1Database, userId: number, expiresHours
 
 export async function getSession(db: D1Database, sessionId: string) {
   return db.prepare(`
-    SELECT s.*, u.username, u.nickname, u.role, u.config_json, u.email, u.phone, u.avatar, u.sex, u.status, u.size_max, u.last_login
+    SELECT s.*, u.username, u.nickname, u.role, u.roleID, u.config_json, u.email, u.phone, u.avatar, u.sex, u.status, u.size_max, u.last_login
     FROM sessions s JOIN users u ON s.user_id = u.id
     WHERE s.id = ? AND s.expires_at > datetime('now')
   `).bind(sessionId).first();

@@ -4,6 +4,7 @@
 
 import type { Context, Next, MiddlewareHandler } from "hono";
 import { getSession, getUserById } from "./db";
+import { t } from "./i18n";
 
 const SESSION_COOKIE = "kod_session";
 
@@ -119,4 +120,15 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
  */
 export function isAdmin(user: AuthUser | null): boolean {
   return user?.role === "admin" || user?.role === "root";
+}
+
+/**
+ * Middleware: require admin role (001: admin 模块仅 root 可访问)
+ */
+export async function adminRequired(c: AppContext, next: Next) {
+  const u = c.get("currentUser");
+  if (!u || !isAdmin(u)) {
+    return c.json({ code: false, data: t("explorer.noPermissionAction") });
+  }
+  await next();
 }

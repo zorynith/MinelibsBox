@@ -339,27 +339,16 @@ userApi.get("/view/options", async (c) => {
       }
 
       // G.user.role 必须是扁平权限对象 {key: 0|1}（前端 allow()/adminAuth()/initAuth() 直接按 key 取值）。
-      // 权限点来自 roles.auth（用户角色经 user_groups.authID 关联），admin 固定取角色 1。
+      // 001 语义: 权限点来自 users.roleID 的主角色(roles.auth), 与 user_groups.authID(部门权限组, auths 表)无关。
+      // 部门权限组影响的是部门内文件权限(explorer.*), 不影响 admin.* 全局权限。
       const roleAuth: Record<string, number> = {};
       try {
-        const authIDs: number[] = isAdmin ? [1] : [];
-        if (!isAdmin) {
-          const grpRows = await c.env.DB.prepare("SELECT authID FROM user_groups WHERE user_id = ?").bind(session.user_id).all<{ authID: number }>();
-          for (const r of grpRows.results || []) {
-            const id = Number(r.authID);
-            if (id > 0 && !authIDs.includes(id)) authIDs.push(id);
-          }
-        }
-        if (!authIDs.length) authIDs.push(3);
-        if (authIDs.length) {
-          const ph = authIDs.map(() => "?").join(",");
-          const roles = await c.env.DB.prepare(`SELECT auth FROM roles WHERE id IN (${ph})`).bind(...authIDs).all<{ auth: string }>();
-          for (const r of roles.results || []) {
-            for (const p of String(r.auth || "").split(",").map(x => x.trim()).filter(Boolean)) roleAuth[p] = 1;
-          }
-        }
+        let primaryRole = Number(session.roleID ?? 0) || 0;
+        if (!primaryRole) primaryRole = isAdmin ? 1 : 3;
+        const roleInfo = await c.env.DB.prepare("SELECT auth FROM roles WHERE id = ?").bind(primaryRole).first<{ auth: string }>();
+        for (const p of String(roleInfo?.auth || "").split(",").map(x => x.trim()).filter(Boolean)) roleAuth[p] = 1;
       } catch {
-        // roles/user_groups 表不可用时回退为仅给基础用户权限
+        // roles 表不可用时回退为仅给基础用户权限
       }
       for (const k of Object.keys(permList)) if (roleAuth[k] !== 1) roleAuth[k] = 0;
 
@@ -397,9 +386,9 @@ userApi.get("/view/options", async (c) => {
           }),
         },
           // 001: 用户配置默认值之上合并 user_option(type='') 覆盖项, 否则刷新后设置全部"变回"默认
-          ...(await getAllUserOptions(c.env.DB, session.user_id)),
+          ...(await getAllUserOptions(c.env.DB, session.user_id as number)),
         },
-        editorConfig: await getAllUserOptions(c.env.DB, session.user_id, "editor"),
+        editorConfig: await getAllUserOptions(c.env.DB, session.user_id as number, "editor"),
         isRootAllowIO: isAdmin ? 1 : 0,
         isRootAllowAll: isAdmin ? 1 : 1,
         targetSpace: { sizeMax: defaultSizeMax * 1024 * 1024 * 1024, sizeUse: userSpaceUsedBytes },

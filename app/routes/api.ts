@@ -23,8 +23,22 @@ import { adminShareApi } from "./admin-share-api";
 import { adminTaskApi } from "./admin-task-api";
 import { adminServerApi } from "./admin-server-api";
 import { shareOutRouter } from "./shareout-api";
+import { authRequired, isAdmin } from "../lib/auth";
+import { t } from "../lib/i18n";
 
 const apiRoutes = new Hono<{ Bindings: Env }>();
+
+// /admin 前缀统一鉴权: 登录 + admin 角色。autoRun 为 cron/前端轮询触发, 排除 admin 校验。
+async function adminGate(c: any, next: any) {
+  if (String(c.req.path).includes("/autoRun/")) return next();
+  const u = c.get("currentUser");
+  if (!u || !isAdmin(u)) {
+    return c.json({ code: false, data: t("explorer.noPermissionAction") });
+  }
+  await next();
+}
+apiRoutes.use("/admin/*", authRequired);
+apiRoutes.use("/admin/*", adminGate);
 
 // Mount user API
 apiRoutes.route("/user", userApi);

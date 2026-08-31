@@ -682,9 +682,9 @@ adminApi.all("/member/add", async (c) => {
   const role = roleID === 1 ? "admin" : "user";
 
   const result = await c.env.DB.prepare(
-    `INSERT INTO users (username, password_hash, nickname, email, phone, sex, role, status, size_max)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(name, passwordHash, nickName, email, phone, sex, role, status, sizeMax).run();
+    `INSERT INTO users (username, password_hash, nickname, email, phone, sex, role, roleID, status, size_max)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(name, passwordHash, nickName, email, phone, sex, role, roleID, status, sizeMax).run();
   const meta = result.meta as any;
   const userID = meta?.last_row_id ?? 0;
   if (!userID) return c.json(fail("explorer.error"));
@@ -740,8 +740,11 @@ adminApi.all("/member/edit", async (c) => {
     args.push(parseFloat(q.sizeMax) || 0);
   }
   if (q.roleID !== undefined && q.roleID !== "") {
+    const rID = parseInt(q.roleID, 10) || 0;
     updates.push("role = ?");
-    args.push(parseInt(q.roleID, 10) === 1 ? "admin" : "user");
+    args.push(rID === 1 ? "admin" : "user");
+    updates.push("roleID = ?");
+    args.push(rID);
   }
   if (q.password) {
     const salt = q.salt === "1" ? "1" : undefined;
@@ -907,7 +910,7 @@ async function buildMemberItem(c: any, u: any) {
     phone: u.phone || "",
     avatar: u.avatar || "",
     sex: u.sex ?? 1,
-    roleID: u.role === "admin" ? 1 : 3,
+    roleID: u.roleID || (u.role === "admin" ? 1 : 3),
     roleName: u.role,
     status: u.status ?? 1,
     sizeMax: u.size_max || 0,

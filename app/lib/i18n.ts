@@ -37,6 +37,7 @@ const ZH: Record<string, string> = {
   "user.sendFail": "发送失败",
   "admin.role.delErrTips": "该角色正在被使用，无法删除",
   "admin.member.delErrTips": "该成员正在被使用，无法删除",
+  "explorer.noPermissionAction": "您没有此权限，请联系管理员!",
 };
 
 const EN: Record<string, string> = {
@@ -65,6 +66,7 @@ const EN: Record<string, string> = {
   "user.sendFail": "Failed to send",
   "admin.role.delErrTips": "This role is in use and cannot be deleted",
   "admin.member.delErrTips": "This member is in use and cannot be deleted",
+  "explorer.noPermissionAction": "You do not have permission, please contact the administrator!",
 };
 
 /** Translate an i18n key to display text. Falls back to the key itself when unknown. */

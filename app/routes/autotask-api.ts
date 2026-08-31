@@ -22,6 +22,7 @@ const autoTaskApi = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 autoTaskApi.use("*", authRequired);
 
+
 function ok(data: any, info?: any) {
   const res: any = { code: true, data: typeof data === "string" ? t(data) : data };
   if (info !== undefined) res.info = info;
