@@ -99,7 +99,10 @@ export default {
     if (!dbInitialized) {
       await initDatabase(env.DB);
 
-      // Seed admin user with the original MbesBox default credentials
+      // Seed admin user with the original MbesBox default credentials.
+      // 仅在 admin 不存在时创建 (ON CONFLICT DO NOTHING)；绝不覆盖已存在用户修改过的密码。
+      // 此前用 ON CONFLICT DO UPDATE 覆盖 password_hash，导致每次 worker 冷启动
+      // (isolate 回收/新部署/新增 isolate) 都把线上 admin 密码重置回 admin123。
       const username = "admin";
       const password = "admin123";
       const encoder = new TextEncoder();
@@ -109,8 +112,8 @@ export default {
         .join("");
 
       await env.DB.prepare(
-        `INSERT INTO users (username, password_hash, nickname, role, status) VALUES (?, ?, ?, 'admin', 1)
-         ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, nickname = excluded.nickname`
+        `INSERT INTO users (username, password_hash, nickname, role, roleID, status) VALUES (?, ?, ?, 'admin', 1, 1)
+         ON CONFLICT(username) DO NOTHING`
       ).bind(username, passwordHash, "Administrator").run();
 
       dbInitialized = true;
