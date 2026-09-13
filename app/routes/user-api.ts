@@ -508,6 +508,16 @@ userApi.get("/view/options", async (c) => {
         },
         sourceMeta: {
           configItem: { defaultShow: "user_sourceAlias,user_sourceCover", fileAllow: "user_sourceAlias,user_sourceCover,user_sourceNumber,user_sourceParticipant", folderAllow: "user_sourceAlias,user_sourceCover,user_sourceParticipant" },
+          user_sourceAlias: {
+            type: "fileSelect", value: "", display: "关联文件(附件)",
+            info: { single: false, type: "all", makeUrl: false, valueKey: "path", valueShowKey: "name", title: "关联文件(附件)", authCheck: "read" },
+          },
+          user_sourceCover: {
+            type: "fileSelect", value: "", display: "文档封面",
+            info: { single: true, type: "file", makeUrl: true, valueKey: "downloadPath", valueShowKey: "name", title: "文档封面", authCheck: "read" },
+          },
+          user_sourceNumber: { type: "input", value: "", display: "宗卷编号" },
+          user_sourceParticipant: { type: "user", value: "", display: "参与者", selectType: "mutil" },
         },
         userDefaultTag: [
           { name: "explorer.tag.default1", style: "label-blue-normal" },

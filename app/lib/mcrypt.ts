@@ -206,6 +206,26 @@ export function mcryptDecode(input: string, key: string): string {
 }
 
 /**
+ * Encode a string with the same scheme as PHP `Mcrypt::encode` / frontend `authCrypt.encode`.
+ * Inverse of {@link mcryptDecode}.
+ */
+export function mcryptEncode(input: string, key: string, expiry = 0): string {
+  const ckeyLength = 4;
+  const keyMd5 = md5(key);
+  const keya = md5(keyMd5.substring(0, 16));
+  const keyb = md5(keyMd5.substring(16));
+  const keyc = Math.random().toString(36).substring(2, 2 + ckeyLength).padEnd(ckeyLength, "0");
+  const cryptkey = keya + md5(keya + keyc);
+
+  const theTime = expiry ? Math.floor(Date.now() / 1000) + expiry : 0;
+  const encoded = encodeURIComponent(input);
+  const plain = String(theTime).padStart(10, "0") + md5(encoded + keyb).substring(0, 16) + encoded;
+  const cipher = rc4Crypt(new TextEncoder().encode(plain), cryptkey);
+  const b64 = btoa(bytesToBinaryStr(cipher)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, ".");
+  return keyc + b64;
+}
+
+/**
  * Decode the password sent by the MbesBox login form.
  * PHP equivalent: `KodUser::parsePass($pass)` when `in.salt == 1`.
  */

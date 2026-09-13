@@ -329,6 +329,17 @@ export async function initDatabase(db: D1Database): Promise<void> {
       UNIQUE (groupID, path, tagID)
     )`,
 
+    // Source file/folder meta (mirrors 001 io_source meta: desc/systemSort/systemLock/folderPassword/user_source*)
+    `CREATE TABLE IF NOT EXISTS source_meta (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sourceID TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL DEFAULT '',
+      createTime INTEGER NOT NULL DEFAULT 0,
+      modifyTime INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (sourceID, key)
+    )`,
+
     // Share targets (mirrors 001 share_to: 内部协作分享目标, targetType 1=user 2=group)
     `CREATE TABLE IF NOT EXISTS share_to (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -396,6 +407,7 @@ export async function initDatabase(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_comment_praise ON comment_praise(commentID)`,
     `CREATE INDEX IF NOT EXISTS idx_group_meta_groupID ON group_meta(groupID, key)`,
     `CREATE INDEX IF NOT EXISTS idx_group_tag_file_group ON group_tag_file(groupID, path)`,
+    `CREATE INDEX IF NOT EXISTS idx_source_meta_sourceID ON source_meta(sourceID, key)`,
     `CREATE INDEX IF NOT EXISTS idx_share_to_shareID ON share_to(shareID)`,
     `CREATE INDEX IF NOT EXISTS idx_share_to_target ON share_to(targetType, targetID)`,
     `CREATE INDEX IF NOT EXISTS idx_user_notice_user ON user_notice(userID)`,
@@ -593,6 +605,44 @@ export async function setUserOption(db: D1Database, userId: number, key: string,
     `INSERT INTO user_option (userID, type, key, value, modifyTime, createTime) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(userID, type, key) DO UPDATE SET value = excluded.value, modifyTime = excluded.modifyTime`
   ).bind(userId, type, key, value, now, now).run();
+}
+
+export async function deleteUserOption(db: D1Database, userId: number, key: string, type: string = "") {
+  return db.prepare("DELETE FROM user_option WHERE userID = ? AND type = ? AND key = ?")
+    .bind(userId, type, key).run();
+}
+
+// Source meta (mirrors 001 io_source meta columns: desc, systemSort, systemLock, folderPassword, user_source*)
+export async function getSourceMeta(db: D1Database, sourceID: string | number): Promise<Record<string, string>> {
+  const rows = await db.prepare("SELECT key, value FROM source_meta WHERE sourceID = ?")
+    .bind(String(sourceID)).all<{ key: string; value: string }>();
+  const map: Record<string, string> = {};
+  for (const r of rows.results) map[r.key] = r.value;
+  return map;
+}
+
+export async function getSourceMetaValue(db: D1Database, sourceID: string | number, key: string): Promise<string | null> {
+  const row = await db.prepare("SELECT value FROM source_meta WHERE sourceID = ? AND key = ?")
+    .bind(String(sourceID), key).first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+export async function setSourceMeta(db: D1Database, sourceID: string | number, key: string, value: string | null | undefined) {
+  const sid = String(sourceID);
+  if (value === null || value === undefined || value === "") {
+    return db.prepare("DELETE FROM source_meta WHERE sourceID = ? AND key = ?").bind(sid, key).run();
+  }
+  const now = Math.floor(Date.now() / 1000);
+  return db.prepare(
+    `INSERT INTO source_meta (sourceID, key, value, createTime, modifyTime) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(sourceID, key) DO UPDATE SET value = excluded.value, modifyTime = excluded.modifyTime`
+  ).bind(sid, key, String(value), now, now).run();
+}
+
+export async function setSourceMetaBulk(db: D1Database, sourceID: string | number, obj: Record<string, any>) {
+  for (const [k, v] of Object.entries(obj)) {
+    await setSourceMeta(db, sourceID, k, v === null || v === undefined ? "" : String(v));
+  }
 }
 
 // Verify codes (image captcha + message codes) - mirrors 001 Session/Cache

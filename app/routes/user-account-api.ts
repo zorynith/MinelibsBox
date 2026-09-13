@@ -14,6 +14,7 @@ import { getUserFileKey, getFileMimeType } from "../lib/r2";
 import { t } from "../lib/i18n";
 import { userDefaultInit } from "../lib/user-init";
 import { loadPluginPackage, loadPluginLang } from "../lib/plugins";
+import { listViewSave } from "../lib/list-view";
 import { detectLang } from "../lib/i18n-lang";
 import { sendEmail, sendSms } from "./msg-api";
 
@@ -230,6 +231,17 @@ accountApi.post("/setting/setConfig", authRequired, async (c) => {
   const keys = keyStr.split(",").map((s) => s.trim()).filter(Boolean);
   const values = valueStr.split(",");
   if (keys.length === 0) return c.json(fail("common.invalid"));
+
+  // 列表视图偏好: 前端 setConfig 会附带 listViewKey/listViewValue/listViewPath 或 clearListView;
+  // 复刻 001 explorer/listView::dataSave (type='folderInfo')
+  if ((body.clearListView || "") === "1" || (body.listViewKey && body.listViewPath)) {
+    await listViewSave(c.env.DB, user.id, {
+      clearListView: body.clearListView,
+      listViewKey: body.listViewKey,
+      listViewValue: body.listViewValue,
+      listViewPath: body.listViewPath,
+    });
+  }
 
   for (let i = 0; i < keys.length; i++) {
     const k = keys[i];

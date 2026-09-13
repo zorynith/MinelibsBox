@@ -20,7 +20,7 @@ import { keyFromBase, listDirectory, listAllFiles, deleteDirectory, getFileMimeT
 import { resolveFileSource, userSource, toRealPath, groupChainMeta } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { getGroupAuthValue, getPersonalAuthValue, hasAuth, AUTH_SHOW, AUTH_VIEW, AUTH_DOWNLOAD, AUTH_UPLOAD, AUTH_EDIT, AUTH_REMOVE, AUTH_SHARE, AUTH_ROOT } from "../lib/source-auth";
-import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources, getSetting, getLightApps, addLightApp, updateLightApp, removeLightApp, getDefaultIoSource, getIoSourceById, getIoSourceList, getPluginMeta, setVerifyCode, getVerifyCode, deleteVerifyCode } from "../lib/db";
+import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources, getSetting, getLightApps, addLightApp, updateLightApp, removeLightApp, getDefaultIoSource, getIoSourceById, getIoSourceList, getPluginMeta, setVerifyCode, getVerifyCode, deleteVerifyCode, getSourceMeta, setSourceMeta, setSourceMetaBulk } from "../lib/db";
 import type { LightAppItem } from "../lib/db";
 import { getGroupTag, sourceTagMap, getTags, isGroupAdmin } from "../lib/group-tag";
 import { ioClientOf } from "../lib/io";
@@ -31,6 +31,8 @@ import { BUILTIN_LIGHT_APPS } from "../lib/light-apps-data";
 import { ALL_PLUGINS, loadPluginPackage, defaultPluginConfig, normalizePluginConfig } from "../lib/plugins";
 import { getStaticHost, getAppHost } from "../lib/user-system";
 import { taskResultSet } from "../lib/task-result-cache";
+import { listViewSave, listViewApply } from "../lib/list-view";
+import { mcryptEncode, mcryptDecode } from "../lib/mcrypt";
 import { parseShareItemPath, listUserShareVirtual, listShareItemDir, listShareToMeVirtual, shareItemFileOut } from "./share-api";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
@@ -1325,6 +1327,19 @@ explorerApi.all("/listSafe/action", async (c) => {
 
 // ============ list (main list + sidebar tree) ============
 
+// listView/dataSave - 保存文件夹显示模式/排序偏好 (复刻 001 explorer/listView::dataSave)
+explorerApi.all("/listView/dataSave", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  await listViewSave(c.env.DB, user.id, {
+    clearListView: params.clearListView,
+    listViewKey: params.listViewKey,
+    listViewValue: params.listViewValue,
+    listViewPath: params.listViewPath,
+  });
+  return c.json({ code: true, data: "explorer.success" });
+});
+
 explorerApi.all("/list/path", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
@@ -1582,6 +1597,9 @@ explorerApi.all("/list/path", async (c) => {
       }
     }
 
+    // 001 listView::listDataSet: 当前路径生效的显示模式/排序偏好
+    const listView = await listViewApply(c.env.DB, user.id, parsed.thisPath);
+
     return c.json({
       code: true,
       data: {
@@ -1593,6 +1611,7 @@ explorerApi.all("/list/path", async (c) => {
         pageInfo: { totalNum: totalNum + groupList.length, pageNum, page, pageTotal },
         thisPath: parsed.thisPath,
         targetSpace,
+        ...listView,
       },
     });
   } catch (err: any) {
@@ -1779,6 +1798,7 @@ explorerApi.all("/index/pathInfo", async (c) => {
     if (!path) continue;
     const isFolder = path.endsWith("/");
     const name = path.split("/").filter(Boolean).pop() || path;
+    const meta = await getSourceMeta(c.env.DB, fileSourceID(path));
 
     if (isFolder) {
       const src = await resolveFileSource(c.env, user, path);
@@ -1804,6 +1824,8 @@ explorerApi.all("/index/pathInfo", async (c) => {
         ext: "",
         modifyTime: new Date().toISOString(),
         createTime: new Date().toISOString(),
+        metaInfo: meta,
+        desc: meta.desc || "",
       });
     } else {
       const src = await resolveFileSource(c.env, user, path);
@@ -1836,6 +1858,9 @@ explorerApi.all("/index/pathInfo", async (c) => {
           ext,
           modifyTime: obj.uploaded ? new Date(obj.uploaded).toISOString() : new Date().toISOString(),
           createTime: new Date().toISOString(),
+          metaInfo: meta,
+          desc: meta.desc || "",
+          downloadPath: `explorer/index/fileDownload?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`,
         });
       }
     }
@@ -1844,6 +1869,162 @@ explorerApi.all("/index/pathInfo", async (c) => {
   if (result.length === 0) return c.json({ code: false, data: "路径不存在" });
   if (result.length === 1) return c.json({ code: true, data: result[0] });
   return c.json({ code: true, data: result });
+});
+
+// ============ index meta (setDesc / setMeta / pathLog / pathCrypt / pathAllowCheck / updateLastOpen) ============
+
+/** 001 explorerIndex::pathAllowCheck: 校验文件名非法字符; 无错误返回 null。 */
+function pathAllowCheckName(name: string): string | null {
+  const notAllow = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"];
+  const trimmed = (name || "").trim();
+  if (!trimmed) return null;
+  let check = "";
+  for (const ch of trimmed) check += notAllow.includes(ch) ? "_" : ch;
+  if (check !== trimmed) return "explorer.charNoSupport" + notAllow.join(",");
+  return null;
+}
+
+/** 解析路径对应的稳定 sourceID (worker 以虚拟路径 hash 驱动, 与列表项/pathInfo 一致)。 */
+function metaSourceID(path: string): number {
+  return fileSourceID(path);
+}
+
+/** 001 explorerIndex::updateLastOpen: 记录文件最近打开时间 (仅文件)。 */
+async function updateLastOpen(db: D1Database, path: string): Promise<void> {
+  if (!path || path.endsWith("/")) return;
+  await setSourceMeta(db, metaSourceID(path), "viewTime", String(Math.floor(Date.now() / 1000)));
+}
+
+function metaTruthy(v: unknown): boolean {
+  return v !== undefined && v !== null && v !== "" && v !== "0" && v !== 0 && v !== false;
+}
+
+const SOURCE_META_KEYS = new Set([
+  "systemSort", "systemLock", "systemLockTime",
+  "folderPassword", "folderPasswordDesc", "folderPasswordTimeTo",
+  "user_sourceAlias", "user_sourceCover", "user_sourceNumber", "user_sourceParticipant",
+]);
+
+// setDesc - 设置文档描述 (复刻 001 explorer/index::setDesc)
+explorerApi.all("/index/setDesc", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path ?? "");
+  const desc = String(params.desc ?? "");
+  if (!path) return c.json({ code: false, data: "explorer.error" });
+
+  const maxLen = parseInt(String((await getSetting(c.env.DB, "fileDescLengthMax")) ?? "0"), 10);
+  const limit = maxLen > 0 ? maxLen : 2000;
+  if (desc.length > limit) return c.json({ code: false, data: `explorer.descTooLong(explorer.noMoreThan${limit})` });
+
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  await setSourceMeta(c.env.DB, metaSourceID(path), "desc", desc);
+  return c.json({ code: true, data: desc });
+});
+
+// setMeta - 设置文档元信息 (复刻 001 explorer/index::setMeta)
+explorerApi.all("/index/setMeta", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path ?? "");
+  const raw = params.data;
+  if (!path || !raw) return c.json({ code: false, data: "explorer.error" });
+
+  let meta: Record<string, any>;
+  try {
+    meta = JSON.parse(String(raw));
+  } catch {
+    return c.json({ code: false, data: "explorer.error" });
+  }
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return c.json({ code: false, data: "explorer.error" });
+
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+
+  const sid = metaSourceID(path);
+  const existing = await getSourceMeta(c.env.DB, sid);
+  delete meta["user_sourceSecret"]; // 密级: worker 未实现 SourceSecret, 按原逻辑忽略该字段
+
+  // 001 thumbClear: clear=1 时清空封面与缓存时间
+  if (String(params.clear ?? "") === "1") {
+    await setSourceMeta(c.env.DB, sid, "user_sourceCover", "");
+    await setSourceMeta(c.env.DB, sid, "modifyTimeShow", String(Math.floor(Date.now() / 1000)));
+  }
+
+  const bulk: Record<string, any> = {};
+  for (const [key, value] of Object.entries(meta)) {
+    if (!SOURCE_META_KEYS.has(key)) return c.json({ code: false, data: "key error!" });
+    if (key === "systemLock" && metaTruthy(value) && metaTruthy(existing.systemLock)) {
+      return c.json({ code: false, data: "explorer.fileLockError" });
+    }
+    bulk[key] = value === "" || value === null || value === undefined
+      ? null
+      : (typeof value === "object" ? JSON.stringify(value) : value);
+  }
+  // 设置文件夹密码时自动记录设置人
+  if (Object.prototype.hasOwnProperty.call(meta, "folderPassword")) {
+    bulk["folderPasswordUser"] = metaTruthy(meta["folderPassword"]) ? user.id : null;
+  }
+  await setSourceMetaBulk(c.env.DB, sid, bulk);
+
+  const infoMeta = await getSourceMeta(c.env.DB, sid);
+  return c.json({ code: true, data: { path, sourceID: sid, metaInfo: infoMeta, desc: infoMeta.desc || "" } });
+});
+
+// pathLog - 文件操作日志 (复刻 001 explorer/index::pathLog, 数据源为 audit_logs)
+explorerApi.all("/index/pathLog", async (c) => {
+  const params = await reqParams(c);
+  const path = String(params.path ?? "");
+  if (!path) return c.json({ code: false, data: "path error" });
+  const base = path.replace(/\/+$/, "");
+  const rows: any = await c.env.DB.prepare(
+    "SELECT id, action, user_id, path, detail, created_at FROM audit_logs WHERE path = ? OR path LIKE ? ORDER BY id DESC LIMIT 50"
+  ).bind(path, base + "/%").all();
+  const list = rows.results.map((r: any) => ({
+    id: r.id,
+    type: r.action,
+    action: r.action,
+    userID: r.user_id,
+    path: r.path,
+    desc: r.detail || "",
+    time: r.created_at,
+    createTime: r.created_at,
+  }));
+  return c.json({
+    code: true,
+    data: {
+      list,
+      pageInfo: { totalNum: list.length, page: 1, pageNum: 50, pageTotal: 1 },
+    },
+  });
+});
+
+// pathCrypt - 文件名加解密 (复刻 001 explorer/index::pathCrypt)
+explorerApi.all("/index/pathCrypt", async (c) => {
+  const params = await reqParams(c);
+  const path = String(params.path ?? "");
+  const en = String(params.en ?? "1") !== "0";
+  const pass = ((await getSetting(c.env.DB, "systemPassword")) ?? "") + "encode";
+  if (!path) return c.json({ code: true, data: "" });
+  return c.json({ code: true, data: en ? mcryptEncode(path, pass) : mcryptDecode(path, pass) });
+});
+
+// pathAllowCheck - 文件名合法性校验 (复刻 001 explorer/index::pathAllowCheck)
+explorerApi.all("/index/pathAllowCheck", async (c) => {
+  const params = await reqParams(c);
+  const path = String(params.path ?? "");
+  const name = path.replace(/\/+$/, "").split("/").pop() || "";
+  const err = pathAllowCheckName(name);
+  if (err) return c.json({ code: false, data: err });
+  return c.json({ code: true, data: "explorer.success" });
+});
+
+// updateLastOpen - 更新文件最近打开时间 (复刻 001 explorer/index::updateLastOpen)
+explorerApi.all("/index/updateLastOpen", async (c) => {
+  const params = await reqParams(c);
+  await updateLastOpen(c.env.DB, String(params.path ?? ""));
+  return c.json({ code: true, data: "explorer.success" });
 });
 
 // mkdir - create folder (path is full path including new folder name)
@@ -2455,6 +2636,9 @@ async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment
     obj = await c.env.FILES.get(key).catch(() => null);
   }
   if (!obj) return c.json({ code: false, data: "Not found" });
+
+  // 001 fileOutUpdate -> updateLastOpen: 记录最近打开时间
+  await updateLastOpen(c.env.DB, path).catch(() => {});
 
   const name = (typeof params.name === "string" && params.name) ? params.name : path.split("/").filter(Boolean).pop() || "file";
   if (disposition === "attachment") {
