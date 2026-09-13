@@ -376,6 +376,14 @@ async function serveIndex(c: Context<{ Bindings: Env }>) {
   <script src="${linkHref("app/vender/lodash.min.js")}"></script>
   <script src="${linkHref("app/dist/vendor.js")}"></script>
   <script src="${linkHref("app/dist/main.js")}"></script>
+  <style>
+    /* 插件配置弹窗标题图标：.path-ico 基础高度为 18px，会把 22px 的图片图标压成 22x18（变扁）。
+       这里仅为含图片图标的 .path-ico 补足高度，并把 .picture.ico 垂直居中到标题行中央，
+       使图片图标与字体图标保持一致（22x22，居中），字体图标类插件不受影响。 */
+    .form-box.config-box .form-header .modal-title .path-ico:has(.picture.ico){height:22px}
+    .form-box.config-box .form-header .modal-title .path-ico .picture.ico{position:relative;top:6px}
+  </style>
+
   <script type="text/javascript">
     // 授权开发版：覆盖授权信息卡(item)为开发版状态
     window.__LICENSE_ITEM = ${JSON.stringify(licenseItem)};
