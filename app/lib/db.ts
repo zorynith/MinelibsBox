@@ -373,6 +373,14 @@ export async function initDatabase(db: D1Database): Promise<void> {
       expire_at INTEGER NOT NULL DEFAULT 0
     )`,
 
+    // 插件运行时缓存 (镜像 001 pluginCacheFileSet/Cache::set):
+    // 供 yzOffice 等需要跨请求保存任务状态的插件使用, 跨 isolate 共享
+    `CREATE TABLE IF NOT EXISTS plugin_cache (
+      id TEXT PRIMARY KEY,
+      data TEXT NOT NULL DEFAULT '',
+      expire_at INTEGER NOT NULL DEFAULT 0
+    )`,
+
     // Indexes
     `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(share_token)`,
@@ -393,6 +401,7 @@ export async function initDatabase(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_user_notice_user ON user_notice(userID)`,
     `CREATE INDEX IF NOT EXISTS idx_audit_logs_time ON audit_logs(created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_task_result_expire ON task_result(expire_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_plugin_cache_expire ON plugin_cache(expire_at)`,
   ];
 
   // 批量建表/索引: 单次 D1 round-trip 完成, 显著降低 worker 冷启动时间

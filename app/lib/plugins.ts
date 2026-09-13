@@ -28,7 +28,7 @@ export interface PluginContext {
 }
 
 /** All plugins shipped with the worker (served from ASSETS static/plugins). */
-export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "CADViewer", "drawio", "Photopea", "bisheng", "PDFTron"];
+export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "CADViewer", "drawio", "Photopea", "bisheng", "PDFTron", "officeLive", "yzOffice"];
 
 // {{{ helpers mirroring 001 array_get_value/_get }}}
 function arrayGet(obj: any, key: string): any {
@@ -220,7 +220,8 @@ export function resolveLngRaw(obj: any, langArr: Record<string, string>): any {
   if (Array.isArray(obj)) return obj.map((x) => resolveLngRaw(x, langArr));
   if (obj && typeof obj === "object") {
     const copy: any = {};
-    for (const [k, v] of Object.entries(obj)) copy[k] = resolveLngRaw(v, langArr);
+    // 键名同样可能含 {{LNG['...']}} (如 formStyle.tabs 的标签), 需一并解析
+    for (const [k, v] of Object.entries(obj)) copy[parseLangRaw(k, langArr)] = resolveLngRaw(v, langArr);
     return copy;
   }
   return obj;
@@ -229,12 +230,14 @@ export function resolveLngRaw(obj: any, langArr: Record<string, string>): any {
 function resolvePkgLngRaw(pkg: PluginPackage, langArr: Record<string, string>): PluginPackage {
   const copy: any = Array.isArray(pkg) ? [] : {};
   for (const [k, v] of Object.entries(pkg)) {
+    // 对象键同样可能含 {{LNG['key']}} (如 formStyle.tabs 的标签名), 需一并替换
+    const key = parseLangRaw(k, langArr);
     if (typeof v === "string") {
-      copy[k] = parseLangRaw(v, langArr);
+      copy[key] = parseLangRaw(v, langArr);
     } else if (isPlainObj(v) || Array.isArray(v)) {
-      copy[k] = resolvePkgLngRaw(v as any, langArr);
+      copy[key] = resolvePkgLngRaw(v as any, langArr);
     } else {
-      copy[k] = v;
+      copy[key] = v;
     }
   }
   return copy;

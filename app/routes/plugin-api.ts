@@ -1169,6 +1169,261 @@ async function pdfTronSaveHandler(c: any): Promise<Response> {
   return c.text('{"error":0}', 200, { "Content-Type": "application/json" });
 }
 
+/** 001 officeLive: index() 直接 302 跳转到外部预览服务(微软 Office Online 等),
+ *  src 参数为匿名可访问的文件流 URL(外部服务无会话 cookie, 需 fileView apiKey 签名)。 */
+async function renderOfficeLive(c: any, params: { rawPath: string; fileName: string; appHost: string }) {
+  const { rawPath, fileName, appHost } = params;
+  if (!rawPath) return c.json({ code: false, data: "explorer.share.errorParam" });
+
+  const isShare = rawPath.indexOf("{shareItemLink:") === 0;
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!isShare && !user) return c.body(errorPage("officeLive", "未登录"), 200, HTML_HEADERS);
+
+  const meta = await getPluginMeta(c.env.DB, "officeLive");
+  const config = meta?.config || {};
+  const apiServer = String(config.apiServer || "https://view.officeapps.live.com/op/embed.aspx?src=");
+
+  const fileUrl = isShare
+    ? fileOutUrl(appHost, rawPath)
+    : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
+
+  return c.redirect(apiServer + encodeURIComponent(fileUrl), 302);
+}
+
+// ---------- yzOffice 永中在线预览 (复刻 001 plugins/yzOffice) ----------
+
+const YZ_OFFICE_UPLOAD = "https://www.yozodcs.com/fcscloud/file/upload";
+const YZ_OFFICE_CONVERT = "https://www.yozodcs.com/fcscloud/composite/convert";
+const YZ_OFFICE_TTL = 2 * 3600;
+
+/** 插件运行时缓存读取 (镜像 001 Cache::get, 跨 isolate 存 D1)。 */
+async function pluginCacheGet(db: D1Database, id: string): Promise<any | null> {
+  const now = Math.floor(Date.now() / 1000);
+  const row = await db
+    .prepare(`SELECT data FROM plugin_cache WHERE id = ? AND expire_at > ?`)
+    .bind(id, now)
+    .first()
+    .catch(() => null);
+  if (!row) return null;
+  try {
+    return JSON.parse((row as { data: string }).data);
+  } catch {
+    return null;
+  }
+}
+
+/** 插件运行时缓存写入 (镜像 001 Cache::set)。 */
+async function pluginCacheSet(db: D1Database, id: string, value: any, ttlSec = YZ_OFFICE_TTL): Promise<void> {
+  const expireAt = Math.floor(Date.now() / 1000) + ttlSec;
+  await db
+    .prepare(
+      `INSERT INTO plugin_cache (id, data, expire_at) VALUES (?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET data = excluded.data, expire_at = excluded.expire_at`
+    )
+    .bind(id, JSON.stringify(value), expireAt)
+    .run()
+    .catch(() => null);
+}
+
+async function pluginCacheDel(db: D1Database, id: string): Promise<void> {
+  await db.prepare(`DELETE FROM plugin_cache WHERE id = ?`).bind(id).run().catch(() => null);
+}
+
+/** yzOffice 任务缓存 key: 按用户 + 真实文件路径隔离 (镜像 001 cacheTask = md5(cachePath+hash(filePath)))。 */
+function yzOfficeTaskKey(userID: number, rawPath: string): string {
+  return "yzOffice:" + userID + ":" + md5(realPathOf(rawPath));
+}
+
+/** 读取 R2/S3 文件原始字节 (供上传到第三方转换服务)。 */
+async function readFileBytes(c: any, user: AuthUser, rawPath: string, name?: string): Promise<{ buf: ArrayBuffer; name: string } | null> {
+  const src = await resolveFileSource(c.env, user, rawPath);
+  if (!src.ok) return null;
+  const key = keyFromBase(src.source.baseKey, src.relPath);
+  const s3 = s3ConfigOf(src.source);
+  let buf: ArrayBuffer | null = null;
+  if (s3) {
+    const g = await s3.get(key).catch(() => null);
+    if (g) buf = await new Response(g.body).arrayBuffer();
+  } else {
+    const o = await c.env.FILES.get(key).catch(() => null);
+    if (o) buf = await o.arrayBuffer();
+  }
+  if (!buf) return null;
+  const fname = name || src.relPath.split("/").filter(Boolean).pop() || "file";
+  return { buf, name: fname };
+}
+
+/** 001 yzOffice upload(): multipart 上传文件到 yozodcs, 返回 { data: 响应JSON }。 */
+async function yzOfficeUpload(c: any, user: AuthUser, rawPath: string, name: string): Promise<{ data: any } | null> {
+  const f = await readFileBytes(c, user, rawPath, name);
+  if (!f) return null;
+  const fd = new FormData();
+  fd.append("file", new Blob([f.buf]), f.name);
+  const res = await fetch(YZ_OFFICE_UPLOAD, { method: "POST", body: fd }).catch(() => null);
+  if (!res || !res.ok) return null;
+  const j = await res.json().catch(() => null);
+  if (!j) return null;
+  return { data: j };
+}
+
+/** 001 yzOffice convert(): 用上传返回的 srcRelativePath 触发转换, 返回 { data: 响应JSON }。 */
+async function yzOfficeConvert(task: any): Promise<{ data: any } | null> {
+  const rel = task?.steps?.[0]?.result?.data?.data;
+  if (!rel) return null;
+  const body = new URLSearchParams({
+    srcRelativePath: String(rel),
+    convertType: "61",
+    isDccAsync: "1",
+    isCopy: "1",
+    isShowTitle: "0",
+    isDelSrc: "1",
+  }).toString();
+  const res = await fetch(YZ_OFFICE_CONVERT, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+    body,
+  }).catch(() => null);
+  if (!res || !res.ok) return null;
+  const j = await res.json().catch(() => null);
+  if (!j) return null;
+  return { data: j };
+}
+
+function yzOfficeNewTask(rawPath: string): any {
+  return {
+    currentStep: 0,
+    success: 0,
+    taskUuid: md5(rawPath + String(Date.now()) + String(Math.random())),
+    steps: [
+      { name: "upload", process: "uploadProcess", status: 0, result: "" },
+      { name: "convert", process: "convert", status: 0, result: "" },
+    ],
+  };
+}
+
+/** 001 yzOffice runTask(): 顺序执行 upload/convert 两步并把状态持久化, 返回最终 task 或错误。 */
+async function yzOfficeRunTask(c: any, user: AuthUser, rawPath: string, fileName: string): Promise<{ task?: any; error?: string }> {
+  const key = yzOfficeTaskKey(user.id, rawPath);
+  let task = await pluginCacheGet(c.env.DB, key);
+  if (!task || !Array.isArray(task.steps)) {
+    task = yzOfficeNewTask(rawPath);
+  }
+
+  for (let i = task.currentStep || 0; i < task.steps.length; i++) {
+    const item = task.steps[i];
+    task.currentStep = i;
+    if (item.status === 2) continue;
+    const result = item.name === "upload" ? await yzOfficeUpload(c, user, rawPath, fileName) : await yzOfficeConvert(task);
+    if (!result || result.data === undefined) {
+      await pluginCacheSet(c.env.DB, key, task);
+      return { error: "explorer.error" };
+    }
+    item.result = result.data;
+    item.status = 2;
+    await pluginCacheSet(c.env.DB, key, task);
+  }
+
+  task.currentStep = task.steps.length - 1;
+  task.success = 1;
+  await pluginCacheSet(c.env.DB, key, task);
+  return { task };
+}
+
+/** 001 yzOffice index(): 未转换完成渲染进度页, 已完成 302 跳转 viewUrl。 */
+async function renderYzOffice(c: any, params: { rawPath: string; fileName: string; appHost: string; staticPath: string; lang: string }) {
+  const { rawPath, fileName, appHost, staticPath, lang } = params;
+  const lng = await loadPluginLang(c.env.ASSETS, "yzOffice", lang);
+  const title = lng["yzOffice.meta.title"] || "永中office在线预览";
+  const isShare = rawPath.indexOf("{shareItemLink:") === 0;
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!rawPath) return c.body(errorPage(title, "explorer.share.errorParam"), 200, HTML_HEADERS);
+  if (!isShare && !user) return c.body(errorPage(title, "未登录"), 200, HTML_HEADERS);
+
+  // 已完成: 读取缓存的 viewUrl
+  if (user) {
+    const key = yzOfficeTaskKey(user.id, rawPath);
+    const task = await pluginCacheGet(c.env.DB, key);
+    if (task && task.success) {
+      const info = task.steps[task.steps.length - 1]?.result;
+      const viewUrl = info && info.data && info.data.viewUrl;
+      if (info && (info.errorcode || !viewUrl)) {
+        await pluginCacheDel(c.env.DB, key);
+        return c.body(errorPage(title, info.message || lng["yzOffice.Main.invalidUrl"] || "无效的请求地址"), 200, HTML_HEADERS);
+      }
+      if (viewUrl) return c.redirect(viewUrl, 302);
+    }
+  }
+
+  const tpl = await loadTemplate(c.env.ASSETS, "plugins/yzOffice/static/index.html");
+  if (!tpl) return c.json({ code: false, data: "yzOffice template not found" });
+
+  const pluginHost = `${staticPath}plugins/yzOffice/`;
+  const apiBase = `${appHost}index.php?plugin/yzOffice/`;
+
+  const html = replaceAll(tpl, [
+    ["@@title@@", htmlEscape(title)],
+    ["@@pluginHost@@", pluginHost],
+    ["@@appName@@", htmlEscape(lng["yzOffice.meta.name"] || "永中office")],
+    ["@@pathJs@@", jsEscape(rawPath)],
+    ["@@apiBase@@", jsEscape(apiBase)],
+    ["@@lngTransfer@@", htmlEscape(lng["yzOffice.Main.transfer"] || "1.数据传输中,请稍后...")],
+    ["@@LNG@@", JSON.stringify({
+      error: lng["explorer.error"] || (lang === "en" ? "Operation failed" : "操作失败！"),
+      transfer: lng["yzOffice.Main.transfer"] || "1.数据传输中,请稍后...",
+      converting: lng["yzOffice.Main.converting"] || "2.文件转换中,请稍后...",
+      uploadError: lng["yzOffice.Main.uploadError"] || "上传失败!",
+      convert: lng["yzOffice.Main.convert"] || "正在转换,请稍后...",
+      transferAgain: lng["yzOffice.Main.transferAgain"] || "重新转换",
+    })],
+  ]);
+  return c.body(html, 200, HTML_HEADERS);
+}
+
+/** 001 yzOffice task(): 触发/轮询转换任务; 前端每 600ms 调用一次。 */
+async function yzOfficeTaskHandler(c: any): Promise<Response> {
+  const rawPath = c.req.query("path") || "";
+  const fileName = c.req.query("name") || "";
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!user) return c.json({ code: false, data: "common.noPermission" });
+  if (!rawPath) return c.json({ code: false, data: "explorer.share.errorParam" });
+  const res = await yzOfficeRunTask(c, user, rawPath, fileName);
+  if (res.error) return c.json({ code: false, data: res.error });
+  return c.json({ code: true, data: res.task });
+}
+
+/** 001 yzOffice restart(): 清除任务缓存, 允许重新转换。 */
+async function yzOfficeRestartHandler(c: any): Promise<Response> {
+  const rawPath = c.req.query("path") || "";
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!user || !rawPath) return c.json({ code: false, data: "explorer.share.errorParam" });
+  await pluginCacheDel(c.env.DB, yzOfficeTaskKey(user.id, rawPath));
+  return c.json({ code: true, data: "success" });
+}
+
+/** 001 yzOffice getFile(): 代理 viewUrl 同源子资源(字体/图片等)。 */
+async function yzOfficeGetFileHandler(c: any): Promise<Response> {
+  const rawPath = c.req.query("path") || "";
+  const file = c.req.query("file") || "";
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!user || !rawPath || !file) return c.json({ code: false, data: "explorer.share.errorParam" });
+  const task = await pluginCacheGet(c.env.DB, yzOfficeTaskKey(user.id, rawPath));
+  const viewUrl = task?.steps?.slice(-1)?.[0]?.result?.data?.viewUrl;
+  if (!viewUrl) return c.json({ code: false, data: "explorer.error" });
+  const base = String(viewUrl).replace(/\/[^/]*$/, "/");
+  let target = "";
+  try {
+    target = new URL(file.replace(/^\.\//, ""), base).toString();
+  } catch {
+    return c.json({ code: false, data: "explorer.share.errorParam" });
+  }
+  const res = await fetch(target).catch(() => null);
+  if (!res || !res.ok) return c.json({ code: false, data: "common.pathNotExists" });
+  const headers = new Headers();
+  const ct = res.headers.get("Content-Type");
+  if (ct) headers.set("Content-Type", ct);
+  return new Response(res.body, { status: res.status, headers });
+}
+
 pluginApi.all("/:name", (c) => pluginHandler(c));
 pluginApi.all("/:name/", (c) => pluginHandler(c));
 pluginApi.all("/:name/:act", (c) => pluginHandler(c));
@@ -1254,6 +1509,17 @@ async function pluginHandler(c: any) {
   if (name === "PDFTron") {
     if (act === "save") return pdfTronSaveHandler(c);
     return renderPdfTron(c, { rawPath, fileName, appHost, staticPath, lang });
+  }
+
+  if (name === "officeLive") {
+    return renderOfficeLive(c, { rawPath, fileName, appHost });
+  }
+
+  if (name === "yzOffice") {
+    if (act === "task") return yzOfficeTaskHandler(c);
+    if (act === "restart") return yzOfficeRestartHandler(c);
+    if (act === "getFile") return yzOfficeGetFileHandler(c);
+    return renderYzOffice(c, { rawPath, fileName, appHost, staticPath, lang });
   }
 
   return c.json({ code: false, data: "未知插件" });

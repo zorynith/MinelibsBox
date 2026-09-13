@@ -324,4 +324,16 @@ Entries discovered by the Agent during task execution should follow this format:
   - **Cloudflare Workers 多 isolate 下模块级内存 Map 跨请求不共享**：内存缓存把 pathDelete（写）与 taskAction（轮询）常分到不同 isolate → 永远 miss → 误报"操作失败"。跨请求状态一律必须落 D1 持久化，不能存模块级内存。修复：`app/lib/task-result-cache.ts` 的 `taskResultSet(db,id,value,ttlSec=300)`(INSERT ON CONFLICT DO UPDATE) 与 `taskResultGet(db,id)`（读取即删、读时清过期），explorer-api 11 个 emit 点、user-api taskActionHandler、share 页 user/view/taskAction 共用此缓存。
   - 本地 wrangler dev 是单 isolate，内存缓存测试全会通过，会掩盖跨 isolate bug；涉及跨请求缓存/状态的机制必须线上验证（实测法：curl pathDelete 一个不存在文件触发长任务 + taskAction 轮询，看是否 task_finished 而非 taskEmpty）。
   - D1 表结构变更（新增表/列）必须同步加 `migrations/000x_*.sql` 并在 `initDatabase()` 建表（CREATE TABLE IF NOT EXISTS），本地 dev 已有旧 schema 时需手工 ALTER 补列。
-  - D1 单值写入有大小上限，超大结果（如巨大 zip 的 unzipList 列表）写 task_result 会被拒导致 abort 后 miss；此类结果需控制体积或跳过缓存，不能无界直写。
+   - D1 单值写入有大小上限，超大结果（如巨大 zip 的 unzipList 列表）写 task_result 会被拒导致 abort 后 miss；此类结果需控制体积或跳过缓存，不能无界直写。
+
+[Project Knowledge Summary]
+- Date: 2026-09-13
+- Context: Discovered by Agent while performing 复刻 officeLive/yzOffice 两个在线预览插件
+- Category: Troubleshooting & Debugging / Testing Methods
+- Instructions:
+  - 001 插件 package.json 可能存在字符串内**字面换行**（如 officeLive 的多行 networkDesc），`parseLooseJson` 只容错注释/尾逗号，不支持字符串内裸换行，会导致整个插件被跳过（appList 缺项）；复刻时须把多行字符串合并为单行。
+  - admin `plugin/getConfig` 的 `formStyle.tabs` 标签是**对象键**上的 `{{LNG['admin.setting.base']}}`：`resolveLngRaw`（`app/lib/plugins.ts`）必须同时对键名做 parseLangRaw 解析，否则配置弹窗 tab 显示占位符字面量。
+  - 插件运行时状态需跨 Worker isolate 持久化：新增 D1 表 `plugin_cache(id,data,expire_at)`（`migrations/0006_plugin_cache.sql` + `initDatabase`），提供读写而非删除语义（与 `task_result` 的读删不同）。
+  - yzOffice 复刻要点：`app.php index()` 未完成时渲染进度页（每 600ms 轮询 `yzOffice/task`），完成时 302 跳转 viewUrl；接口为 yozodcs `file/upload`（multipart，返回 `{data:{data:"<hash>/name"}}`）与 `composite/convert`（x-www-form-urlencoded，body `srcRelativePath=<上传返回路径>&convertType=61&isDccAsync=1&isCopy=1&isShowTitle=0&isDelSrc=1`，返回 `{data:{viewUrl,errorcode,...}}`）。原版 task 分 upload/convert 两步且步骤内阻塞；Worker 版在单次 task 请求内顺序跑完两步并落库。
+  - officeLive 复刻要点：`index()` 直接 `302 Location: <config.apiServer>+urlencode(filePathLinkOut)`，无本地页面；`apiServer` 默认 `https://view.officeapps.live.com/op/embed.aspx?src=`，src 用 fileView apiKey 签名的匿名 fileOut URL（外部服务无 cookie）。
+
