@@ -109,6 +109,18 @@ async function serveIndex(c: Context<{ Bindings: Env }>) {
     }
   </style>
 
+  <style>
+    /* 插件配置弹窗顶部标题行（图标+窗口按钮）高度对齐普通弹窗，避免比常规窗口高一截 */
+    .artDialog.dialog-plugin-config.dialog-form.dialog-no-title .form-box.config-box .form-header {
+      height: 30px;
+      box-sizing: border-box;
+    }
+    .artDialog.dialog-plugin-config.dialog-form.dialog-no-title .form-box.config-box .form-header .modal-title {
+      height: 30px;
+      line-height: 30px;
+    }
+  </style>
+
   <div class="loading-body"><div></div></div>
   <script type="text/javascript">
     // 全局配置对象

@@ -308,6 +308,12 @@ Entries discovered by the Agent during task execution should follow this format:
   - io 目录占位对象(dir/, mkdir 创建)在列出该目录自身时会被 io.list 当作子项返回, 须按 f.key===prefix 过滤(explorer-api /list/path io 分支)。
    - zip/unzipList/zipDownload/zip/unzip 与 editor/fileGet|fileSave、index/fileSave、fileView/index、fav/get 历史上均为 R2-only, 已全部修复(2026-08-26, commit 4b5e48b); 分享(share-api)对 io 挂载文件的分享仍未支持, 属已知缺口。
 
+[User Instruction Summary]
+- Date: 2026-09-05
+- Context: 用户明确要求提交格式与上一次一致
+- Instructions:
+  - 每次 git 提交必须严格按照上一次提交的提交名与作者：提交信息统一用 `Update`（无正文），作者为 `zorynith <monkeycode-ai@chaitin.com>`（本机 git config user.name/user.email 已为此值，无需改动）。
+
 [Project Knowledge Summary]
 - Date: 2026-08-26
 - Context: Discovered by Agent while performing 修复删除/清空回收站报"参数错误"、长任务 abort 后"操作失败"误报排查
