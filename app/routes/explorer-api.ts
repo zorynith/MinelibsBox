@@ -77,6 +77,14 @@ function normDirPath(p: string): string {
   return toRealPath(p);
 }
 
+/** 001 explorerUpload::pathAllowReplace: 将文件名非法字符替换为下划线。 */
+function uploadPathAllowReplace(p: string): string {
+  const notAllow = ["\\", ":", "*", "?", '"', "<", ">", "|", "\r", "\n"];
+  let out = "";
+  for (const ch of p) out += notAllow.includes(ch) ? "_" : ch;
+  return out;
+}
+
 /** {io:N} 外部存储挂载: 返回统一 io 客户端; 非外部存储(本地/R2/未知驱动) 返回 null */
 function externalIoOf(source: SourceRef): IoClient | null {
   return ioClientOf(source);
@@ -1597,6 +1605,23 @@ explorerApi.all("/list/path", async (c) => {
       }
     }
 
+    // 001 fav::favAppendItem: 标记已收藏项 (列表中显示收藏状态)
+    const favList = await getFavorites(c.env.DB, user.id).catch(() => [] as any[]);
+    if (favList.length > 0) {
+      const favMap = new Map<string, any>();
+      for (const f of favList) {
+        favMap.set(f.path, f);
+        favMap.set(f.path.replace(/\/+$/, ""), f);
+      }
+      for (const item of [...folderList, ...fileList] as Record<string, unknown>[]) {
+        const p = String(item.path ?? "");
+        const fav = favMap.get(p) || favMap.get(p.replace(/\/+$/, ""));
+        if (fav) {
+          item.sourceInfo = { ...(item.sourceInfo as Record<string, unknown> || {}), isFav: 1, favName: fav.name, favID: fav.id };
+        }
+      }
+    }
+
     // 001 listView::listDataSet: 当前路径生效的显示模式/排序偏好
     const listView = await listViewApply(c.env.DB, user.id, parsed.thisPath);
 
@@ -3064,6 +3089,83 @@ explorerApi.all("/index/zipDownload", async (c) => {
   }
 });
 
+/** 001 explorer/upload::zipDownloadClient: 递归收集文件清单, 供前端自行打包下载。 */
+async function zipClientCollect(
+  c: AppContext,
+  user: Vars["currentUser"],
+  path: string,
+  zipName: string,
+  out: Record<string, unknown>[]
+): Promise<void> {
+  const isFolder = path.endsWith("/");
+  if (!isFolder) {
+    const src = await resolveFileSource(c.env, user, path);
+    const h = src.ok ? await headObject(c, src.source, src.relPath) : null;
+    out.push({
+      path: zipName,
+      folder: false,
+      filePath: path,
+      size: h?.size ?? 0,
+      modifyTime: h?.lastModified || new Date().toISOString(),
+    });
+    return;
+  }
+  out.push({ path: zipName, folder: true, modifyTime: new Date().toISOString() });
+
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return;
+  const dir = normDirPath(src.relPath);
+  const io = ioClientOf(src.source);
+  let folders: R2Object[] = [];
+  let files: R2Object[] = [];
+  if (io) {
+    const res = await io.list(keyFromBase(src.source.baseKey, dir));
+    folders = res.folders.map((p) => toR2LikeObject(p, 0, "inode/directory"));
+    files = res.files
+      .filter((f) => f.key !== keyFromBase(src.source.baseKey, dir))
+      .map((f) => toR2LikeObject(f.key, f.size));
+  } else {
+    const res = await listDirectory(c.env.FILES, src.source.baseKey, dir);
+    folders = res.folders;
+    files = res.files;
+  }
+  const base = path.endsWith("/") ? path : path + "/";
+  for (const f of folders) {
+    const n = f.key.split("/").filter(Boolean).pop() || "";
+    if (!n || n.startsWith(".")) continue;
+    await zipClientCollect(c, user, base + n + "/", zipName + "/" + n + "/", out);
+  }
+  for (const f of files) {
+    const n = f.key.split("/").pop() || "";
+    if (n === ".keep" || n.startsWith(".")) continue;
+    out.push({
+      path: zipName + "/" + n,
+      folder: false,
+      filePath: base + n,
+      size: f.size,
+      modifyTime: f.uploaded ? new Date(f.uploaded).toISOString() : new Date().toISOString(),
+    });
+  }
+}
+
+// zipDownloadClient - 客户端打包文件清单 (复刻 001 explorer/upload::zipDownloadClient)
+explorerApi.all("/index/zipDownloadClient", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const items = parseDataArr(params.dataArr);
+  if (items.length === 0) return c.json({ code: false, data: "参数错误" });
+  const out: Record<string, unknown>[] = [];
+  try {
+    for (const it of items) {
+      const name = it.name || it.path.split("/").filter(Boolean).pop() || "file";
+      await zipClientCollect(c, user, it.path, "/" + name, out);
+    }
+    return c.json({ code: true, data: out });
+  } catch (err: any) {
+    return c.json({ code: false, data: err.message });
+  }
+});
+
 // fileSave - save text content to file
 explorerApi.all("/index/fileSave", async (c) => {
   const user = c.get("currentUser");
@@ -3093,11 +3195,15 @@ explorerApi.all("/index/fileSave", async (c) => {
 // ============ editor ============
 
 // editor/fileGet - read file content for text editor
-explorerApi.all("/editor/fileGet", async (c) => {
+async function editorFileGetHandler(c: AppContext) {
   const user = c.get("currentUser");
   const params = await reqParams(c);
   const path = typeof params.path === "string" ? params.path : "";
-  if (!path) return c.json({ code: false, data: "参数错误" });
+  const pathUrl = typeof params.pathUrl === "string" ? params.pathUrl : "";
+  if (!path) {
+    if (pathUrl) return c.json({ code: false, data: "common.pathNotExists" });
+    return c.json({ code: false, data: "参数错误" });
+  }
 
   // zip 预览面板内条目: path 是完整 unzipList URL 串
   const zipInner = parseZipInnerPath(path);
@@ -3146,7 +3252,11 @@ explorerApi.all("/editor/fileGet", async (c) => {
       content,
     },
   });
-});
+}
+
+explorerApi.all("/editor/fileGet", editorFileGetHandler);
+// fileGetMake - 001 内部复用 fileGet; pathUrl(压缩包内文件/url只读) 走同一读取逻辑
+explorerApi.all("/editor/fileGetMake", editorFileGetHandler);
 
 // editor/fileSave - save text editor content
 explorerApi.all("/editor/fileSave", async (c) => {
@@ -3576,6 +3686,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
 
   let path = "/", name = "", size = 0, chunk = 0, chunks = 1, chunkSizeParam = 0;
   let checkType = "", fileInfo = "";
+  let fullPath = "", fileSave = "", repeatParam = "";
   let file: File | null = null;
 
   const isMultipart = contentType.includes("multipart/form-data");
@@ -3592,6 +3703,9 @@ explorerApi.post("/upload/fileUpload", async (c) => {
     chunkSizeParam = parseInt(q.chunkSize || "0", 10);
     checkType = q.checkType || "";
     fileInfo = q.fileInfo || "";
+    fullPath = q.fullPath || "";
+    fileSave = q.fileSave || "";
+    repeatParam = q.repeatType || q.fileRepeat || "";
     if (name) {
       const buf = await c.req.arrayBuffer();
       file = new File([buf], name, { type: q.type || "application/octet-stream" });
@@ -3608,6 +3722,9 @@ explorerApi.post("/upload/fileUpload", async (c) => {
     chunkSizeParam = parseInt(str("chunkSize") || "0", 10);
     checkType = str("checkType");
     fileInfo = str("fileInfo");
+    fullPath = str("fullPath");
+    fileSave = str("fileSave");
+    repeatParam = str("repeatType") || str("fileRepeat");
     file = body["file"] instanceof File ? (body["file"] as File) : null;
   }
   // 对齐 001 逻辑: 分片大小不小于文件大小时视为不分片, 避免小文件触发 R2 multipart 最小 5MiB 限制
@@ -3643,8 +3760,43 @@ explorerApi.post("/upload/fileUpload", async (c) => {
   if (!quota.ok) return c.json({ code: false, data: quota.error });
 
   const virtualDir = path.endsWith("/") ? path : path + "/";
-  const fileName = name || file.name;
-  const key = keyFromBase(src.source.baseKey, realDir + fileName);
+  let destDir = realDir;
+  let destName = uploadPathAllowReplace(name || file.name);
+  let respVirtualDir = virtualDir;
+
+  // 001 fullPath: 带文件夹上传, 在目标目录下重建父级目录
+  if (fullPath) {
+    const fp = uploadPathAllowReplace(fullPath).replace(/^\/+/, "").replace(/\/+$/, "");
+    const father = fp.includes("/") ? fp.slice(0, fp.lastIndexOf("/") + 1) : "";
+    destDir = realDir + father;
+    respVirtualDir = virtualDir + father;
+  }
+
+  if (fileSave === "1") {
+    // 001 fileSave: 保存内容到已存在文件 (编辑器保存), 强制覆盖
+    const tsrc = await resolveFileSource(c.env, user, path);
+    if (!tsrc.ok) return c.json({ code: false, data: tsrc.error });
+    const rel = tsrc.relPath.replace(/\/+$/, "");
+    const idx = rel.lastIndexOf("/");
+    destDir = idx >= 0 ? rel.slice(0, idx + 1) : "/";
+    destName = rel.slice(idx + 1);
+    respVirtualDir = path.slice(0, path.lastIndexOf("/") + 1);
+  } else {
+    // 001 同名文件处理: replace(默认覆盖) / rename / skip
+    const repeat = repeatParam || (await getUserOption(c.env.DB, user.id, "fileRepeat")) || "replace";
+    const exist = await headObject(c, src.source, destDir + destName);
+    if (exist) {
+      if (repeat === "skip") {
+        return c.json({ code: true, data: "skiped", info: uploadInfoJson(respVirtualDir, destName, size || file.size, fileInfo) });
+      }
+      if (repeat === "rename") {
+        destName = await uniqueNameInDirSrc(c, src.source, destDir, destName);
+      }
+    }
+  }
+
+  const fileName = destName;
+  const key = keyFromBase(src.source.baseKey, destDir + fileName);
   const io = ioClientOf(src.source);
 
   try {
@@ -3657,7 +3809,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
     if (io) {
       // 外链存储上传: 分片暂存 R2 临时区, 全部到齐后一次性上传 (对象存储需整体 body)
       if (chunks > 1) {
-        const sessionId = await sha256Hex(`${src.source.baseKey}|${realDir}|${fileName}|${size}`);
+        const sessionId = await sha256Hex(`${src.source.baseKey}|${destDir}|${fileName}|${size}`);
         const tmpPrefix = keyFromBase(src.source.baseKey, `/.upload_tmp/${sessionId}/`);
         const mergedKey = `${tmpPrefix}merged`;
         await c.env.FILES.put(`${tmpPrefix}chunk_${chunk}`, file.stream(), { httpMetadata: { contentType: file.type || getFileMimeType(fileName) } });
@@ -3701,7 +3853,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
     } else if (chunks > 1) {
       // 分片上传: 每个分片独立暂存为临时对象, 全部到达后按序流式合并,
       // 规避 R2 multipart 每 part 最小 5MiB 的限制(前端默认分片仅 2MB)。
-      const sessionId = await sha256Hex(`${src.source.baseKey}|${realDir}|${fileName}|${size}`);
+      const sessionId = await sha256Hex(`${src.source.baseKey}|${destDir}|${fileName}|${size}`);
       const tmpPrefix = keyFromBase(src.source.baseKey, `/.upload_tmp/${sessionId}/`);
       const chunkKey = `${tmpPrefix}chunk_${chunk}`;
       const mergedKey = `${tmpPrefix}merged`;
@@ -3749,16 +3901,96 @@ explorerApi.post("/upload/fileUpload", async (c) => {
       await c.env.FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || getFileMimeType(fileName) } });
     }
 
-    await addAuditLog(c.env.DB, "upload", user.id, realDir + fileName, null, null, `Size: ${size || file.size}`);
+    await addAuditLog(c.env.DB, "upload", user.id, destDir + fileName, null, null, `Size: ${size || file.size}`);
     invalidateSpaceUsageByBase(src.source.baseKey);
-    return c.json({ code: true, data: "上传成功", info: uploadInfoJson(virtualDir, fileName, size || file.size, fileInfo) });
+    return c.json({ code: true, data: "上传成功", info: uploadInfoJson(respVirtualDir, fileName, size || file.size, fileInfo) });
   } catch (err: any) {
     return c.json({ code: false, data: err.message });
   }
 });
 
-// ============ explorer/attachment (图片附件上传/关联) ============
+// pathAllowReplace - 文件名非法字符替换 (复刻 001 explorer/upload::pathAllowReplace)
+explorerApi.all("/upload/pathAllowReplace", async (c) => {
+  const params = await reqParams(c);
+  const path = String(params.path ?? "");
+  return c.json({ code: true, data: uploadPathAllowReplace(path) });
+});
 
+// fileUploadTemp - 上传获取临时文件 (复刻 001 explorer/upload::fileUploadTemp, 供插件/编辑器使用)
+explorerApi.post("/upload/fileUploadTemp", async (c) => {
+  const user = c.get("currentUser");
+  const contentType = c.req.header("Content-Type") || "";
+  let file: File | null = null;
+  let name = "";
+  if (contentType.includes("multipart/form-data")) {
+    const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, unknown>;
+    const f = Object.values(body).find((v) => v instanceof File) as File | undefined;
+    if (f) {
+      file = f;
+      name = f.name;
+    }
+  }
+  if (!file) return c.json({ code: false, data: "No file" });
+  const src = await resolveFileSource(c.env, user, "{source:home}/");
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const rand = Math.random().toString(36).substring(2, 10);
+  const safeName = uploadPathAllowReplace(name || "temp.tmp");
+  const rel = `.upload_temp/${rand}_${safeName}`;
+  await writeObject(c, src.source, rel, await file.arrayBuffer(), file.type || getFileMimeType(safeName));
+  return c.json({ code: true, data: `{source:home}/${rel}` });
+});
+
+// serverDownload - 远程 URL 下载到网盘 (复刻 001 explorer/upload::serverDownload)
+explorerApi.post("/upload/serverDownload", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const url = String(params.url ?? "");
+  const rawPath = String(params.path ?? "");
+  if (!url || !rawPath) return c.json({ code: false, data: "download_error_exists" });
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, { redirect: "follow", headers: { "User-Agent": "MinelibsBox" } });
+  } catch {
+    return c.json({ code: false, data: "download_error_exists" });
+  }
+  if (!resp.ok) return c.json({ code: false, data: "download_error_exists" });
+
+  let fileName = String(params.name ?? "").trim();
+  if (!fileName) {
+    const cd = resp.headers.get("content-disposition") || "";
+    const m = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i);
+    if (m) {
+      try { fileName = decodeURIComponent(m[1]); } catch { fileName = m[1]; }
+    }
+  }
+  if (!fileName) {
+    try { fileName = decodeURIComponent(new URL(url).pathname.split("/").pop() || ""); } catch { /* keep */ }
+  }
+  if (!fileName) fileName = "download";
+  fileName = uploadPathAllowReplace(fileName);
+
+  const src = await resolveFileSource(c.env, user, rawPath);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const dir = normDirPath(src.relPath);
+  const repeat = (await getUserOption(c.env.DB, user.id, "fileRepeat")) || "rename";
+  let finalName = fileName;
+  const exist = await headObject(c, src.source, dir + finalName);
+  if (exist && repeat !== "replace") finalName = await uniqueNameInDirSrc(c, src.source, dir, finalName);
+
+  try {
+    const buf = await resp.arrayBuffer();
+    const ok = await writeObject(c, src.source, dir + finalName, buf, resp.headers.get("content-type") || getFileMimeType(finalName));
+    if (!ok) return c.json({ code: false, data: "explorer.upload.error" });
+  } catch (err: any) {
+    return c.json({ code: false, data: err.message });
+  }
+  invalidateSpaceUsageByBase(src.source.baseKey);
+  const fullPath = (rawPath.endsWith("/") ? rawPath : rawPath + "/") + finalName;
+  return c.json({ code: true, data: "explorer.downloaded", info: fullPath });
+});
+
+// ============ explorer/attachment (图片附件上传/关联) ============
 const ATTACH_IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico"];
 const ATTACH_LOCAL_PREFIX = ["http://127.0.0.1/", "https://127.0.0.1/", "//127.0.0.1/", "http://localhost/", "https://localhost/", "//localhost/"];
 const ATTACH_PROXY_DOMAINS = ["douban.com", "doubanio.com", "qq.com"];
