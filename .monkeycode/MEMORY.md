@@ -336,4 +336,5 @@ Entries discovered by the Agent during task execution should follow this format:
   - 插件运行时状态需跨 Worker isolate 持久化：新增 D1 表 `plugin_cache(id,data,expire_at)`（`migrations/0006_plugin_cache.sql` + `initDatabase`），提供读写而非删除语义（与 `task_result` 的读删不同）。
   - yzOffice 复刻要点：`app.php index()` 未完成时渲染进度页（每 600ms 轮询 `yzOffice/task`），完成时 302 跳转 viewUrl；接口为 yozodcs `file/upload`（multipart，返回 `{data:{data:"<hash>/name"}}`）与 `composite/convert`（x-www-form-urlencoded，body `srcRelativePath=<上传返回路径>&convertType=61&isDccAsync=1&isCopy=1&isShowTitle=0&isDelSrc=1`，返回 `{data:{viewUrl,errorcode,...}}`）。原版 task 分 upload/convert 两步且步骤内阻塞；Worker 版在单次 task 请求内顺序跑完两步并落库。
   - officeLive 复刻要点：`index()` 直接 `302 Location: <config.apiServer>+urlencode(filePathLinkOut)`，无本地页面；`apiServer` 默认 `https://view.officeapps.live.com/op/embed.aspx?src=`，src 用 fileView apiKey 签名的匿名 fileOut URL（外部服务无 cookie）。
+  - 打开方式菜单不显示新插件的排查点：`static/plugins/officeViewer/static/main.js` 内有「屏蔽已包含的打开方式」逻辑，会在 explorer.kodApp.before 后 100ms 调 `kodApp.remove('officeLive')`/`remove('yzOffice')`/`remove('googleDocs')`，把独立插件从 kodApp 列表中删掉。新增独立预览插件时必须检查该处；已移除对 officeLive/yzOffice 的 remove（保留 googleDocs）。
 
