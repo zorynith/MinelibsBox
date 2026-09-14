@@ -3095,9 +3095,10 @@ async function zipClientCollect(
   user: Vars["currentUser"],
   path: string,
   zipName: string,
-  out: Record<string, unknown>[]
+  out: Record<string, unknown>[],
+  isFolderOverride?: boolean
 ): Promise<void> {
-  const isFolder = path.endsWith("/");
+  const isFolder = isFolderOverride ?? path.endsWith("/");
   if (!isFolder) {
     const src = await resolveFileSource(c.env, user, path);
     const h = src.ok ? await headObject(c, src.source, src.relPath) : null;
@@ -3112,7 +3113,8 @@ async function zipClientCollect(
   }
   out.push({ path: zipName, folder: true, modifyTime: new Date().toISOString() });
 
-  const src = await resolveFileSource(c.env, user, path);
+  const dirPath = path.endsWith("/") ? path : path + "/";
+  const src = await resolveFileSource(c.env, user, dirPath);
   if (!src.ok) return;
   const dir = normDirPath(src.relPath);
   const io = ioClientOf(src.source);
@@ -3129,17 +3131,18 @@ async function zipClientCollect(
     folders = res.folders;
     files = res.files;
   }
-  const base = path.endsWith("/") ? path : path + "/";
+  const base = dirPath;
+  const zipBase = zipName.replace(/\/+$/, "");
   for (const f of folders) {
     const n = f.key.split("/").filter(Boolean).pop() || "";
     if (!n || n.startsWith(".")) continue;
-    await zipClientCollect(c, user, base + n + "/", zipName + "/" + n + "/", out);
+    await zipClientCollect(c, user, base + n + "/", zipBase + "/" + n + "/", out);
   }
   for (const f of files) {
     const n = f.key.split("/").pop() || "";
     if (n === ".keep" || n.startsWith(".")) continue;
     out.push({
-      path: zipName + "/" + n,
+      path: zipBase + "/" + n,
       folder: false,
       filePath: base + n,
       size: f.size,
@@ -3158,7 +3161,7 @@ explorerApi.all("/index/zipDownloadClient", async (c) => {
   try {
     for (const it of items) {
       const name = it.name || it.path.split("/").filter(Boolean).pop() || "file";
-      await zipClientCollect(c, user, it.path, "/" + name, out);
+      await zipClientCollect(c, user, it.path, "/" + name, out, it.type === "folder" || it.path.endsWith("/"));
     }
     return c.json({ code: true, data: out });
   } catch (err: any) {

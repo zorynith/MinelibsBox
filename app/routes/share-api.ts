@@ -1021,8 +1021,26 @@ shareApi.all("/share/report", async (c) => {
   return c.json({ code: true, data: "OK" });
 });
 
-// zipDownload / unzipList / fileDownloadRemove - 003 暂不支持压缩
-shareApi.all("/share/zipDownload", (c) => c.json({ code: false, data: "暂不支持" }));
+// zipDownload - 客户端打包文件清单（zipClient=1，复刻 001 share::zipDownload 客户端分支）
+shareApi.all("/share/zipDownload", async (c) => {
+  const params = await reqParams(c);
+  const init = await initShare(c, params);
+  if (!init.ok) return init.response;
+  const errMsg = authCheck(c, init.share, "zipdownload", params);
+  if (errMsg) return c.json({ code: false, data: errMsg });
+  if (String(params.zipClient) !== "1") return c.json({ code: false, data: "暂不支持" });
+
+  const items = parseDataArr(params.dataArr);
+  if (items.length === 0) return c.json({ code: false, data: L.error });
+  const out: Record<string, unknown>[] = [];
+  for (const it of items) {
+    const rel = parseShareLinkRel(init.share, it.path);
+    if (rel === null) continue;
+    const name = rel ? rel.replace(/\/+$/, "").split("/").pop()! : init.source.name;
+    await shareZipCollect(c, init.owner, init.share, init.source, rel, "/" + name, out);
+  }
+  return c.json({ code: true, data: out });
+});
 shareApi.all("/share/unzipList", (c) => c.json({ code: false, data: "暂不支持" }));
 shareApi.all("/share/unzipListHash", (c) => c.json({ code: false, data: "暂不支持" }));
 // fileDownloadRemove - 下载 explorer/index/zipDownload 生成的临时 zip (带登录态), 下载后删除
@@ -1983,6 +2001,62 @@ async function runSharePaste(
   await addAuditLog(c.env.DB, copyType === "cute" ? "shareMove" : "shareCopy", owner.id, share.sourcePath, null, null, `to:${targetRel}`);
   if (out.length === 0) return c.json({ code: false, data: L.error });
   return c.json({ code: 1, data: copyType === "cute" ? "移动成功" : "复制成功", info: out });
+}
+
+/** 递归收集分享内文件清单（供前端 zipClient 自行打包）。 */
+async function shareZipCollect(
+  c: AppContext,
+  owner: AuthUser,
+  share: ShareRow,
+  source: { type: "folder" | "file"; name: string; realPath: string },
+  rel: string,
+  zipName: string,
+  out: Record<string, unknown>[]
+): Promise<void> {
+  const isFolder = rel.endsWith("/") || (rel === "" && source.type === "folder");
+  const now = new Date().toISOString();
+  if (!isFolder) {
+    const realPath = joinShareRealPath(share.sourcePath, rel);
+    const obj = await c.env.FILES.head(shareStorageKey(owner.username, realPath));
+    out.push({
+      path: zipName,
+      folder: false,
+      filePath: shareLinkRoot(share.shareHash) + rel,
+      size: obj?.size ?? 0,
+      modifyTime: obj?.uploaded ? new Date(obj.uploaded).toISOString() : now,
+    });
+    return;
+  }
+  out.push({ path: zipName, folder: true, modifyTime: now });
+  const realDir = joinShareRealPath(share.sourcePath, rel, true);
+  let folders: { key: string }[] = [];
+  let files: { key: string; size: number; uploaded?: Date }[] = [];
+  try {
+    const r = await listDirectory(c.env.FILES, owner.username, realDir);
+    folders = r.folders;
+    files = r.files;
+  } catch {
+    return;
+  }
+  const baseRel = rel.replace(/\/+$/, "");
+  for (const f of folders) {
+    const n = f.key.split("/").filter(Boolean).pop() || "";
+    if (!n || n.startsWith(".")) continue;
+    const zipBase = zipName.replace(/\/+$/, "");
+    await shareZipCollect(c, owner, share, source, (baseRel ? baseRel + "/" : "") + n + "/", zipBase + "/" + n + "/", out);
+  }
+  for (const f of files) {
+    const n = f.key.split("/").pop() || "";
+    if (n === ".keep" || n.startsWith(".")) continue;
+    const zipBase = zipName.replace(/\/+$/, "");
+    out.push({
+      path: zipBase + "/" + n,
+      folder: false,
+      filePath: shareLinkRoot(share.shareHash) + (baseRel ? baseRel + "/" : "") + n,
+      size: f.size,
+      modifyTime: f.uploaded ? new Date(f.uploaded).toISOString() : now,
+    });
+  }
 }
 
 export { shareApi };
