@@ -831,6 +831,70 @@ shareApi.all("/share/pathDelete", async (c) => {
   return c.json({ code: 1, data: "ok" });
 });
 
+// pathCopy / pathCute - 复制/剪切到剪贴板（存 shareClip Cookie，兼容未登录访客）
+shareApi.all("/share/pathCopy", async (c) => {
+  const params = await reqParams(c);
+  const init = await initShare(c, params);
+  if (!init.ok) return init.response;
+  const errMsg = authCheck(c, init.share, "pathcopy", params);
+  if (errMsg) return c.json({ code: false, data: errMsg });
+  const items = parseDataArr(params.dataArr);
+  if (items.length === 0) return c.json({ code: false, data: L.error });
+  for (const it of items) {
+    if (parseShareLinkRel(init.share, it.path) === null) return c.json({ code: false, data: L.noPermission });
+  }
+  setShareClip(c, "copy", items);
+  return c.json({ code: 1, data: "复制成功" });
+});
+
+shareApi.all("/share/pathCute", async (c) => {
+  const params = await reqParams(c);
+  const init = await initShare(c, params);
+  if (!init.ok) return init.response;
+  const errMsg = authCheck(c, init.share, "pathcute", params);
+  if (errMsg) return c.json({ code: false, data: errMsg });
+  const items = parseDataArr(params.dataArr);
+  if (items.length === 0) return c.json({ code: false, data: L.error });
+  for (const it of items) {
+    if (parseShareLinkRel(init.share, it.path) === null) return c.json({ code: false, data: L.noPermission });
+  }
+  setShareClip(c, "cute", items);
+  return c.json({ code: 1, data: "剪切成功" });
+});
+
+// pathPast - 从剪贴板粘贴（或 pathCopyTo/pathCuteTo 显式指定来源）
+shareApi.all("/share/pathPast", async (c) => {
+  const params = await reqParams(c);
+  const init = await initShare(c, params);
+  if (!init.ok) return init.response;
+  const errMsg = authCheck(c, init.share, "pathpast", params);
+  if (errMsg) return c.json({ code: false, data: errMsg });
+  const clip = getShareClip(c);
+  if (clip.list.length === 0) return c.json({ code: false, data: "剪贴板为空" });
+  const res = await runSharePaste(c, init, params, clip.type === "cute" ? "cute" : "copy", clip.list);
+  if (clip.type === "cute") clearShareClip(c);
+  return res;
+});
+
+// pathCopyTo / pathCuteTo - 直接复制/移动到目标目录
+shareApi.all("/share/pathCopyTo", async (c) => {
+  const params = await reqParams(c);
+  const init = await initShare(c, params);
+  if (!init.ok) return init.response;
+  const errMsg = authCheck(c, init.share, "pathcopyto", params);
+  if (errMsg) return c.json({ code: false, data: errMsg });
+  return runSharePaste(c, init, params, "copy", parseDataArr(params.dataArr));
+});
+
+shareApi.all("/share/pathCuteTo", async (c) => {
+  const params = await reqParams(c);
+  const init = await initShare(c, params);
+  if (!init.ok) return init.response;
+  const errMsg = authCheck(c, init.share, "pathcuteto", params);
+  if (errMsg) return c.json({ code: false, data: errMsg });
+  return runSharePaste(c, init, params, "cute", parseDataArr(params.dataArr));
+});
+
 // fileUpload - 分享上传（目标为分享者空间，canEdit/canUpload 控制）
 shareApi.post("/share/fileUpload", async (c) => {
   const params = await reqParams(c);
@@ -1755,6 +1819,170 @@ async function deleteR2Directory(bucket: R2Bucket, prefix: string): Promise<void
     if (keys.length > 0) await Promise.all(keys.map((k) => bucket.delete(k)));
     cursor = listed.truncated ? listed.cursor : undefined;
   } while (cursor);
+}
+
+// ============ 分享内复制/移动（复刻 001 copyCheckShare + pathPast） ============
+
+const SHARE_CLIP_COOKIE = "shareClip";
+
+function b64encode(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/=+$/, "");
+}
+
+function b64decode(s: string): string {
+  try {
+    const padded = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4);
+    const bin = atob(padded);
+    const bytes = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+/** 读取分享页剪贴板（Cookie，兼容未登录访客）。 */
+function getShareClip(c: AppContext): { type: string; list: { path: string }[] } {
+  const cookie = c.req.header("Cookie") || "";
+  const m = cookie.match(/(?:^|;\s*)shareClip=([^;]+)/);
+  if (!m) return { type: "", list: [] };
+  try {
+    const j = JSON.parse(b64decode(m[1]));
+    return { type: j.type || "", list: Array.isArray(j.list) ? j.list : [] };
+  } catch {
+    return { type: "", list: [] };
+  }
+}
+
+function setShareClip(c: AppContext, type: string, list: { path: string }[]): void {
+  const val = b64encode(JSON.stringify({ type, list }));
+  c.header("Set-Cookie", `${SHARE_CLIP_COOKIE}=${val}; Path=/; Max-Age=86400; SameSite=Lax`);
+}
+
+function clearShareClip(c: AppContext): void {
+  c.header("Set-Cookie", `${SHARE_CLIP_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`);
+}
+
+/** 分享内相对路径 + 是否目录 → 完整 R2 key。 */
+function shareRelKey(owner: AuthUser, share: ShareRow, rel: string, isDir: boolean): string {
+  return shareStorageKey(owner.username, joinShareRealPath(share.sourcePath, rel, isDir));
+}
+
+/** 目标目录下是否已存在同名文件或文件夹。 */
+async function shareDestConflict(c: AppContext, owner: AuthUser, share: ShareRow, destDirRel: string, name: string): Promise<boolean> {
+  const dirClean = destDirRel.replace(/\/+$/, "");
+  const rel = (dirClean ? dirClean + "/" : "") + name;
+  const fileKey = shareStorageKey(owner.username, joinShareRealPath(share.sourcePath, rel, false));
+  if (await c.env.FILES.head(fileKey)) return true;
+  const dirKey = shareRelKey(owner, share, rel, true);
+  const listed = await c.env.FILES.list({ prefix: dirKey.endsWith("/") ? dirKey : dirKey + "/", limit: 1 });
+  return listed.objects.length > 0 || (listed.delimitedPrefixes || []).length > 0;
+}
+
+/** 目标目录下自动生成不冲突的名字。 */
+async function uniqueShareName(c: AppContext, owner: AuthUser, share: ShareRow, destDirRel: string, name: string): Promise<string> {
+  const dot = name.lastIndexOf(".");
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let n = name;
+  let i = 1;
+  while (await shareDestConflict(c, owner, share, destDirRel, n)) {
+    n = `${base}_${i}${ext}`;
+    i++;
+    if (i > 999) break;
+  }
+  return n;
+}
+
+/** 删除分享内条目（文件或整个目录）。 */
+async function deleteShareEntry(c: AppContext, owner: AuthUser, share: ShareRow, rel: string): Promise<void> {
+  const isDir = rel.endsWith("/");
+  const key = shareRelKey(owner, share, rel, isDir);
+  if (isDir) await deleteR2Directory(c.env.FILES, key.endsWith("/") ? key : key + "/");
+  else await c.env.FILES.delete(key);
+}
+
+/** 复制分享内条目（文件或目录），返回目标相对路径（目录带尾斜杠），失败返回 null。 */
+async function copyShareEntry(c: AppContext, owner: AuthUser, share: ShareRow, srcRel: string, destDirRel: string, repeat: string): Promise<string | null> {
+  const isDir = srcRel.endsWith("/");
+  const name = srcRel.replace(/\/+$/, "").split("/").pop() || "";
+  if (!name) return null;
+  const dirClean = destDirRel.replace(/\/+$/, "");
+  let finalName = name;
+  if (await shareDestConflict(c, owner, share, destDirRel, name)) {
+    if (repeat === "skip") return null;
+    if (repeat === "replace") {
+      await deleteShareEntry(c, owner, share, (dirClean ? dirClean + "/" : "") + name + (isDir ? "/" : ""));
+    } else {
+      finalName = await uniqueShareName(c, owner, share, destDirRel, name);
+    }
+  }
+  const destRel = (dirClean ? dirClean + "/" : "") + finalName;
+  if (srcRel.replace(/\/+$/, "") === destRel.replace(/\/+$/, "")) return null;
+  const srcKey = shareRelKey(owner, share, srcRel, isDir);
+  const destKey = shareRelKey(owner, share, destRel, isDir);
+  if (isDir) {
+    const prefix = srcKey.endsWith("/") ? srcKey : srcKey + "/";
+    const dstPrefix = destKey.endsWith("/") ? destKey : destKey + "/";
+    let cursor: string | undefined;
+    let count = 0;
+    do {
+      const batch = await c.env.FILES.list({ prefix, cursor });
+      for (const o of batch.objects) {
+        const sub = o.key.slice(prefix.length);
+        const data = await c.env.FILES.get(o.key);
+        if (data) {
+          await c.env.FILES.put(dstPrefix + sub, data.body, { httpMetadata: o.httpMetadata, customMetadata: o.customMetadata });
+          count++;
+        }
+      }
+      cursor = batch.truncated ? batch.cursor : undefined;
+    } while (cursor);
+    if (count === 0) return null;
+    return destRel + "/";
+  }
+  const obj = await c.env.FILES.get(srcKey);
+  if (!obj) return null;
+  await c.env.FILES.put(destKey, obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata });
+  return destRel;
+}
+
+/** 移动分享内条目（先复制再删除源）。 */
+async function moveShareEntry(c: AppContext, owner: AuthUser, share: ShareRow, srcRel: string, destDirRel: string, repeat: string): Promise<string | null> {
+  const destRel = await copyShareEntry(c, owner, share, srcRel, destDirRel, repeat);
+  if (!destRel) return null;
+  await deleteShareEntry(c, owner, share, srcRel);
+  return destRel;
+}
+
+/** 执行粘贴：把 list（分享链接项）复制/移动到 params.path 指定的分享目录。 */
+async function runSharePaste(
+  c: AppContext,
+  init: Extract<InitResult, { ok: true }>,
+  params: Record<string, any>,
+  copyType: "copy" | "cute",
+  list: { path: string }[]
+): Promise<Response> {
+  const { share, owner } = init;
+  const targetRel = parseShareLinkRel(share, typeof params.path === "string" ? params.path : "");
+  if (targetRel === null) return c.json({ code: false, data: L.noPermission });
+  if (list.length === 0) return c.json({ code: false, data: "剪贴板为空" });
+
+  const repeat = typeof params.fileRepeat === "string" && params.fileRepeat ? params.fileRepeat : "rename";
+  const out: string[] = [];
+  for (const it of list) {
+    const srcRel = parseShareLinkRel(share, it.path);
+    if (!srcRel) continue;
+    const r = copyType === "cute"
+      ? await moveShareEntry(c, owner, share, srcRel, targetRel, repeat)
+      : await copyShareEntry(c, owner, share, srcRel, targetRel, repeat);
+    if (r) out.push(shareLinkRoot(share.shareHash) + r);
+  }
+  await addAuditLog(c.env.DB, copyType === "cute" ? "shareMove" : "shareCopy", owner.id, share.sourcePath, null, null, `to:${targetRel}`);
+  if (out.length === 0) return c.json({ code: false, data: L.error });
+  return c.json({ code: 1, data: copyType === "cute" ? "移动成功" : "复制成功", info: out });
 }
 
 export { shareApi };
