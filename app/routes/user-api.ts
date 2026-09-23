@@ -3,7 +3,7 @@
  * These are the critical APIs the 003 SPA needs to bootstrap
  */
 import { Hono } from "hono";
-import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions } from "../lib/db";
+import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions, getPluginMeta } from "../lib/db";
 import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, authRequired } from "../lib/auth";
 import { parseKodPassword } from "../lib/mcrypt";
 import { DEV_KOD, devLicenseHashes } from "../lib/license";
@@ -707,7 +707,8 @@ userApi.get("/view/_pluginDbg", async (c) => {
   for (const name of ALL_PLUGINS) {
     const pkg = await loadPluginPackage(c.env.ASSETS, name);
     const tpl = await loadPluginMainJs(c.env.ASSETS, name);
-    out.push({ name, inAll: true, pkgLoaded: !!pkg, tplLoaded: tpl != null, tplLen: tpl ? tpl.length : 0 });
+    const meta = await getPluginMeta(c.env.DB, name);
+    out.push({ name, pkgLoaded: !!pkg, tplLoaded: tpl != null, tplLen: tpl ? tpl.length : 0, status: meta.status });
   }
   const rendered = await renderPluginsJs(c.env.ASSETS, {
     appHost: getAppHost(c),
@@ -719,6 +720,8 @@ userApi.get("/view/_pluginDbg", async (c) => {
     renderedLen: rendered.length,
     renderedHasOfficeLive: rendered.includes("officeLive"),
     renderedHasYzOffice: rendered.includes("yzOffice"),
+    renderedNames: Array.from(rendered.matchAll(/plugin\/([A-Za-z0-9_]+)\//g)).map((m) => m[1]),
+    rendered,
     plugins: out,
     dbRows: rows.results,
   });
