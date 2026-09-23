@@ -709,7 +709,19 @@ userApi.get("/view/_pluginDbg", async (c) => {
     const tpl = await loadPluginMainJs(c.env.ASSETS, name);
     out.push({ name, inAll: true, pkgLoaded: !!pkg, tplLoaded: tpl != null, tplLen: tpl ? tpl.length : 0 });
   }
-  return c.json({ allPlugins: ALL_PLUGINS.length, plugins: out, dbRows: rows.results });
+  const rendered = await renderPluginsJs(c.env.ASSETS, {
+    appHost: getAppHost(c),
+    staticPath: getStaticHost(c),
+    lang: detectLang(c),
+  }, c.env.DB);
+  return c.json({
+    allPlugins: ALL_PLUGINS.length,
+    renderedLen: rendered.length,
+    renderedHasOfficeLive: rendered.includes("officeLive"),
+    renderedHasYzOffice: rendered.includes("yzOffice"),
+    plugins: out,
+    dbRows: rows.results,
+  });
 });
 
 // manifest - PWA manifest
