@@ -8,7 +8,7 @@ import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, aut
 import { parseKodPassword } from "../lib/mcrypt";
 import { DEV_KOD, devLicenseHashes } from "../lib/license";
 import { detectLang, loadLangPack, normalizeLang } from "../lib/i18n-lang";
-import { renderPluginsJs } from "../lib/plugins";
+import { renderPluginsJs, ALL_PLUGINS, loadPluginPackage, loadPluginMainJs } from "../lib/plugins";
 import { taskResultGet } from "../lib/task-result-cache";
 import { accountApi } from "./user-account-api";
 import { getAppHost, getStaticHost } from "../lib/user-system";
@@ -698,6 +698,18 @@ userApi.get("/view/plugins", async (c) => {
     lang,
   }, c.env.DB);
   return c.body(body, 200, { "Content-Type": "application/javascript" });
+});
+
+// TEMP DIAGNOSTIC (will be removed): expose raw plugin DB status + load results.
+userApi.get("/view/_pluginDbg", async (c) => {
+  const rows = await c.env.DB.prepare("SELECT id, status, typeof(status) AS t FROM plugin ORDER BY id").all();
+  const out: any[] = [];
+  for (const name of ALL_PLUGINS) {
+    const pkg = await loadPluginPackage(c.env.ASSETS, name);
+    const tpl = await loadPluginMainJs(c.env.ASSETS, name);
+    out.push({ name, inAll: true, pkgLoaded: !!pkg, tplLoaded: tpl != null, tplLen: tpl ? tpl.length : 0 });
+  }
+  return c.json({ allPlugins: ALL_PLUGINS.length, plugins: out, dbRows: rows.results });
 });
 
 // manifest - PWA manifest
