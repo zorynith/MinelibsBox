@@ -106,10 +106,48 @@ export function defaultPluginConfig(pkg: PluginPackage): Record<string, any> {
 }
 
 /**
- * Load plugin package.json from ASSETS. Returns null on failure.
- * URL is /plugins/{name}/package.json because ASSETS serves ./static at root.
+ * 构建期生成的插件资源聚合包(static/plugins/__assets__.json)。
+ * 见 scripts/gen-plugin-assets.mjs: Cloudflare Workers 单次调用子请求数量
+ * 受限(免费版约 50), 逐插件 3 次 ASSETS fetch 会超限并静默丢弃末尾插件,
+ * 故合并为单文件, 运行时每个 isolate 只取一次。
+ */
+type PluginBundleEntry = { pkg?: string; main?: string; langs?: Record<string, Record<string, string>> };
+type PluginAssetsBundle = { plugins?: Record<string, PluginBundleEntry> };
+
+let pluginBundlePromise: Promise<PluginAssetsBundle> | null = null;
+
+export function loadPluginBundle(assets: Fetcher): Promise<PluginAssetsBundle> {
+  if (!pluginBundlePromise) {
+    pluginBundlePromise = (async () => {
+      try {
+        const res = await assets.fetch(new Request("https://assets.local/plugins/__assets__.json"));
+        if (!res.ok) {
+          pluginBundlePromise = null;
+          return {};
+        }
+        return (await res.json<PluginAssetsBundle>()) || {};
+      } catch {
+        pluginBundlePromise = null;
+        return {};
+      }
+    })();
+  }
+  return pluginBundlePromise;
+}
+
+/**
+ * Load plugin package.json. 优先取聚合包, 缺失时回退到单独 ASSETS fetch
+ * (本地未执行构建脚本 / 聚合包缺失时仍可工作)。Returns null on failure.
  */
 export async function loadPluginPackage(assets: Fetcher, name: string): Promise<PluginPackage | null> {
+  const entry = (await loadPluginBundle(assets)).plugins?.[name];
+  if (entry && typeof entry.pkg === "string") {
+    try {
+      return parseLooseJson(entry.pkg) as PluginPackage;
+    } catch {
+      /* fall through to direct fetch */
+    }
+  }
   try {
     const res = await assets.fetch(new Request(`https://assets.local/plugins/${name}/package.json`));
     if (!res.ok) return null;
@@ -122,6 +160,8 @@ export async function loadPluginPackage(assets: Fetcher, name: string): Promise<
 
 /** Load plugin language pack for a given lang. Returns {} on failure. */
 export async function loadPluginLang(assets: Fetcher, name: string, lang: string): Promise<Record<string, string>> {
+  const entry = (await loadPluginBundle(assets)).plugins?.[name];
+  if (entry?.langs && entry.langs[lang]) return entry.langs[lang];
   try {
     const res = await assets.fetch(new Request(`https://assets.local/plugins/i18n/${name}.${lang}.json`));
     if (!res.ok) return {};
@@ -133,6 +173,8 @@ export async function loadPluginLang(assets: Fetcher, name: string, lang: string
 
 /** Load plugin static/main.js template. Returns null on failure. */
 export async function loadPluginMainJs(assets: Fetcher, name: string): Promise<string | null> {
+  const entry = (await loadPluginBundle(assets)).plugins?.[name];
+  if (entry && typeof entry.main === "string") return entry.main;
   try {
     const res = await assets.fetch(new Request(`https://assets.local/plugins/${name}/static/main.js`));
     if (!res.ok) return null;

@@ -977,15 +977,9 @@ export async function removeLightApp(db: D1Database, name: string): Promise<bool
 
 // Plugin status/config helpers (mirrors 001 Model('Plugin'))
 export async function getPluginMeta(db: D1Database, id: string): Promise<{ status: number; config: Record<string, any> }> {
-  const row = await db.prepare("SELECT status, config_json FROM plugin WHERE id = ?").bind(id).first<{ status: any; config_json: string }>();
-  // 插件表 status 合法值只有 0(禁用)/1(启用), 缺失行视为启用。
-  // 仅显式 0/"0"/false 判为禁用; 空值(""/null)及其它历史脏值一律按启用处理,
-  // 避免导入/迁移产生的异常值让插件在用户端 renderPluginsJs 与管理端"安装"
-  // 标签中同时被静默隐藏(管理端"安装"标签只收 status=="1"||"0")。
-  const raw = row ? row.status : undefined;
-  const disabled = raw === 0 || raw === "0" || raw === false;
+  const row = await db.prepare("SELECT status, config_json FROM plugin WHERE id = ?").bind(id).first<{ status: number; config_json: string }>();
   return {
-    status: disabled ? 0 : 1,
+    status: row ? row.status : 1,
     config: row ? safeParseJson(row.config_json) : {},
   };
 }

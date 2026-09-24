@@ -3,12 +3,12 @@
  * These are the critical APIs the 003 SPA needs to bootstrap
  */
 import { Hono } from "hono";
-import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions, getPluginMeta } from "../lib/db";
+import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions } from "../lib/db";
 import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, authRequired } from "../lib/auth";
 import { parseKodPassword } from "../lib/mcrypt";
 import { DEV_KOD, devLicenseHashes } from "../lib/license";
 import { detectLang, loadLangPack, normalizeLang } from "../lib/i18n-lang";
-import { renderPluginsJs, ALL_PLUGINS, loadPluginPackage, loadPluginMainJs, loadPluginLang, renderPluginJs, defaultPluginConfig, normalizePluginConfig } from "../lib/plugins";
+import { renderPluginsJs } from "../lib/plugins";
 import { taskResultGet } from "../lib/task-result-cache";
 import { accountApi } from "./user-account-api";
 import { getAppHost, getStaticHost } from "../lib/user-system";
@@ -698,42 +698,6 @@ userApi.get("/view/plugins", async (c) => {
     lang,
   }, c.env.DB);
   return c.body(body, 200, { "Content-Type": "application/javascript" });
-});
-
-// TEMP DIAGNOSTIC (will be removed): expose raw plugin DB status + load results.
-userApi.get("/view/_pluginDbg", async (c) => {
-  const ctx = { appHost: getAppHost(c), staticPath: getStaticHost(c), lang: detectLang(c) };
-  const rows = await c.env.DB.prepare("SELECT id, status, typeof(status) AS t FROM plugin ORDER BY id").all();
-  const out: any[] = [];
-  for (const name of ALL_PLUGINS) {
-    const pkg = await loadPluginPackage(c.env.ASSETS, name);
-    const tpl = await loadPluginMainJs(c.env.ASSETS, name);
-    const meta = await getPluginMeta(c.env.DB, name);
-    const langArr = await loadPluginLang(c.env.ASSETS, name, ctx.lang);
-    let renderedLen = -1;
-    let error = "";
-    try {
-      if (pkg && tpl != null) {
-        const config = { ...defaultPluginConfig(pkg), ...meta.config };
-        renderedLen = renderPluginJs(tpl, pkg, normalizePluginConfig(config), langArr, ctx).length;
-      }
-    } catch (e: any) {
-      error = String(e && e.stack ? e.stack : e).slice(0, 500);
-    }
-    out.push({ name, pkgLoaded: !!pkg, tplLoaded: tpl != null, tplLen: tpl ? tpl.length : 0, status: meta.status, renderedLen, error });
-  }
-  const rendered = await renderPluginsJs(c.env.ASSETS, ctx, c.env.DB);
-  return c.json({
-    allPlugins: ALL_PLUGINS.length,
-    renderedLen: rendered.length,
-    renderedHasOfficeLive: rendered.includes("officeLive"),
-    renderedHasYzOffice: rendered.includes("yzOffice"),
-    renderedNames: Array.from(rendered.matchAll(/plugin\/([A-Za-z0-9_]+)\//g)).map((m) => m[1]),
-    rendered,
-    ctx,
-    plugins: out,
-    dbRows: rows.results,
-  });
 });
 
 // manifest - PWA manifest

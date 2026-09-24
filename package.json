@@ -4,7 +4,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "node scripts/gen-plugin-assets.mjs && vite build",
     "cf-typegen": "node -e \"const fs=require('fs');const path=require('path');const dir=path.join('.wrangler','tmp');fs.mkdirSync(dir,{recursive:true});const cfg=path.join(dir,'wrangler.jsonc');fs.writeFileSync(cfg,fs.readFileSync('wrangler.jsonc.example','utf8'));\" && wrangler types --config .wrangler/tmp/wrangler.jsonc",
     "deploy": "npm run build && wrangler deploy",
     "dev": "wrangler dev",

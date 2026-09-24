@@ -6,6 +6,9 @@ wrangler.jsonc
 /build/
 /dist/
 
+# 构建期生成的插件资源聚合包
+/static/plugins/__assets__.json
+
 # Cloudflare
 .mf
 .wrangler
