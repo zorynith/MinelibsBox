@@ -338,3 +338,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - officeLive 复刻要点：`index()` 直接 `302 Location: <config.apiServer>+urlencode(filePathLinkOut)`，无本地页面；`apiServer` 默认 `https://view.officeapps.live.com/op/embed.aspx?src=`，src 用 fileView apiKey 签名的匿名 fileOut URL（外部服务无 cookie）。
   - 打开方式菜单不显示新插件的排查点：`static/plugins/officeViewer/static/main.js` 内有「屏蔽已包含的打开方式」逻辑，会在 explorer.kodApp.before 后 100ms 调 `kodApp.remove('officeLive')`/`remove('yzOffice')`/`remove('googleDocs')`，把独立插件从 kodApp 列表中删掉。新增独立预览插件时必须检查该处；已移除对 officeLive/yzOffice 的 remove（保留 googleDocs）。
 
+[Project Knowledge Summary]
+- Date: 2026-09-25
+- Context: Discovered by Agent while diagnosing why officeLive/yzOffice 在用户端打开方式与后台插件列表同时缺失
+- Category: Troubleshooting & Debugging / Build Methods
+- Instructions:
+  - **Cloudflare Workers 单次调用子请求数有上限（免费版约 50）**。凡在请求内按列表逐项 `ASSETS.fetch` 的代码（如 `renderPluginsJs`、`buildPluginAppList` 每插件取 package.json/main.js/i18n），一旦总次数触顶，**末尾项的 fetch 会静默失败并被 `continue` 跳过**，表现为"列表最后几个插件莫名消失"，且本地 Miniflare 无此限制、无法复现，极难定位。排查手法：加临时公共路由输出 `ALL_PLUGINS` 总数与逐项加载成功标志，对比线上/本地。
+  - 修复模式：构建期把每个插件的 package.json/main.js/i18n 合并为 `static/plugins/__assets__.json`（`scripts/gen-plugin-assets.mjs`，随 `npm run build` 生成并部署进 ASSETS），运行时每个 isolate 只 fetch 一次；`loadPluginPackage/Lang/MainJs` 优先读聚合包、缺失回退单独 fetch。今后新增插件只需追加 `ALL_PLUGINS`，位置不再影响加载。
+  - 判断插件缺失是否为"末尾截断"：若缺失项恰好是 `ALL_PLUGINS` 末尾连续若干个，优先怀疑子请求超限，而非插件本身数据/状态问题。
+  - 所有 JSON API 响应统一加 `Cache-Control: no-store`（`app/routes/api.ts` 全局中间件，仅对未显式设置缓存头的 `application/json` 生效），避免 CDN(EdgeOne)/浏览器缓存旧接口结果造成"代码已修但页面不更新"的假象。
+
