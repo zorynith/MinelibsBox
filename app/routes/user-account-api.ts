@@ -141,6 +141,14 @@ accountApi.get("/view/qrcode", async (c) => {
   return c.redirect("https://api.pwmqr.com/qrcode/create/?url=" + encodeURIComponent(url));
 });
 
+// TEMP diagnostic: admin appList keys/status
+accountApi.get("/view/_appListDbg", async (c) => {
+  const { buildPluginAppList } = await import("../lib/plugins");
+  const { getStaticHost } = await import("../lib/user-system");
+  const data = await buildPluginAppList(c.env.ASSETS, c.env.DB, detectLang(c), getStaticHost(c));
+  return c.json({ keys: Object.keys(data), status: Object.fromEntries(Object.entries(data).map(([k, v]: any) => [k, v.status])) });
+});
+
 // pluginDesc - plugin readme (base64 markdown, mirrors 001 pluginDesc)
 accountApi.get("/view/pluginDesc", async (c) => {
   const callback = c.req.query("callback") || "";
