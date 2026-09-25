@@ -28,6 +28,17 @@ import { t } from "../lib/i18n";
 
 const apiRoutes = new Hono<{ Bindings: Env }>();
 
+// API 动态数据默认禁止缓存: 避免 CDN/浏览器缓存旧响应导致"接口已修但页面不更新"
+// 这类难以定位的问题(如后台插件列表)。文件下载等已显式设置 Cache-Control 的
+// 非 JSON 响应不受影响。
+apiRoutes.use("*", async (c, next) => {
+  await next();
+  const ct = c.res.headers.get("Content-Type") || "";
+  if (!c.res.headers.has("Cache-Control") && ct.includes("application/json")) {
+    c.res.headers.set("Cache-Control", "no-store");
+  }
+});
+
 // /admin 前缀统一鉴权: 登录 + admin 角色。autoRun 为 cron/前端轮询触发, 排除 admin 校验。
 async function adminGate(c: any, next: any) {
   if (String(c.req.path).includes("/autoRun/")) return next();

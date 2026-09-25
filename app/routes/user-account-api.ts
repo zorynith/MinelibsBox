@@ -141,24 +141,6 @@ accountApi.get("/view/qrcode", async (c) => {
   return c.redirect("https://api.pwmqr.com/qrcode/create/?url=" + encodeURIComponent(url));
 });
 
-// TEMP diagnostic: mirror admin appList exactly
-accountApi.get("/view/_appListDbg", async (c) => {
-  try {
-    const { buildPluginAppList } = await import("../lib/plugins");
-    const { getStaticHost } = await import("../lib/user-system");
-    const data = await buildPluginAppList(c.env.ASSETS, c.env.DB, detectLang(c), getStaticHost(c));
-    let json = "";
-    try {
-      json = JSON.stringify(data);
-    } catch (e: any) {
-      return c.json({ ok: false, keys: Object.keys(data), stringifyError: String(e) });
-    }
-    return c.json({ ok: true, keys: Object.keys(data), jsonLen: json.length, officeLive: data["officeLive"], yzOffice: data["yzOffice"] });
-  } catch (e: any) {
-    return c.json({ ok: false, error: String(e && e.stack ? e.stack : e) });
-  }
-});
-
 // pluginDesc - plugin readme (base64 markdown, mirrors 001 pluginDesc)
 accountApi.get("/view/pluginDesc", async (c) => {
   const callback = c.req.query("callback") || "";
