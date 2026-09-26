@@ -166,7 +166,11 @@ async function resolveDavVirtualPath(
   if (!rel) return "{block:files}";
   const segs = rel.split("/");
   const root = await blockFilesRoot(env, user, lang);
-  const first = root.find((r) => r.name === segs[0]);
+  // 001 loadLangKeys: 'my' 是"个人空间"(rootPath) 的固定别名 (rootPathAutoLang)
+  let first = root.find((r) => r.name === segs[0]);
+  if (!first && segs[0] === "my") {
+    first = { name: "my", path: "{source:home}/" };
+  }
   if (!first) return null;
   const rest = segs.slice(1).join("/");
   return rest ? `${first.path}${rest}` : first.path;
@@ -240,8 +244,13 @@ function gmDate(d: Date): string {
   return d.toUTCString().replace(/GMT$/, "GMT");
 }
 
+/** 001 parseItem: href 相对路径逐段 rawurlencode (保留 '/')。 */
+function encodeDavPath(rel: string): string {
+  return rel.split("/").map((seg) => encodeURIComponent(seg)).join("/");
+}
+
 function itemXml(davRoot: string, rel: string, isFolder: boolean, size: number, modifyTime: Date): string {
-  const href = davRoot + rel + (isFolder && rel !== "" ? "/" : "");
+  const href = davRoot + encodeDavPath(rel) + (isFolder && rel !== "" ? "/" : "");
   const mtime = gmDate(modifyTime);
   const creation = modifyTime.toISOString().replace(/\.\d+Z$/, "Z");
   const resourcetype = isFolder
