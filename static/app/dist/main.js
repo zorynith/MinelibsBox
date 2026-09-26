@@ -96606,7 +96606,7 @@
     },
     requestLocal: function u(t) {
       var i = this;
-      this.adminModel.pluginList({}, function (e) {
+      this.adminModel.pluginList({ _t: time() }, function (e) {
         i.parent.appListLocal = $.extend(true, {}, e);
         i.appListDataLoad(e);
         if (t) {
