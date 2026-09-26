@@ -12,7 +12,7 @@
 import { Hono } from "hono";
 import type { AuthUser } from "../lib/auth";
 import { verifyPassword } from "../lib/auth";
-import { getUserByUsername, getUserById, getSession, getPluginMeta } from "../lib/db";
+import { getUserByUsername, getUserById, getSession, getPluginMeta, getFavorites } from "../lib/db";
 import { resolveFileSource } from "../lib/source";
 import { keyFromBase, listDirectory, deleteDirectory, getFileMimeType } from "../lib/r2";
 import { detectLang, loadLangPack } from "../lib/i18n-lang";
@@ -122,14 +122,22 @@ function personalRoot(): string {
   return "{source:home}/";
 }
 
-/** {block:files} 第一层: 个人空间 + 我所在的部门。返回 [{name, path}]。 */
+/** {block:files} 第一层: 收藏夹/个人空间/我所在的部门/与我协作 + 企业网盘(部门)。返回 [{name, path}]。 */
 async function blockFilesRoot(env: Env, user: AuthUser, lang: string): Promise<Array<{ name: string; path: string }>> {
   const global = await loadLangPack(env.ASSETS, lang);
+  const favName = (global && global["explorer.toolbar.fav"]) || "收藏夹";
   const rootName = (global && global["explorer.toolbar.rootPath"]) || "个人空间";
-  const list: Array<{ name: string; path: string }> = [{ name: rootName, path: "{source:home}/" }];
-  // 我所在的部门
+  const groupName = (global && global["explorer.toolbar.myGroup"]) || "我所在的部门";
+  const shareName = (global && global["explorer.toolbar.shareToMe"]) || "与我协作";
+  const list: Array<{ name: string; path: string }> = [
+    { name: favName, path: "{userFav}/" },
+    { name: rootName, path: "{source:home}/" },
+    { name: groupName, path: "{groupRootSelf}/" },
+    { name: shareName, path: "{shareToMe}/" },
+  ];
+  // 企业网盘: 用户所在的部门 (001 pathBlockRoot 罗列部门根)
   const groups = await env.DB.prepare(
-    "SELECT g.id, g.name FROM groups g JOIN user_groups ug ON g.id = ug.group_id WHERE ug.user_id = ? AND g.status = 1"
+    "SELECT g.id, g.name FROM groups g JOIN user_groups ug ON g.id = ug.group_id WHERE ug.user_id = ? AND g.status = 1 ORDER BY g.sort, g.id"
   )
     .bind(user.id)
     .all<{ id: number; name: string }>()
@@ -140,6 +148,58 @@ async function blockFilesRoot(env: Env, user: AuthUser, lang: string): Promise<A
     }
   }
   return list;
+}
+
+/** 虚拟目录类型 (001 pathBlockRoot 中不可直接 R2 访问的虚拟项)。 */
+type DavVirtualKind = "fav" | "groupRootSelf" | "shareToMe";
+
+function virtualKindOf(virtual: string): DavVirtualKind | null {
+  const v = virtual.replace(/\/+$/, "");
+  if (v === "{userFav}") return "fav";
+  if (v === "{groupRootSelf}") return "groupRootSelf";
+  if (v === "{shareToMe}") return "shareToMe";
+  return null;
+}
+
+/** 虚拟目录子项 [{name, path, isFolder}]。 */
+type DavVirtualChild = { name: string; path: string; isFolder: boolean };
+
+/** 列出虚拟目录的子项 (收藏夹/我的部门/与我协作)。 */
+async function davVirtualChildren(env: Env, user: AuthUser, kind: DavVirtualKind): Promise<DavVirtualChild[]> {
+  if (kind === "fav") {
+    const list = await getFavorites(env.DB, user.id).catch(() => [] as any[]);
+    return (list as any[]).map((item: any) => ({
+      name: item.name,
+      path: item.path,
+      isFolder: item.type === "folder" || String(item.path || "").endsWith("/"),
+    }));
+  }
+  if (kind === "groupRootSelf") {
+    const rows = await env.DB.prepare(
+      "SELECT g.id, g.name FROM groups g JOIN user_groups ug ON g.id = ug.group_id WHERE ug.user_id = ? AND g.status = 1 ORDER BY g.sort, g.id"
+    ).bind(user.id).all<{ id: number; name: string }>().catch(() => null);
+    const list: DavVirtualChild[] = [];
+    if (rows && rows.results) {
+      for (const g of rows.results) {
+        list.push({ name: g.name, path: `{source:${g.id}}/`, isFolder: true });
+      }
+    }
+    return list;
+  }
+  // shareToMe: 分享给我的内容结构较复杂, webdav 暂不展开
+  return [];
+}
+
+/** 在虚拟目录里按名查找子项, 返回其真实虚拟路径 (可继续拼接子路径)。 */
+async function davResolveVirtualChild(env: Env, user: AuthUser, kind: DavVirtualKind, childPath: string): Promise<string | null> {
+  const segs = childPath.split("/");
+  const children = await davVirtualChildren(env, user, kind);
+  const first = children.find((c) => c.name === segs[0]);
+  if (!first) return null;
+  if (segs.length === 1) return first.path;
+  const rest = segs.slice(1).join("/");
+  const base = first.path.endsWith("/") ? first.path.slice(0, -1) : first.path;
+  return `${base}/${rest}`;
 }
 
 /**
@@ -173,21 +233,33 @@ async function resolveDavVirtualPath(
   }
   if (!first) return null;
   const rest = segs.slice(1).join("/");
+
+  // 虚拟目录 (收藏夹/我的部门/与我协作): 子内容需在虚拟目录里查找
+  const kind = virtualKindOf(first.path);
+  if (kind && rest) {
+    return davResolveVirtualChild(env, user, kind, rest);
+  }
   return rest ? `${first.path}${rest}` : first.path;
 }
 
-/** 解析为 source + relPath; 虚拟块根 {block:files} 特殊处理 (返回 block:true)。 */
+/** 解析结果: block 根 / 虚拟目录 / 真实 source。 */
 type DavResolve =
-  | { ok: true; source: import("../lib/source").SourceRef; relPath: string; block?: boolean }
-  | { ok: false; error: string; block?: boolean };
+  | { ok: true; kind: "source"; source: import("../lib/source").SourceRef; relPath: string }
+  | { ok: true; kind: "block"; source: import("../lib/source").SourceRef; relPath: string }
+  | { ok: true; kind: "virtual"; virtual: DavVirtualKind }
+  | { ok: false; error: string };
 
 async function resolveDavSource(env: Env, user: AuthUser, virtual: string): Promise<DavResolve> {
   if (virtual === "{block:files}") {
-    return { ok: true, source: { sourceId: "files", type: "user", baseKey: "", targetID: user.id, displayName: "全部文件" } as any, relPath: "/", block: true };
+    return { ok: true, kind: "block", source: { sourceId: "files", type: "user", baseKey: "", targetID: user.id, displayName: "全部文件" } as any, relPath: "/" };
+  }
+  const kind = virtualKindOf(virtual);
+  if (kind) {
+    return { ok: true, kind: "virtual", virtual: kind };
   }
   const r = await resolveFileSource(env, user, virtual);
   if (!r.ok) return { ok: false, error: r.error };
-  return { ok: true, source: r.source, relPath: r.relPath };
+  return { ok: true, kind: "source", source: r.source, relPath: r.relPath };
 }
 
 // ---------- 文件操作辅助 ----------
@@ -272,6 +344,18 @@ async function handleDav(request: Request, env: Env, ctx: any, c?: any): Promise
     return davResponse(404, errorBody("ObjectNotFound", "not open webdav"));
   }
 
+  // 下载 webdav.cmd (001 webdavPlugin::download, 无需认证)
+  if (/\/plugin\/webdav\/download$/i.test(url.pathname)) {
+    const cmd = await env.ASSETS.fetch(new Request("https://assets.local/plugins/webdav/static/webdav.cmd"));
+    if (cmd.ok) {
+      const headers = new Headers(cmd.headers);
+      headers.set("Content-Type", "application/octet-stream");
+      headers.set("Content-Disposition", 'attachment; filename="webdav.cmd"');
+      return new Response(cmd.body, { headers });
+    }
+    return davResponse(404);
+  }
+
   // OPTIONS 无需认证 (001: OPTIONS 在 checkUser 之前返回)
   if (method === "OPTIONS") {
     return davResponse(200, undefined, {
@@ -298,11 +382,8 @@ async function handleDav(request: Request, env: Env, ctx: any, c?: any): Promise
   if (!resolved.ok) {
     return davResponse(404, errorBody("ObjectNotFound", resolved.error));
   }
-  const source = resolved.source;
-  const relPath = resolved.relPath;
-
   // {block:files} 根: 只支持 PROPFIND 列出虚拟目录
-  if (resolved.block) {
+  if (resolved.kind === "block") {
     if (method === "PROPFIND") {
       const root = await blockFilesRoot(env, user, lang);
       let out = "";
@@ -315,6 +396,24 @@ async function handleDav(request: Request, env: Env, ctx: any, c?: any): Promise
     return davResponse(405);
   }
 
+  // 虚拟目录 (收藏夹/我的部门/与我协作): 只支持 PROPFIND 列出子项
+  if (resolved.kind === "virtual") {
+    if (method === "PROPFIND") {
+      const children = await davVirtualChildren(env, user, resolved.virtual);
+      let out = "";
+      const davRoot = url.origin + "/index.php/dav/";
+      const cur = davRel.replace(/\/+$/, "");
+      out += itemXml(davRoot, cur, true, 0, new Date());
+      for (const it of children) {
+        out += itemXml(davRoot, cur ? cur + "/" + it.name : it.name, it.isFolder, 0, new Date());
+      }
+      return davResponse(207, `<D:multistatus xmlns:D="DAV:">${out}\n</D:multistatus>`);
+    }
+    return davResponse(405);
+  }
+
+  const source = resolved.source;
+  const relPath = resolved.relPath;
   const isRoot = relPath === "/" || relPath === "";
 
   switch (method) {
@@ -413,7 +512,7 @@ async function handleDav(request: Request, env: Env, ctx: any, c?: any): Promise
       const destVirtual = await resolveDavVirtualPath(env, user, destRel, config, lang);
       if (destVirtual === null) return davResponse(404);
       const destResolved = await resolveDavSource(env, user, destVirtual);
-      if (!destResolved.ok || destResolved.block) return davResponse(404);
+      if (!destResolved.ok || destResolved.kind === "block" || destResolved.kind === "virtual") return davResponse(404);
       const destSource = destResolved.source;
       const destPath = destResolved.relPath;
 
@@ -447,7 +546,7 @@ async function handleDav(request: Request, env: Env, ctx: any, c?: any): Promise
       const destVirtual = await resolveDavVirtualPath(env, user, destRel, config, lang);
       if (destVirtual === null) return davResponse(404);
       const destResolved = await resolveDavSource(env, user, destVirtual);
-      if (!destResolved.ok || destResolved.block) return davResponse(404);
+      if (!destResolved.ok || destResolved.kind === "block" || destResolved.kind === "virtual") return davResponse(404);
       const destSource = destResolved.source;
       const destPath = destResolved.relPath;
 
