@@ -28,7 +28,7 @@ export interface PluginContext {
 }
 
 /** All plugins shipped with the worker (served from ASSETS static/plugins). */
-export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "CADViewer", "drawio", "Photopea", "bisheng", "PDFTron", "officeLive", "yzOffice"];
+export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "CADViewer", "drawio", "Photopea", "bisheng", "PDFTron", "officeLive", "yzOffice", "adminer", "client", "fileThumb", "msgWarning", "oauth", "storeImport", "webdav"];
 
 // {{{ helpers mirroring 001 array_get_value/_get }}}
 function arrayGet(obj: any, key: string): any {
@@ -358,10 +358,13 @@ export function normalizePluginConfig(config: Record<string, any>): Record<strin
 
 /**
  * Render the /api/user/view/plugins output body. Only enabled (DB status=1) plugins load.
+ * isRoot: 当前用户是否管理员。用于 adminer 等 root-only 插件 (001 echoJs: if(isRoot!=1) return)。
  */
-export async function renderPluginsJs(assets: Fetcher, ctx: PluginContext, db?: D1Database): Promise<string> {
+export async function renderPluginsJs(assets: Fetcher, ctx: PluginContext, db?: D1Database, isRoot?: boolean): Promise<string> {
   let body = "var kodReady=[];";
   for (const name of ALL_PLUGINS) {
+    // adminer 仅管理员可见 (001 adminerPlugin::echoJs 硬编码 isRoot 判断)
+    if (name === "adminer" && isRoot !== true) continue;
     let meta: { status: number; config: Record<string, any> } | null = null;
     if (db) {
       meta = await getPluginMeta(db, name);

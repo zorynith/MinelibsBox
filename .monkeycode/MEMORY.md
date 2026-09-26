@@ -35,7 +35,7 @@ Entries discovered by the Agent during task execution should follow this format:
 - Date: 2026-08-19
 - Context: 用户明确要求的目录组织约定
 - Instructions:
-  - static/app/dist/dev/ 存放的永远是反混淆版文件，禁止改动。
+  - static/app/dist/dev/ 存放的永远是反混淆版文件，禁止改动；dev 里的反混淆文件仅用于定位参考（辅助理解混淆代码逻辑、定位代码位置），不得当作运行版直接替换进 dist 根目录。
   - static/app/dist/orig/ 存放的永远是原版混淆文件，禁止改动。
   - dev/ 与 orig/ 目录比备份文件还重要，绝不可轻易改动。
   - 只允许改动 static/app/dist/ 根目录的文件：替换时从 dev/ 或 orig/ 复制到 dist 根目录。
@@ -308,12 +308,6 @@ Entries discovered by the Agent during task execution should follow this format:
   - io 目录占位对象(dir/, mkdir 创建)在列出该目录自身时会被 io.list 当作子项返回, 须按 f.key===prefix 过滤(explorer-api /list/path io 分支)。
    - zip/unzipList/zipDownload/zip/unzip 与 editor/fileGet|fileSave、index/fileSave、fileView/index、fav/get 历史上均为 R2-only, 已全部修复(2026-08-26, commit 4b5e48b); 分享(share-api)对 io 挂载文件的分享仍未支持, 属已知缺口。
 
-[User Instruction Summary]
-- Date: 2026-09-05
-- Context: 用户明确要求提交格式与上一次一致
-- Instructions:
-  - 每次 git 提交必须严格按照上一次提交的提交名与作者：提交信息统一用 `Update`（无正文），作者为 `zorynith <monkeycode-ai@chaitin.com>`（本机 git config user.name/user.email 已为此值，无需改动）。
-  - 注意：仓库存在 `.git/hooks/prepare-commit-msg`（配合 `coauthor.0.*` config），会自动把 `Co-authored-by: monkeycode-ai <monkeycode-ai@chaitin.com>` 追加进提交信息，导致标题被污染。`--no-verify` 不会跳过该 hook；提交需临时绕过：`git -c core.hooksPath=/tmp/opencode/nohooks commit --no-verify --author="zorynith <monkeycode-ai@chaitin.com>" -m "Update"`（目录先 mkdir -p），已推送后再修正需 `git push --force-with-lease`。
 
 [Project Knowledge Summary]
 - Date: 2026-08-26

@@ -8,17 +8,33 @@ import { poweredBy } from "hono/powered-by";
 import { logger } from "hono/logger";
 import { apiRoutes } from "../app/routes/api";
 import { pageRoutes } from "../app/routes/pages";
+import { webdavApi } from "../app/routes/webdav-api";
 import { initDatabase } from "../app/lib/db";
 
 const app = new Hono<{ Bindings: Env }>();
+
+// WebDAV (001 plugins/webdav): 独立协议模块, 需绕过 CORS 中间件 (OPTIONS 能力探测
+// 与浏览器 preflight 冲突), 在其它中间件之前直接分发。
+app.use("*", async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (
+    path === "/dav" || path.startsWith("/dav/") ||
+    path === "/index.php/dav" || path.startsWith("/index.php/dav/") ||
+    path === "/plugin/webdav" || path.startsWith("/plugin/webdav/") ||
+    path === "/index.php/plugin/webdav" || path.startsWith("/index.php/plugin/webdav/")
+  ) {
+    return webdavApi.fetch(c.req.raw, c.env, c.executionCtx);
+  }
+  await next();
+});
 
 // Middleware
 app.use("*", poweredBy());
 app.use("*", logger());
 app.use("*", cors({
   origin: "*",
-  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PROPFIND", "PROPPATCH", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK", "HEAD"],
+  allowHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Depth", "Destination", "Overwrite", "X-Expected-Entity-Length"],
   credentials: true,
 }));
 

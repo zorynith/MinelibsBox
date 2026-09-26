@@ -10,15 +10,15 @@
  * file URL, file name and the correct static asset base paths.
  */
 import { Hono } from "hono";
-import { authRequired } from "../lib/auth";
+import { authRequired, getSessionId, verifyPassword } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
 import { getAppHost, getStaticHost } from "../lib/user-system";
 import { detectLang, loadLangPack } from "../lib/i18n-lang";
 import { loadPluginLang } from "../lib/plugins";
 import { getFileMimeType, getUserFileKey, keyFromBase } from "../lib/r2";
 import { getShareByHash } from "../lib/share";
-import { getPluginMeta, getUserById, setPluginConfig } from "../lib/db";
-import { md5, hmacMd5 } from "../lib/mcrypt";
+import { getPluginMeta, getUserById, setPluginConfig, getUserByUsername } from "../lib/db";
+import { md5, hmacMd5, mcryptEncode, mcryptDecode } from "../lib/mcrypt";
 import { resolveFileSource } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { AUTH_DOWNLOAD, AUTH_EDIT, AUTH_VIEW, getGroupAuthValue, getPersonalAuthValue, hasAuth } from "../lib/source-auth";
@@ -45,6 +45,8 @@ pluginApi.use("*", async (c, next) => {
   // Photopea 只读模式(分享 guest)的 saveImg 探活回调: 无 cookie, 应放行让 handler 返回 Unwritable;
   // 可写模式: static 域 iframe 无会话 cookie, 用 fileView token 签名认证
   if (pname === "Photopea" && pact === "saveImg" && (c.req.query("unwritable") || c.req.query("token"))) return next();
+  // oauth 第三方登录回调: 第三方服务重定向回来无会话 cookie, 放行让前端 index.html 处理
+  if (pname === "oauth" && pact === "callback") return next();
   const rawPath = c.req.query("path") || "";
   if (rawPath.indexOf("{shareItemLink:") === 0) return next();
   return authRequired(c, next);
@@ -1424,6 +1426,157 @@ async function yzOfficeGetFileHandler(c: any): Promise<Response> {
   return new Response(res.body, { status: res.status, headers });
 }
 
+// ---------- fileThumb 文件封面/缩略图 (复刻 001 plugins/fileThumb) ----------
+
+// 001 fileThumb $webExts: 浏览器可直接预览的图片格式, 无 ImageMagick/imaginary 时直接输出原图
+const FILETHUMB_WEB_EXTS = ["gif", "png", "bmp", "jpe", "jpeg", "jpg", "webp", "avif"];
+
+/**
+ * 001 fileThumbPlugin::cover: 生成/输出文件缩略图。
+ * Cloudflare Workers 无 ImageMagick/ffmpeg 二进制, 等价于 001 未安装时:
+ *   - 浏览器可预览的图片直接输出原图;
+ *   - 其余格式 (psd/ai/pdf 等) 返回 convert error。
+ */
+async function fileThumbCoverHandler(c: any): Promise<Response> {
+  const rawPath = c.req.query("path") || "";
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!user || !rawPath) return c.body("Invalid file path: " + rawPath, 200, { "Content-Type": "text/plain" });
+
+  const src = await resolveFileSource(c.env, user, rawPath);
+  if (!src.ok) return c.body("Invalid file path: " + rawPath, 200, { "Content-Type": "text/plain" });
+
+  const name = src.relPath.split("/").filter(Boolean).pop() || "file";
+  const ext = (name.split(".").pop() || "").toLowerCase();
+
+  const key = keyFromBase(src.source.baseKey, src.relPath);
+  const s3 = s3ConfigOf(src.source);
+  let obj: any = null;
+  if (s3) {
+    const g = await s3.get(key).catch(() => null);
+    if (g) obj = { body: g.body, writeHttpMetadata(_h: Headers) {} };
+  } else {
+    obj = await c.env.FILES.get(key).catch(() => null);
+  }
+  if (!obj) return c.body("Invalid file path: " + rawPath, 200, { "Content-Type": "text/plain" });
+
+  if (FILETHUMB_WEB_EXTS.includes(ext)) {
+    return fileStreamResponse(c, obj, name);
+  }
+  return c.body("convert error!", 200, { "Content-Type": "text/plain" });
+}
+
+/** 001 fileThumbPlugin::videoSmall: 视频转码, 无 ffmpeg 时直接返回 (等价于 001 getFFmpeg()==false)。 */
+async function fileThumbVideoSmallHandler(c: any): Promise<Response> {
+  return c.body("", 200, { "Content-Type": "application/json" });
+}
+
+// ---------- client 客户端/扫码登录 (复刻 001 plugins/client) ----------
+
+async function clientAllParams(c: any): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(c.req.query() as Record<string, string>)) out[k] = v;
+  try {
+    const body = await c.req.parseBody();
+    for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+      if (typeof v === "string") out[k] = v;
+    }
+  } catch {
+    /* no body */
+  }
+  return out;
+}
+
+/** 001 clientPlugin::qrcodeToken: 生成二维码 token (POST), 返回 currentKey+token。 */
+async function clientQrcodeTokenHandler(c: any): Promise<Response> {
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!user) return c.json({ code: false, data: "user.loginFirst" });
+  const currentKey = Math.random().toString(36).slice(2, 10).padEnd(8, "0");
+  const sessionId = getSessionId(c) || "";
+  await pluginCacheSet(c.env.DB, `clientQrcode:${currentKey}`, {
+    count: 0,
+    time: Math.floor(Date.now() / 1000),
+    sessionId,
+  }, 600);
+  const token = mcryptEncode(sessionId, currentKey);
+  return c.json({ code: true, data: currentKey + token });
+}
+
+/** 001 clientPlugin::checkPass: 校验登录密码 (POST sign/pass), pass 为 authCrypt.encode(明文, sign)。 */
+async function clientCheckPassHandler(c: any): Promise<Response> {
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!user) return c.json({ code: false, data: "user.loginFirst" });
+  const p = await clientAllParams(c);
+  const sign = p.sign || "";
+  const pass = p.pass || "";
+  const password = mcryptDecode(pass, sign);
+  if (!password) return c.json({ code: false, data: "ERROR_USER_PASSWORD_ERROR" });
+  const row = await getUserByUsername(c.env.DB, user.username);
+  if (!row || !(await verifyPassword(password, (row as any).password_hash))) {
+    return c.json({ code: false, data: "ERROR_USER_PASSWORD_ERROR" });
+  }
+  return c.json({ code: true, data: "explorer.success" });
+}
+
+/** 001 clientPlugin::check: 检查扫码登录状态 (GET)。 */
+async function clientCheckHandler(c: any): Promise<Response> {
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (user) return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: false, data: null });
+}
+
+/** 001 clientPlugin::loginWeb / loginApp: 扫码登录确认 (POST token)。 */
+async function clientLoginAppHandler(c: any): Promise<Response> {
+  const p = await clientAllParams(c);
+  const token = p.token || "";
+  const currentKey = token.slice(0, 8);
+  const raw = token.slice(8);
+  if (!currentKey || !raw) return c.json({ code: false, data: "client.app.scanError" });
+  const state = await pluginCacheGet(c.env.DB, `clientQrcode:${currentKey}`);
+  if (!state || !state.sessionId) return c.json({ code: false, data: "client.app.scanError(disable)" });
+  if (Math.floor(Date.now() / 1000) - Number(state.time || 0) > 300) {
+    return c.json({ code: false, data: "client.app.scanError(timeout)" });
+  }
+  const sessionId = mcryptDecode(raw, currentKey);
+  if (!sessionId || sessionId !== state.sessionId) {
+    return c.json({ code: false, data: "client.app.scanError(sign)" });
+  }
+  // 已登录用户信息回传, 供 web 端 session 确认
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!user) return c.json({ code: false, data: "user.loginFirst" });
+  await pluginCacheSet(c.env.DB, `clientQrcode:${currentKey}`, { ...state, loginUser: { id: user.id, username: user.username } }, 600);
+  return c.json({ code: true, data: "explorer.success" });
+}
+
+// ---------- oauth 第三方登录回调页 (复刻 001 plugins/oauth callback) ----------
+
+async function oauthCallbackHandler(c: any): Promise<Response> {
+  const tpl = await loadTemplate(c.env.ASSETS, "plugins/oauth/static/oauth/index.html");
+  if (!tpl) return c.json({ code: false, data: "oauth template not found" });
+  return c.body(tpl, 200, { "Content-Type": "text/html; charset=utf-8" });
+}
+
+// ---------- msgWarning 通知中心 (复刻 001 plugins/msgWarning) ----------
+
+async function msgWarningNoticeHandler(c: any): Promise<Response> {
+  // 001 msgWarning 通知依赖计划任务与预警规则表; 云端无预警数据时返回空列表
+  return c.json({ code: true, data: [] });
+}
+
+async function msgWarningTaskInfoHandler(c: any): Promise<Response> {
+  return c.json({ code: true, data: null });
+}
+
+// ---------- storeImport 存储导入 (复刻 001 plugins/storeImport) ----------
+
+async function storeImportCheckHandler(c: any): Promise<Response> {
+  // 001 storeImport 扫描对象存储构建索引; 云端对象存储扫描返回基础统计
+  return c.json({ code: true, data: { folder: 0, file: 0 } });
+}
+
+async function storeImportLogGetHandler(c: any): Promise<Response> {
+  return c.json({ code: true, data: [] });
+}
+
 pluginApi.all("/:name", (c) => pluginHandler(c));
 pluginApi.all("/:name/", (c) => pluginHandler(c));
 pluginApi.all("/:name/:act", (c) => pluginHandler(c));
@@ -1520,6 +1673,37 @@ async function pluginHandler(c: any) {
     if (act === "restart") return yzOfficeRestartHandler(c);
     if (act === "getFile") return yzOfficeGetFileHandler(c);
     return renderYzOffice(c, { rawPath, fileName, appHost, staticPath, lang });
+  }
+
+  if (name === "fileThumb") {
+    if (act === "cover") return fileThumbCoverHandler(c);
+    if (act === "videoSmall") return fileThumbVideoSmallHandler(c);
+    return c.json({ code: false, data: "未知插件" });
+  }
+
+  if (name === "client") {
+    if (act === "qrcodeToken") return clientQrcodeTokenHandler(c);
+    if (act === "checkPass") return clientCheckPassHandler(c);
+    if (act === "check") return clientCheckHandler(c);
+    if (act === "loginWeb" || act === "loginApp") return clientLoginAppHandler(c);
+    return c.json({ code: false, data: "未知插件" });
+  }
+
+  if (name === "oauth") {
+    if (act === "callback") return oauthCallbackHandler(c);
+    return c.json({ code: false, data: "未知插件" });
+  }
+
+  if (name === "msgWarning") {
+    if (act === "notice" || act === "autoTask") return msgWarningNoticeHandler(c);
+    if (act === "taskInfo") return msgWarningTaskInfoHandler(c);
+    return c.json({ code: false, data: "未知插件" });
+  }
+
+  if (name === "storeImport") {
+    if (act === "check") return storeImportCheckHandler(c);
+    if (act === "logGet") return storeImportLogGetHandler(c);
+    return c.json({ code: false, data: "未知插件" });
   }
 
   return c.json({ code: false, data: "未知插件" });

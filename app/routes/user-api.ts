@@ -692,11 +692,18 @@ userApi.get("/view/lang", async (c) => {
 // Mirrors 001 user.view.class.php plugins(): 'var kodReady=[];' + each plugin's echoJs
 userApi.get("/view/plugins", async (c) => {
   const lang = detectLang(c);
+  // 判断当前用户是否管理员 (adminer 等 root-only 插件仅管理员加载)
+  let isRoot = false;
+  const sessionId = getSessionId(c);
+  if (sessionId) {
+    const session = await getSession(c.env.DB, sessionId);
+    if (session && session.role === "admin") isRoot = true;
+  }
   const body = await renderPluginsJs(c.env.ASSETS, {
     appHost: getAppHost(c),
     staticPath: getStaticHost(c),
     lang,
-  }, c.env.DB);
+  }, c.env.DB, isRoot);
   return c.body(body, 200, { "Content-Type": "application/javascript" });
 });
 

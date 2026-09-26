@@ -7,6 +7,22 @@ export function parseLooseJson(raw: string): Record<string, any> {
   while (i < n) {
     const ch = raw[i];
     if (inStr) {
+      // 字符串内裸控制字符 (001 package.json 多行字符串如 fileThumb.desc) 需转义,
+      // 否则 JSON.parse 报错。\n -> 换行、\t -> 制表符、\r 跳过 (CRLF)。
+      if (ch === "\n") {
+        out += "\\n";
+        i++;
+        continue;
+      }
+      if (ch === "\r") {
+        i++;
+        continue;
+      }
+      if (ch === "\t") {
+        out += "\\t";
+        i++;
+        continue;
+      }
       out += ch;
       if (ch === "\\" && i + 1 < n) {
         out += raw[i + 1];

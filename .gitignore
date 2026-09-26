@@ -20,3 +20,6 @@ worker-configuration.d.ts
 
 !.dev.vars.example
 !.env.example
+
+# safe-delete 回收站垃圾目录
+.Trash-*/
