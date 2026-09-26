@@ -1536,17 +1536,12 @@ async function renderAdminer(c: any): Promise<Response> {
 <title>Adminer</title>
 <link rel="stylesheet" href="${pluginHost}adminer/adminer.css">
 </head>
-<body>
-<div id="menu">
-  <h1><a href="javascript:void(0)">D1</a><span id="h1">D1</span></h1>
-  <p class="links"><a href="javascript:void(0)" onclick="showSql()">SQL command</a></p>
-  <p id="lang">Language: <select onchange="setLang(this.value)"><option value="en" selected>English</option><option value="zh">中文</option></select></p>
-  <div id="tables"><p class="error">Loading tables...</p></div>
-</div>
+<body class="ltr js">
 <div id="content">
-  <div id="breadcrumb"><a href="javascript:void(0)" onclick="showSql()">D1</a><span id="crumb"></span></div>
+  <p id="breadcrumb"><a href="javascript:void(0)" onclick="showSql()">D1</a><span id="crumb"></span></p>
   <h2 id="title">SQL command</h2>
-  <p id="links" style="display:none">
+  <div id="ajaxstatus" class="jsonly hidden"></div>
+  <p class="links" id="tableLinks" style="display:none">
     <a href="javascript:void(0)" onclick="selectData()">Select data</a>
     <a href="javascript:void(0)" onclick="showStructure()">Show structure</a>
     <a href="javascript:void(0)" onclick="alterTable()">Alter table</a>
@@ -1557,6 +1552,16 @@ async function renderAdminer(c: any): Promise<Response> {
     <p><input type="submit" value="Execute"> <input type="button" value="Clear" onclick="clearAll()"></p>
   </form>
   <div id="result"></div>
+</div>
+<div id="foot" class="foot">
+<div id="menu">
+  <h1><a href="javascript:void(0)" id="h1" onclick="showSql()">Adminer</a> <span class="version">5.4.1</span></h1>
+  <form action="" method="post">
+    <div id="lang"><label>Language: <select name="lang" onchange="setLang(this.value)"><option value="en" selected>English</option><option value="zh">简体中文</option></select></label> <input type="submit" value="Set" class="hidden"></div>
+  </form>
+  <div id="tables"><p class="error">Loading tables...</p></div>
+  <p class="links"><a href="javascript:void(0)" onclick="showSql()">SQL command</a></p>
+</div>
 </div>
 <script>
 var apiBase = ${JSON.stringify(apiBase)};
@@ -1569,7 +1574,7 @@ var L = LANG.en;
 function t(k){ return (L[k] !== undefined ? L[k] : LANG.en[k]) || k; }
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function q(n){ return String(n).replace(/"/g,'""'); }
-function setLang(lang){ L = LANG[lang] || LANG.en; document.getElementById('lang').firstChild.nodeValue = t('language') + ' '; if(currentTable){ setTitle('table'); } else { document.getElementById('title').textContent = t('sqlCommand'); } }
+function setLang(lang){ L = LANG[lang] || LANG.en; if(currentTable){ setTitle('table'); } else { document.getElementById('title').textContent = t('sqlCommand'); } }
 function api(path, body){
   var opt = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), credentials:'include'} : {credentials:'include'};
   return fetch(apiBase + path, opt).then(function(r){return r.json();});
@@ -1596,14 +1601,14 @@ function setTitle(kind){
 function showSql(){
   currentTable = '';
   setTitle('sql');
-  document.getElementById('links').style.display = 'none';
+  document.getElementById('tableLinks').style.display = 'none';
   document.getElementById('crumb').textContent = '';
   clearAll();
 }
 function showTable(name){
   currentTable = name;
   setTitle('table');
-  document.getElementById('links').style.display = '';
+  document.getElementById('tableLinks').style.display = '';
   document.getElementById('crumb').textContent = ' › ' + name;
   selectData();
 }
