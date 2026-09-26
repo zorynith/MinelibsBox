@@ -1567,6 +1567,7 @@ function loadTables(){
       var a = document.createElement('a');
       a.href = 'javascript:void(0)';
       a.textContent = t;
+      a.title = t;
       a.onclick = function(){ showTable(t); };
       el.appendChild(a);
     });
