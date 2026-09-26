@@ -1538,14 +1538,12 @@ async function renderAdminer(c: any): Promise<Response> {
 </head>
 <body>
 <div id="menu">
-  <div class="links">
-    <h1>D1</h1>
-    <p class="links"><a href="javascript:void(0)" onclick="loadTables()">Refresh</a></p>
-    <div id="tables"><p class="error">Loading tables...</p></div>
-  </div>
+  <h1><a href="javascript:void(0)">D1</a><span id="h1">D1</span></h1>
+  <p class="links"><a href="javascript:void(0)" onclick="loadTables()">Refresh</a></p>
+  <div id="tables"><p class="error">Loading tables...</p></div>
 </div>
 <div id="content">
-  <div class="breadcrumb"></div>
+  <div id="breadcrumb">SQL command</div>
   <form id="sqlForm" onsubmit="return runSql()">
     <textarea id="sql" name="query" rows="6" cols="80" style="width:100%"></textarea>
     <p><input type="submit" value="Execute"> <input type="button" value="Clear" onclick="clearAll()"></p>
