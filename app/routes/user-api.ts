@@ -8,7 +8,7 @@ import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, aut
 import { parseKodPassword } from "../lib/mcrypt";
 import { DEV_KOD, devLicenseHashes } from "../lib/license";
 import { detectLang, loadLangPack, normalizeLang } from "../lib/i18n-lang";
-import { renderPluginsJs } from "../lib/plugins";
+import { renderPluginsJs, mergePluginLang } from "../lib/plugins";
 import { taskResultGet } from "../lib/task-result-cache";
 import { accountApi } from "./user-account-api";
 import { getAppHost, getStaticHost } from "../lib/user-system";
@@ -626,6 +626,8 @@ userApi.get("/view/options", async (c) => {
     let list = await loadLangPack(c.env.ASSETS, lang);
     if (!list && lang !== "zh-CN") list = await loadLangPack(c.env.ASSETS, "zh-CN");
     if (!list) list = {};
+    // 合并插件语言包 (001 Model('Plugin')->init()): webdav 等插件 key 依赖 window.LNG
+    await mergePluginLang(c.env.ASSETS, list, lang);
     overlayCopyright(list, settingsMap);
     (options as any)._lang = { list, lang };
   }
@@ -674,6 +676,9 @@ userApi.get("/view/lang", async (c) => {
     list = await loadLangPack(c.env.ASSETS, "zh-CN");
   }
   if (!list) list = {};
+
+  // 合并插件语言包 (001 Model('Plugin')->init()): webdav 等插件 key 依赖 window.LNG
+  await mergePluginLang(c.env.ASSETS, list, lang);
 
   // Overlay saved enterprise/copyright info so window.LNG reflects admin edits.
   const settingsMap = await loadSettingsMap(c.env.DB);

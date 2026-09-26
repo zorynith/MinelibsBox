@@ -171,6 +171,27 @@ export async function loadPluginLang(assets: Fetcher, name: string, lang: string
   }
 }
 
+/**
+ * 001 Model('Plugin')->init(): 把所有插件的 i18n 合并进全局语言包。
+ * view/lang 与 view/options?full=1 返回前调用, 使前端 window.LNG 包含插件 key
+ * (webdav 等插件的 main.js/user.js 直接运行时访问 LNG['xxx.meta.name'], 不经 {{LNG}} 模板)。
+ */
+export async function mergePluginLang(assets: Fetcher, list: Record<string, string>, lang: string): Promise<void> {
+  const bundle = await loadPluginBundle(assets);
+  for (const name of ALL_PLUGINS) {
+    const entry = bundle.plugins?.[name];
+    let pluginLang = entry?.langs?.[lang];
+    if (!pluginLang) {
+      // 聚合包缺失该插件语言时回退单独 fetch (本地未 build 场景)
+      pluginLang = await loadPluginLang(assets, name, lang);
+    }
+    if (!pluginLang) continue;
+    for (const [k, v] of Object.entries(pluginLang)) {
+      list[k] = v;
+    }
+  }
+}
+
 /** Load plugin static/main.js template. Returns null on failure. */
 export async function loadPluginMainJs(assets: Fetcher, name: string): Promise<string | null> {
   const entry = (await loadPluginBundle(assets)).plugins?.[name];
