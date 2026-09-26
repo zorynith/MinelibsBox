@@ -1539,11 +1539,19 @@ async function renderAdminer(c: any): Promise<Response> {
 <body>
 <div id="menu">
   <h1><a href="javascript:void(0)">D1</a><span id="h1">D1</span></h1>
-  <p class="links"><a href="javascript:void(0)" onclick="loadTables()">Refresh</a></p>
+  <p class="links"><a href="javascript:void(0)" onclick="showSql()">SQL command</a></p>
+  <p id="lang">Language: <select onchange="setLang(this.value)"><option value="en" selected>English</option><option value="zh">中文</option></select></p>
   <div id="tables"><p class="error">Loading tables...</p></div>
 </div>
 <div id="content">
-  <div id="breadcrumb">SQL command</div>
+  <div id="breadcrumb"><a href="javascript:void(0)" onclick="showSql()">D1</a><span id="crumb"></span></div>
+  <h2 id="title">SQL command</h2>
+  <p id="links" style="display:none">
+    <a href="javascript:void(0)" onclick="selectData()">Select data</a>
+    <a href="javascript:void(0)" onclick="showStructure()">Show structure</a>
+    <a href="javascript:void(0)" onclick="alterTable()">Alter table</a>
+    <a href="javascript:void(0)" onclick="newItem()">New item</a>
+  </p>
   <form id="sqlForm" onsubmit="return runSql()">
     <textarea id="sql" name="query" rows="6" cols="80" style="width:100%"></textarea>
     <p><input type="submit" value="Execute"> <input type="button" value="Clear" onclick="clearAll()"></p>
@@ -1552,7 +1560,16 @@ async function renderAdminer(c: any): Promise<Response> {
 </div>
 <script>
 var apiBase = ${JSON.stringify(apiBase)};
+var currentTable = '';
+var LANG = {
+  en: {sqlCommand:'SQL command', table:'Table:', selectData:'Select data', showStructure:'Show structure', alterTable:'Alter table', newItem:'New item', refresh:'Refresh', execute:'Execute', clear:'Clear', rows:'rows', language:'Language:'},
+  zh: {sqlCommand:'SQL 命令', table:'表:', selectData:'选择数据', showStructure:'显示结构', alterTable:'修改表', newItem:'新建记录', refresh:'刷新', execute:'执行', clear:'清空', rows:'行', language:'语言:'}
+};
+var L = LANG.en;
+function t(k){ return (L[k] !== undefined ? L[k] : LANG.en[k]) || k; }
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function q(n){ return String(n).replace(/"/g,'""'); }
+function setLang(lang){ L = LANG[lang] || LANG.en; document.getElementById('lang').firstChild.nodeValue = t('language') + ' '; if(currentTable){ setTitle('table'); } else { document.getElementById('title').textContent = t('sqlCommand'); } }
 function api(path, body){
   var opt = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), credentials:'include'} : {credentials:'include'};
   return fetch(apiBase + path, opt).then(function(r){return r.json();});
@@ -1573,14 +1590,35 @@ function loadTables(){
     });
   });
 }
+function setTitle(kind){
+  document.getElementById('title').textContent = (kind === 'table' ? t('table') + ' ' : t('sqlCommand')) + (currentTable || '');
+}
+function showSql(){
+  currentTable = '';
+  setTitle('sql');
+  document.getElementById('links').style.display = 'none';
+  document.getElementById('crumb').textContent = '';
+  clearAll();
+}
 function showTable(name){
-  runSql('SELECT * FROM "'+name.replace(/"/g,'""')+'" LIMIT 50');
-  document.getElementById('sql').value = 'SELECT * FROM "'+name.replace(/"/g,'""')+'" LIMIT 50';
+  currentTable = name;
+  setTitle('table');
+  document.getElementById('links').style.display = '';
+  document.getElementById('crumb').textContent = ' › ' + name;
+  selectData();
+}
+function selectData(){ runSql('SELECT * FROM "'+q(currentTable)+'" LIMIT 50'); }
+function showStructure(){ runSql('PRAGMA table_info("'+q(currentTable)+'")'); }
+function alterTable(){ runSql("SELECT sql FROM sqlite_master WHERE name = '"+q(currentTable).replace(/'/g,"''")+"'"); }
+function newItem(){
+  document.getElementById('sql').value = 'INSERT INTO "'+q(currentTable)+'" (...) VALUES (...);';
+  document.getElementById('result').innerHTML = '';
 }
 function clearAll(){ document.getElementById('sql').value=''; document.getElementById('result').innerHTML=''; }
 function runSql(sqlOverride){
   var sql = sqlOverride || document.getElementById('sql').value;
   if(!sql.trim()) return false;
+  document.getElementById('sql').value = sql;
   document.getElementById('result').innerHTML = '<p>Running...</p>';
   api('query', {sql: sql}).then(function(res){
     var el = document.getElementById('result');
@@ -1595,7 +1633,7 @@ function runSql(sqlOverride){
         (d.columns||[]).forEach(function(c){ html += '<td>'+esc(row[c])+'</td>'; });
         html += '</tr>';
       });
-      html += '</tbody></table><p>' + d.rows.length + ' rows</p>';
+      html += '</tbody></table><p>' + d.rows.length + ' ' + t('rows') + '</p>';
       el.innerHTML = html;
     } else if(d && d.changes !== undefined){
       el.innerHTML = '<p>'+d.changes+' row(s) affected</p>';
