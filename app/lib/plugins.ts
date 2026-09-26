@@ -199,7 +199,8 @@ export function renderPluginJs(
   pkg: PluginPackage,
   config: Record<string, any>,
   langArr: Record<string, string>,
-  ctx: PluginContext
+  ctx: PluginContext,
+  extraVars?: Record<string, string>
 ): string {
   const name = pkg.id || pkg.name;
   const pluginHost = `${ctx.staticPath}plugins/${name}/`;
@@ -217,6 +218,14 @@ export function renderPluginJs(
   ];
   for (const [k, v] of basePairs) {
     out = out.split(k).join(v);
+  }
+
+  // 插件特有变量 (001 各插件 echoJs 传入 $assign 的额外占位符, 如 webdav 的
+  // {{isAllow}}/{{systemAutoMount}}/{{pathAllow}}/{{webdavName}})
+  if (extraVars) {
+    for (const [k, v] of Object.entries(extraVars)) {
+      out = out.split(k).join(v);
+    }
   }
 
   // {{LNG}} whole pack -> urlencoded JSON (photoSwipe LNG.set(jsonDecode(urlDecode(...))))
@@ -357,10 +366,88 @@ export function normalizePluginConfig(config: Record<string, any>): Record<strin
 }
 
 /**
+ * 001 webdavPlugin::authCheck: 当前用户是否有权限使用 webdav 插件。
+ * 镜像 001 user/authPlugin.checkAuth + checkAuthValue (pluginAuth 配置解析)。
+ */
+async function webdavAuthCheck(
+  db: D1Database | undefined,
+  config: Record<string, any>,
+  currentUser: { id: number; role: string } | null | undefined,
+  isRoot?: boolean
+): Promise<boolean> {
+  if (config.pluginAuthOpen) return true;
+  if (isRoot) return true;
+  const auth = config.pluginAuth;
+  if (!auth) return false;
+  let parsed: Record<string, any> | null = null;
+  if (typeof auth === "string") {
+    try {
+      parsed = JSON.parse(auth);
+    } catch {
+      parsed = null;
+    }
+  } else if (auth && typeof auth === "object") {
+    parsed = auth as Record<string, any>;
+  }
+  if (!parsed) return false;
+  if (parsed.all === "1" || parsed.all === 1) return true; // 全部(含未登录)
+  if (!currentUser) return false;
+  if (parsed.user === "all") return true;
+  if (parsed.user === "admin" && isRoot) return true;
+  if (parsed.role === "1" && isRoot) return true;
+
+  const userList = (parsed.user ? String(parsed.user).split(",") : [])
+    .map((x) => parseInt(x, 10)).filter(Number.isInteger);
+  const roleList = (parsed.role ? String(parsed.role).split(",") : [])
+    .map((x) => parseInt(x, 10)).filter(Number.isInteger);
+  const groupList = (parsed.group ? String(parsed.group).split(",") : [])
+    .map((x) => parseInt(x, 10)).filter(Number.isInteger);
+
+  if (userList.includes(currentUser.id)) return true;
+  const roleId = currentUser.role === "admin" || currentUser.role === "root" ? 1 : 3;
+  if (roleList.includes(roleId)) return true;
+  if (groupList.length && db) {
+    const rows = await db.prepare("SELECT group_id FROM user_groups WHERE user_id = ?")
+      .bind(currentUser.id).all().catch(() => ({ results: [] as any[] }));
+    const groupIds = (rows.results || []).map((r: any) => r.group_id);
+    if (groupList.some((gid) => groupIds.includes(gid))) return true;
+  }
+  return false;
+}
+
+/**
+ * 001 webdavPlugin::echoJs 的 $assign: {{isAllow}}/{{systemAutoMount}}/{{pathAllow}}/{{webdavName}}。
+ */
+async function webdavEchoVars(
+  db: D1Database | undefined,
+  config: Record<string, any>,
+  currentUser: { id: number; role: string } | null | undefined,
+  isRoot?: boolean
+): Promise<Record<string, string>> {
+  const isOpen = String(config.isOpen) === "1";
+  const allow = isOpen && (await webdavAuthCheck(db, config, currentUser, isRoot));
+  // 001: systemAutoMount = config.systemAutoMount !== '0', 且服务未开放时强制关闭
+  const systemAutoMount = (String(config.systemAutoMount) !== "0") && allow;
+  return {
+    "{{isAllow}}": allow ? "1" : "0",
+    "{{systemAutoMount}}": systemAutoMount ? "1" : "0",
+    "{{pathAllow}}": config.pathAllow ? String(config.pathAllow) : "all",
+    "{{webdavName}}": config.webdavName ? String(config.webdavName) : "kodbox",
+  };
+}
+
+/**
  * Render the /api/user/view/plugins output body. Only enabled (DB status=1) plugins load.
  * isRoot: 当前用户是否管理员。用于 adminer 等 root-only 插件 (001 echoJs: if(isRoot!=1) return)。
+ * currentUser: 当前登录用户 (webdav 等插件 echoJs 需要按 pluginAuth 判断权限)。
  */
-export async function renderPluginsJs(assets: Fetcher, ctx: PluginContext, db?: D1Database, isRoot?: boolean): Promise<string> {
+export async function renderPluginsJs(
+  assets: Fetcher,
+  ctx: PluginContext,
+  db?: D1Database,
+  isRoot?: boolean,
+  currentUser?: { id: number; role: string } | null
+): Promise<string> {
   let body = "var kodReady=[];";
   for (const name of ALL_PLUGINS) {
     // adminer 仅管理员可见 (001 adminerPlugin::echoJs 硬编码 isRoot 判断)
@@ -380,7 +467,9 @@ export async function renderPluginsJs(assets: Fetcher, ctx: PluginContext, db?: 
     // main.js 模板里的 {{config.fileExt}} 等残留为字面量, 导致插件注册的
     // 文件打开方式 ext 全部失效(图片/视频/Office 等 app 匹配不到文件)
     const config = { ...defaultPluginConfig(pkg), ...(meta ? meta.config : {}) };
-    body += "\n" + renderPluginJs(tpl, pkg, normalizePluginConfig(config), langArr, ctx);
+    // webdav 特有变量 (001 webdavPlugin::echoJs $assign)
+    const extraVars = name === "webdav" ? await webdavEchoVars(db, config, currentUser, isRoot) : undefined;
+    body += "\n" + renderPluginJs(tpl, pkg, normalizePluginConfig(config), langArr, ctx, extraVars);
   }
   return body;
 }
