@@ -1470,6 +1470,149 @@ async function fileThumbVideoSmallHandler(c: any): Promise<Response> {
   return c.body("", 200, { "Content-Type": "application/json" });
 }
 
+// ---------- adminer 数据库管理 (复刻 001 plugins/adminer) ----------
+// 001 里 adminer 是 PHP(Adminer) 管理 MySQL; Workers 无 PHP/MySQL, 改用 D1。
+// 前端 main.js url 用 {{pluginApi}} 指向 worker 后端, 这里渲染 Adminer 主题的 D1 管理页。
+
+function adminerIsAdmin(user: AuthUser | undefined): boolean {
+  return !!user && (user.role === "admin" || user.role === "root");
+}
+
+/** 列出 D1 全部表 (sqlite_master)。 */
+async function adminerTablesHandler(c: any): Promise<Response> {
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!adminerIsAdmin(user)) return c.json({ code: false, data: "explorer.noPermissionAction" });
+  const r = await c.env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+  ).all().catch(() => null);
+  return c.json({ code: true, data: r ? (r.results as Array<{ name: string }>).map((x) => x.name) : [] });
+}
+
+/** 执行 SQL (SELECT 返回结果集, 其余返回影响行数)。 */
+async function adminerQueryHandler(c: any): Promise<Response> {
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!adminerIsAdmin(user)) return c.json({ code: false, data: "explorer.noPermissionAction" });
+  let sql = c.req.query("sql") || "";
+  if (!sql) {
+    try {
+      const body = await c.req.json();
+      sql = String((body as any).sql || "");
+    } catch {
+      /* no body */
+    }
+  }
+  if (!sql) return c.json({ code: false, data: "empty sql" });
+  const trimmed = sql.trim();
+  const lower = trimmed.toLowerCase();
+  const isSelect = /^(select|pragma|with|explain|values)/.test(lower);
+  try {
+    if (isSelect) {
+      const r = await c.env.DB.prepare(trimmed).all();
+      return c.json({ code: true, data: { columns: r.results.length ? Object.keys(r.results[0]) : [], rows: r.results } });
+    }
+    const r = await c.env.DB.prepare(trimmed).run();
+    return c.json({ code: true, data: { changes: r.meta?.changes ?? r.meta?.last_row_id ?? 0 } });
+  } catch (e: any) {
+    return c.json({ code: false, data: String(e?.message || e) });
+  }
+}
+
+/** 渲染 Adminer 主题的 D1 管理页 (001 adminer/index.php 语义: 仅管理员可访问)。 */
+async function renderAdminer(c: any): Promise<Response> {
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!adminerIsAdmin(user)) {
+    return c.body(errorPage("Adminer", "no permission"), 200, HTML_HEADERS);
+  }
+  const appHost = getAppHost(c);
+  const staticPath = getStaticHost(c);
+  const pluginHost = `${staticPath}plugins/adminer/`;
+  const apiBase = `${appHost}index.php?plugin/adminer/`;
+
+  const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Adminer</title>
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css">
+</head>
+<body>
+<div id="menu">
+  <div class="links">
+    <h1>D1</h1>
+    <p class="links"><a href="javascript:void(0)" onclick="loadTables()">Refresh</a></p>
+    <div id="tables"><p class="error">Loading tables...</p></div>
+  </div>
+</div>
+<div id="content">
+  <div class="breadcrumb"></div>
+  <form id="sqlForm" onsubmit="return runSql()">
+    <textarea id="sql" name="query" rows="6" cols="80" style="width:100%"></textarea>
+    <p><input type="submit" value="Execute"> <input type="button" value="Clear" onclick="clearAll()"></p>
+  </form>
+  <div id="result"></div>
+</div>
+<script>
+var apiBase = ${JSON.stringify(apiBase)};
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function api(path, body){
+  var opt = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), credentials:'include'} : {credentials:'include'};
+  return fetch(apiBase + path, opt).then(function(r){return r.json();});
+}
+function loadTables(){
+  api('tables').then(function(res){
+    var el = document.getElementById('tables'); el.innerHTML = '';
+    if(!res || !res.code){ el.innerHTML = '<p class="error">'+esc(res&&res.data)+'</p>'; return; }
+    var tables = res.data || [];
+    if(!tables.length){ el.innerHTML = '<p>No tables</p>'; return; }
+    tables.forEach(function(t){
+      var a = document.createElement('a');
+      a.href = 'javascript:void(0)';
+      a.textContent = t;
+      a.onclick = function(){ showTable(t); };
+      el.appendChild(a);
+    });
+  });
+}
+function showTable(name){
+  runSql('SELECT * FROM "'+name.replace(/"/g,'""')+'" LIMIT 50');
+  document.getElementById('sql').value = 'SELECT * FROM "'+name.replace(/"/g,'""')+'" LIMIT 50';
+}
+function clearAll(){ document.getElementById('sql').value=''; document.getElementById('result').innerHTML=''; }
+function runSql(sqlOverride){
+  var sql = sqlOverride || document.getElementById('sql').value;
+  if(!sql.trim()) return false;
+  document.getElementById('result').innerHTML = '<p>Running...</p>';
+  api('query', {sql: sql}).then(function(res){
+    var el = document.getElementById('result');
+    if(!res || !res.code){ el.innerHTML = '<p class="error">'+esc(res&&res.data)+'</p>'; return; }
+    var d = res.data;
+    if(d && d.rows){
+      var html = '<table class="nowrap checkable"><thead><tr>';
+      (d.columns||[]).forEach(function(c){ html += '<th>'+esc(c)+'</th>'; });
+      html += '</tr></thead><tbody>';
+      d.rows.forEach(function(row){
+        html += '<tr>';
+        (d.columns||[]).forEach(function(c){ html += '<td>'+esc(row[c])+'</td>'; });
+        html += '</tr>';
+      });
+      html += '</tbody></table><p>' + d.rows.length + ' rows</p>';
+      el.innerHTML = html;
+    } else if(d && d.changes !== undefined){
+      el.innerHTML = '<p>'+d.changes+' row(s) affected</p>';
+    } else {
+      el.innerHTML = '<p>OK</p>';
+    }
+  });
+  return false;
+}
+loadTables();
+</script>
+</body>
+</html>`;
+  return c.body(html, 200, HTML_HEADERS);
+}
+
 // ---------- client 客户端/扫码登录 (复刻 001 plugins/client) ----------
 
 async function clientAllParams(c: any): Promise<Record<string, string>> {
@@ -1679,6 +1822,12 @@ async function pluginHandler(c: any) {
     if (act === "cover") return fileThumbCoverHandler(c);
     if (act === "videoSmall") return fileThumbVideoSmallHandler(c);
     return c.json({ code: false, data: "未知插件" });
+  }
+
+  if (name === "adminer") {
+    if (act === "tables") return adminerTablesHandler(c);
+    if (act === "query") return adminerQueryHandler(c);
+    return renderAdminer(c);
   }
 
   if (name === "client") {
