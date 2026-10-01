@@ -372,7 +372,15 @@ async function adminerRow(c: any): Promise<Response> {
 
   const colNames = meta.columns.map((x: any) => x.name);
   const values = body.values && typeof body.values === "object" ? (body.values as Record<string, any>) : {};
-  const setCols = Object.keys(values).filter((k) => colNames.includes(k) && !meta.pk.includes(k));
+  const providedCols = Object.keys(values).filter((k) => colNames.includes(k));
+  // update: 不修改主键列; insert: 主键列留空时省略(交由默认值/自增), 填写时写入。
+  const setCols = providedCols.filter((k) => !meta.pk.includes(k));
+  const insertCols = providedCols.filter((k) => {
+    const v = values[k];
+    if (v === undefined) return false;
+    if (meta.pk.includes(k) && (v === null || v === "")) return false;
+    return true;
+  });
 
   // WHERE: 优先主键, 无主键时用 rowid (仅 update/delete 需要)
   let whereSql = "";
@@ -392,15 +400,15 @@ async function adminerRow(c: any): Promise<Response> {
 
   try {
     if (action === "insert") {
-      if (!setCols.length) {
+      if (!insertCols.length) {
         const r = await runStmt(c, `INSERT INTO ${qi(table)} DEFAULT VALUES`);
         return c.json({ code: true, data: { changes: r.meta?.changes ?? 0, lastRowId: r.meta?.last_row_id ?? null } });
       }
-      const placeholders = setCols.map(() => "?").join(", ");
+      const placeholders = insertCols.map(() => "?").join(", ");
       const r = await runStmt(
         c,
-        `INSERT INTO ${qi(table)} (${setCols.map(qi).join(", ")}) VALUES (${placeholders})`,
-        setCols.map((k) => values[k])
+        `INSERT INTO ${qi(table)} (${insertCols.map(qi).join(", ")}) VALUES (${placeholders})`,
+        insertCols.map((k) => values[k])
       );
       return c.json({ code: true, data: { changes: r.meta?.changes ?? 0, lastRowId: r.meta?.last_row_id ?? null } });
     }
