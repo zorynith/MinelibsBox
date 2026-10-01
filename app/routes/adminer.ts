@@ -9,6 +9,7 @@
  * 访问控制: 与 001 adminerPlugin::echoJs / index.php KodSSO::check('user:admin') 一致, 仅管理员。
  */
 import type { AuthUser } from "../lib/auth";
+import { getPluginMeta } from "../lib/db";
 
 const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8" };
 
@@ -27,6 +28,16 @@ function deny(c: any): Response {
 
 function fail(c: any, msg: string, extra?: Record<string, unknown>): Response {
   return c.json(Object.assign({ code: false, data: msg }, extra || {}));
+}
+
+/** 001 adminerPlugin::debugSet: 读取插件 config.debug(默认 0) 决定是否输出错误信息。 */
+async function adminerDebugOn(c: any): Promise<boolean> {
+  try {
+    const meta = await getPluginMeta(c.env.DB, "adminer");
+    return Number((meta.config || {}).debug) === 1;
+  } catch {
+    return false;
+  }
 }
 
 // ---------- SQL 基础 ----------
@@ -832,31 +843,36 @@ async function adminerAlter(c: any): Promise<Response> {
 // ---------- dispatcher ----------
 
 export async function handleAdminer(c: any, act: string, appHost: string, staticPath: string): Promise<Response> {
-  switch (act) {
-    case "tables":
-      return adminerTables(c);
-    case "info":
-      return adminerInfo(c);
-    case "structure":
-      return adminerStructure(c);
-    case "data":
-      return adminerData(c);
-    case "query":
-      return adminerQuery(c);
-    case "row":
-      return adminerRow(c);
-    case "create":
-      return adminerCreate(c);
-    case "alter":
-      return adminerAlter(c);
-    case "drop":
-      return adminerDrop(c);
-    case "export":
-      return adminerExport(c);
-    case "import":
-      return adminerImport(c);
-    default:
-      return renderAdminer(c, appHost, staticPath);
+  try {
+    switch (act) {
+      case "tables":
+        return adminerTables(c);
+      case "info":
+        return adminerInfo(c);
+      case "structure":
+        return adminerStructure(c);
+      case "data":
+        return adminerData(c);
+      case "query":
+        return adminerQuery(c);
+      case "row":
+        return adminerRow(c);
+      case "create":
+        return adminerCreate(c);
+      case "alter":
+        return adminerAlter(c);
+      case "drop":
+        return adminerDrop(c);
+      case "export":
+        return adminerExport(c);
+      case "import":
+        return adminerImport(c);
+      default:
+        return renderAdminer(c, appHost, staticPath);
+    }
+  } catch (e: any) {
+    const debug = await adminerDebugOn(c);
+    return c.json({ code: false, data: debug ? String((e && e.stack) || e) : "adminer.execError" });
   }
 }
 
@@ -873,6 +889,7 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
   }
   const pluginHost = `${staticPath}plugins/adminer/`;
   const apiBase = `${appHost}index.php?plugin/adminer/`;
+  const debug = await adminerDebugOn(c);
 
   const html = `<!doctype html>
 <html lang="en">
@@ -903,8 +920,10 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
   </p>
 </div></div>
 <div class="toggle-menu"></div>
+<div id="adminerDebug" style="display:none;position:fixed;left:0;right:0;bottom:0;max-height:35%;overflow:auto;background:#1e1e1e;color:#d4d4d4;font:12px/1.5 monospace;padding:8px 12px;border-top:2px solid #e8a33d;z-index:9999"></div>
 <script>
 var apiBase = ${JSON.stringify(apiBase)};
+var DEBUG = ${debug ? 1 : 0};
 var TYPE_LIST = ['INTEGER','TEXT','REAL','BLOB','NUMERIC','BOOLEAN','DATE','DATETIME','TIMESTAMP','VARCHAR','CHAR','DECIMAL','DOUBLE','FLOAT','BIGINT','SMALLINT','CLOB','JSON'];
 var LANG = {
   en: { sqlCommand:'SQL command', import:'Import', export:'Export', createTable:'Create table', alterTable:'Alter table', selectData:'Select data', structure:'Structure', newItem:'New item', edit:'edit', del:'delete', save:'Save', cancel:'Cancel', refresh:'Refresh', execute:'Execute', clear:'Clear', rows:'row(s)', page:'Page', prev:'<', next:'>', indexes:'Indexes', foreignKeys:'Foreign keys', triggers:'Triggers', ddl:'Create code', columns:'Columns', name:'Name', type:'Type', nullable:'Nullable', default:'Default', primaryKey:'Primary key', unique:'Unique', importSql:'Import SQL / CSV', importHint:'Paste SQL statements (or CSV data with a header row), or choose a file.', loading:'Loading...', noTables:'No tables', noRows:'No rows', views:'Views', db:'D1', table:'Table', tableName:'Table name', format:'Format', file:'File', executed:'statement(s) executed', actions:'Actions', where:'WHERE', rowsPerPage:'Rows', size:'Size', addColumn:'Add column', dropColumn:'Drop column', renameColumn:'Rename column', renameTable:'Rename table', addIndex:'Add index', dropIndex:'Drop index', column:'Column', length:'Length', notnull:'Not NULL', autoIncrement:'Auto increment', add:'Add', remove:'Remove', drop:'Drop', empty:'Empty', confirmDrop:'Drop this object? This cannot be undone.', confirmEmpty:'Delete ALL rows in this table?', confirmDelete:'Delete this row?', newTableName:'New name', from:'From', to:'To', ifNotExists:'IF NOT EXISTS', affected:'row(s) affected', selectTable:'Select a table from the left.' },
@@ -918,18 +937,29 @@ function $(id){ return document.getElementById(id); }
 function busy(on){ $('ajaxstatus').textContent = on ? t('loading') : ''; }
 var state = { view:'sql', table:'', type:'table', columns:[], pk:[], canRowid:false, page:1, size:50, total:0, rows:[], where:'', order:'', dir:'asc' };
 
+function dbg(label, data){
+  if (!DEBUG) return;
+  var box = $('adminerDebug'); if (!box) return;
+  box.style.display = 'block';
+  var line = document.createElement('div');
+  line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + label + ' ' + (data === undefined ? '' : (typeof data === 'string' ? data : JSON.stringify(data)));
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
 function apiGet(act, params){
   var u = apiBase + act, qs = [], k;
   for (k in (params || {})) { var v = params[k]; if (v !== undefined && v !== null && v !== '') qs.push(k + '=' + encodeURIComponent(v)); }
   if (qs.length) u += '&' + qs.join('&');
-  return fetch(u, { credentials:'include' }).then(function(r){ return r.json(); });
+  dbg('GET ' + act, params);
+  return fetch(u, { credentials:'include' }).then(function(r){ return r.json(); }).then(function(j){ dbg('GET ' + act + ' ->', j); return j; });
 }
 function apiPost(act, body){
-  return fetch(apiBase + act, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body || {}), credentials:'include' }).then(function(r){ return r.json(); });
+  dbg('POST ' + act, body);
+  return fetch(apiBase + act, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body || {}), credentials:'include' }).then(function(r){ return r.json(); }).then(function(j){ dbg('POST ' + act + ' ->', j); return j; });
 }
 function doPost(act, body, done){
   busy(true);
-  apiPost(act, body).then(function(res){ busy(false); if (!res || !res.code) { alert((res && res.data) || 'error'); return; } if (done) done(res); });
+  apiPost(act, body).then(function(res){ busy(false); if (!res || !res.code) { if (DEBUG) dbg('ERROR ' + act, res); alert((res && res.data) || 'error'); return; } if (done) done(res); }).catch(function(e){ busy(false); if (DEBUG) dbg('EXC ' + act, String(e)); alert(String(e)); });
 }
 function setTitle(s){ $('h2').textContent = s; document.title = s; }
 function setCrumb(parts){ $('breadcrumb').innerHTML = (parts && parts.length) ? parts.map(function(p, i){ return (i ? ' \u203a ' : '') + esc(p); }).join('') : ''; }
@@ -1322,6 +1352,7 @@ if (tgl) tgl.addEventListener('click', function(){ document.body.classList.toggl
 if (window.innerWidth < 769) { document.body.classList.add('app-page-small'); document.body.classList.add('menu-hide'); }
 loadTables();
 showSql();
+if (DEBUG) dbg('debug mode on', { apiBase: apiBase });
 </script>
 </body>
 </html>`;
