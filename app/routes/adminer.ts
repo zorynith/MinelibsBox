@@ -1028,6 +1028,14 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
 <link rel="stylesheet" href="${pluginHost}adminer/adminer.css">
+<style>
+#page input[type=button]{margin:0 5px 6px 0;padding:5px 11px;border:1px solid #d0cdc4;border-radius:3px;background:#fff;color:#2c3e50;cursor:pointer;vertical-align:middle;}
+#page input[type=button]:hover{background:#eef3f8;}
+#page input[type=button]:disabled{opacity:.45;cursor:default;}
+#page p{line-height:2.2;}
+td a{margin-right:8px;}
+
+</style>
 </head>
 <body class="ltr js">
 <div id="lang"><form onsubmit="return false"><label>Language: <select id="langSel"><option value="en">English</option><option value="zh">简体中文</option></select></label></form></div>
@@ -1224,17 +1232,13 @@ function renderData(){
   var pages = Math.max(1, Math.ceil(d.total / d.size)), editable = d.type !== 'view';
   var h = '';
   h += '<p class="links">';
-  h += '<input type="button" value="' + esc(t('newItem')) + '" ' + (editable ? 'onclick="showRow(null)"' : 'disabled') + '> ';
-  h += '<input type="button" value="' + esc(t('structure')) + '" onclick="showStructure()"> ';
-  h += '<input type="button" value="' + esc(t('alterTable')) + '" ' + (editable ? 'onclick="showAlter()"' : 'disabled') + '> ';
-  h += '<input type="button" value="' + esc(t('export')) + '" onclick="exportTable()"> ';
   h += '<input type="button" value="' + esc(t('empty')) + '" onclick="emptyTable()"> ';
   h += '<input type="button" value="' + esc(t('drop')) + '" onclick="dropObject()"> ';
   h += '<input type="button" value="' + esc(t('print')) + '" onclick="printView()"> ';
   h += '</p>';
-  h += '<p>' + esc(t('where')) + ': <input type="text" id="whereInput" style="width:40%" value="' + esc(d.where) + '"> ';
-  h += '<input type="button" value="' + esc(t('refresh')) + '" onclick="applyWhere()"> ';
-  h += esc(t('rowsPerPage')) + ' <input type="number" class="size" id="sizeInput" value="' + d.size + '" onchange="applySize()"> ';
+  h += '<p>' + esc(t('where')) + ': <input type="text" id="whereInput" style="width:50%" value="' + esc(d.where) + '"> ';
+  h += '<input type="button" value="' + esc(t('refresh')) + '" onclick="applyWhere()"></p>';
+  h += '<p>' + esc(t('rowsPerPage')) + ' <input type="number" class="size" id="sizeInput" value="' + d.size + '" onchange="applySize()"> ';
   h += '<input type="button" value="' + esc(t('first')) + '" ' + (d.page <= 1 ? 'disabled' : 'onclick="gotoPage(1)"') + '> ';
   h += '<input type="button" value="' + esc(t('prev')) + '" ' + (d.page <= 1 ? 'disabled' : 'onclick="gotoPage(' + (d.page - 1) + ')"') + '> ';
   h += '<input type="button" value="' + esc(t('next')) + '" ' + (d.page >= pages ? 'disabled' : 'onclick="gotoPage(' + (d.page + 1) + ')"') + '> ';
