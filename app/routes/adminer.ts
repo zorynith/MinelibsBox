@@ -303,21 +303,40 @@ async function adminerData(c: any): Promise<Response> {
   const colNames = meta.columns.map((x: any) => x.name);
   const size = Math.min(1000, Math.max(1, parseInt(c.req.query("size") || "50", 10) || 50));
   const page = Math.max(1, parseInt(c.req.query("page") || "1", 10) || 1);
-  let order = c.req.query("order") || "";
-  if (order && !colNames.includes(order)) order = "";
-  const dir = (c.req.query("dir") || "asc").toLowerCase() === "desc" ? "DESC" : "ASC";
+  const orderCols = (c.req.query("order") || "").split(",").map((s: string) => s.trim()).filter((col: string) => colNames.includes(col));
+  const dirs = (c.req.query("dir") || "").split(",").map((s: string) => s.trim().toLowerCase());
   const where = (c.req.query("where") || "").trim();
   const whereSql = where ? ` WHERE ${where}` : "";
   const countRow = (await safeAll(c, `SELECT COUNT(*) AS n FROM ${qi(table)}${whereSql}`))[0];
   const total = countRow ? Number(countRow.n) : 0;
   const select = meta.canRowid ? "rowid AS __rowid__, *" : "*";
-  const orderSql = order ? ` ORDER BY ${qi(order)} ${dir}` : "";
+  const orderSql = orderCols.length
+    ? ` ORDER BY ${orderCols.map((col: string, i: number) => `${qi(col)} ${dirs[i] === "desc" ? "DESC" : "ASC"}`).join(", ")}`
+    : "";
   const offset = (page - 1) * size;
   const rows = await safeAll(c, `SELECT ${select} FROM ${qi(table)}${whereSql}${orderSql} LIMIT ${size} OFFSET ${offset}`);
   return c.json({
     code: true,
-    data: { table, type: meta.type, columns: meta.columns, pk: meta.pk, canRowid: meta.canRowid, page, size, total, where, order, dir, rows },
+    data: { table, type: meta.type, columns: meta.columns, pk: meta.pk, canRowid: meta.canRowid, page, size, total, where, order: orderCols.join(","), dir: dirs.join(","), rows },
   });
+}
+
+/** 跨表搜索: 在所有表的文本列中 LIKE 匹配。 */
+async function adminerSearch(c: any): Promise<Response> {
+  if (!currentAdmin(c)) return deny(c);
+  const q = String(c.req.query("q") || "").trim();
+  if (!q) return fail(c, "empty query");
+  const tables = await safeAll(c, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
+  const results: Array<{ table: string; columns: string[]; rows: any[] }> = [];
+  for (const t of tables) {
+    const meta = await objectMeta(c, String(t.name));
+    const textCols = meta.columns.filter((col: any) => /TEXT|CHAR|CLOB/i.test(String(col.type || ""))).map((col: any) => String(col.name));
+    if (!textCols.length) continue;
+    const where = textCols.map((col: string) => `${qi(col)} LIKE ?`).join(" OR ");
+    const rows = await safeAll(c, `SELECT * FROM ${qi(String(t.name))} WHERE ${where} LIMIT 100`, textCols.map(() => `%${q}%`));
+    if (rows.length) results.push({ table: String(t.name), columns: meta.columns.map((col: any) => String(col.name)), rows });
+  }
+  return c.json({ code: true, data: { q, results } });
 }
 
 /** SQL 执行(支持多语句)。 */
@@ -490,6 +509,9 @@ function xmlEscape(v: any): string {
 async function adminerExport(c: any): Promise<Response> {
   if (!currentAdmin(c)) return deny(c);
   const format = (c.req.query("format") || "sql").toLowerCase();
+  const mode = (c.req.query("mode") || "both").toLowerCase();
+  const includeStructure = mode !== "data";
+  const includeData = mode !== "structure";
   const tablesParam = c.req.query("tables") || "";
   const only = c.req.query("table") || "";
   const selected = (tablesParam ? tablesParam.split(",") : only ? [only] : [])
@@ -565,27 +587,33 @@ async function adminerExport(c: any): Promise<Response> {
     for (const t of tables) {
       const name = String(t.name);
       out.push("");
-      out.push(`DROP TABLE IF EXISTS ${qi(name)};`);
-      out.push(String(t.sql || `CREATE TABLE ${qi(name)} ();`) + ";");
-      const meta = await objectMeta(c, name);
-      const colNames = meta.columns.map((x: any) => x.name);
-      if (colNames.length) {
-        const step = 500;
-        for (let offset = 0; ; offset += step) {
-          const rows = await safeAll(c, `SELECT * FROM ${qi(name)} LIMIT ${step} OFFSET ${offset}`);
-          if (!rows.length) break;
-          for (const row of rows) {
-            const vals = colNames.map((col: string) => sqlLiteral(row[col]));
-            out.push(`INSERT INTO ${qi(name)} (${colNames.map(qi).join(", ")}) VALUES (${vals.join(", ")});`);
+      if (includeStructure) {
+        out.push(`DROP TABLE IF EXISTS ${qi(name)};`);
+        out.push(String(t.sql || `CREATE TABLE ${qi(name)} ();`) + ";");
+      }
+      if (includeData) {
+        const meta = await objectMeta(c, name);
+        const colNames = meta.columns.map((x: any) => x.name);
+        if (colNames.length) {
+          const step = 500;
+          for (let offset = 0; ; offset += step) {
+            const rows = await safeAll(c, `SELECT * FROM ${qi(name)} LIMIT ${step} OFFSET ${offset}`);
+            if (!rows.length) break;
+            for (const row of rows) {
+              const vals = colNames.map((col: string) => sqlLiteral(row[col]));
+              out.push(`INSERT INTO ${qi(name)} (${colNames.map(qi).join(", ")}) VALUES (${vals.join(", ")});`);
+            }
+            if (rows.length < step) break;
           }
-          if (rows.length < step) break;
         }
       }
     }
-    for (const o of others) {
-      if (!o.sql) continue;
-      out.push("");
-      out.push(String(o.sql) + ";");
+    if (includeStructure) {
+      for (const o of others) {
+        if (!o.sql) continue;
+        out.push("");
+        out.push(String(o.sql) + ";");
+      }
     }
     out.push("COMMIT;");
     out.push("");
@@ -665,12 +693,14 @@ async function adminerImport(c: any): Promise<Response> {
   let sql = "";
   let format = "sql";
   let table = "";
+  let skipErrors = false;
   const ct = c.req.header("content-type") || "";
   try {
     if (ct.includes("multipart/form-data")) {
       const fd = await c.req.formData();
       format = String(fd.get("format") || "sql");
       table = String(fd.get("table") || "");
+      skipErrors = String(fd.get("skipErrors") || "") === "1";
       const f: any = fd.get("file");
       if (f && typeof f === "object" && typeof f.text === "function") sql = await f.text();
       else sql = String(fd.get("sql") || "");
@@ -680,6 +710,7 @@ async function adminerImport(c: any): Promise<Response> {
         sql = String(body.sql || "");
         format = String(body.format || "sql");
         table = String(body.table || "");
+        skipErrors = body.skipErrors === true || body.skipErrors === "1";
       } catch {
         sql = await c.req.text();
       }
@@ -698,35 +729,59 @@ async function adminerImport(c: any): Promise<Response> {
     const placeholders = header.map(() => "?").join(", ");
     const stmt = `INSERT INTO ${qi(table)} (${header.map(qi).join(", ")}) VALUES (${placeholders})`;
     let executed = 0;
+    const errors: string[] = [];
     const chunkSize = 100;
     for (let i = 0; i < data.length; i += chunkSize) {
       const chunk = data.slice(i, i + chunkSize);
-      const prepared = chunk.map((r) => c.env.DB.prepare(stmt).bind(...header.map((_, j) => bindValue(r[j]))));
-      try {
-        await c.env.DB.batch(prepared);
-        executed += chunk.length;
-      } catch (e: any) {
-        return fail(c, String(e?.message || e), { executed });
+      if (skipErrors) {
+        for (let j = 0; j < chunk.length; j++) {
+          try {
+            await c.env.DB.prepare(stmt).bind(...header.map((_, k) => bindValue(chunk[j][k]))).run();
+            executed++;
+          } catch (e: any) {
+            errors.push(String(e?.message || e));
+          }
+        }
+      } else {
+        const prepared = chunk.map((r) => c.env.DB.prepare(stmt).bind(...header.map((_, j) => bindValue(r[j]))));
+        try {
+          await c.env.DB.batch(prepared);
+          executed += chunk.length;
+        } catch (e: any) {
+          return fail(c, String(e?.message || e), { executed });
+        }
       }
     }
-    return c.json({ code: true, data: { executed } });
+    return c.json({ code: true, data: { executed, errors } });
   }
 
   const statements = splitStatements(sql);
   if (!statements.length) return fail(c, "no statements");
   let executed = 0;
+  const errors: string[] = [];
   const chunkSize = 50;
   for (let i = 0; i < statements.length; i += chunkSize) {
     const chunk = statements.slice(i, i + chunkSize);
-    const prepared = chunk.map((s) => c.env.DB.prepare(s));
-    try {
-      await c.env.DB.batch(prepared);
-      executed += chunk.length;
-    } catch (e: any) {
-      return fail(c, String(e?.message || e), { executed, failedAt: chunk[0] });
+    if (skipErrors) {
+      for (const s of chunk) {
+        try {
+          await c.env.DB.prepare(s).run();
+          executed++;
+        } catch (e: any) {
+          errors.push(String(e?.message || e));
+        }
+      }
+    } else {
+      const prepared = chunk.map((s) => c.env.DB.prepare(s));
+      try {
+        await c.env.DB.batch(prepared);
+        executed += chunk.length;
+      } catch (e: any) {
+        return fail(c, String(e?.message || e), { executed, failedAt: chunk[0] });
+      }
     }
   }
-  return c.json({ code: true, data: { executed } });
+  return c.json({ code: true, data: { executed, errors } });
 }
 
 /** 建表(列定义 + 可选索引)。 */
@@ -757,11 +812,21 @@ async function adminerCreate(c: any): Promise<Response> {
     let def = qi(cn) + " " + type;
     if (col.notnull) def += " NOT NULL";
     if (col.default !== undefined && col.default !== null && col.default !== "") def += " DEFAULT " + String(col.default);
+    if (col.foreignKey && col.foreignKey.refTable) {
+      def += ` REFERENCES ${qi(String(col.foreignKey.refTable))}${col.foreignKey.refColumn ? `(${qi(String(col.foreignKey.refColumn))})` : ""}`;
+    }
     if (col.pk) pkCols.push(cn);
     defs.push(def);
   }
   if (!defs.length) return fail(c, "no columns");
   if (pkCols.length && !autoCol) defs.push("PRIMARY KEY (" + pkCols.map(qi).join(", ") + ")");
+  const fks: any[] = Array.isArray(body.foreignKeys) ? body.foreignKeys : [];
+  for (const fk of fks) {
+    const fkCols: string[] = Array.isArray(fk.columns) ? fk.columns.filter(Boolean) : [];
+    if (!fkCols.length || !fk.refTable) continue;
+    const refCols: string[] = Array.isArray(fk.refColumns) ? fk.refColumns.filter(Boolean) : [];
+    defs.push(`FOREIGN KEY (${fkCols.map(qi).join(", ")}) REFERENCES ${qi(String(fk.refTable))}${refCols.length ? ` (${refCols.map(qi).join(", ")})` : ""}`);
+  }
   const createSql = `CREATE TABLE ${body.ifNotExists ? "IF NOT EXISTS " : ""}${qi(name)} (\n  ${defs.join(",\n  ")}\n)`;
   const executed: string[] = [createSql];
   try {
@@ -848,6 +913,57 @@ async function adminerAlter(c: any): Promise<Response> {
   }
 }
 
+/** 创建/替换视图。 */
+async function adminerCreateView(c: any): Promise<Response> {
+  if (!currentAdmin(c)) return deny(c);
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    /* empty */
+  }
+  const name = String(body.name || "").trim();
+  const selectSql = String(body.sql || "").trim();
+  if (!name) return fail(c, "missing view name");
+  if (!selectSql) return fail(c, "missing SELECT sql");
+  if (!/^select\b/i.test(selectSql)) return fail(c, "view SQL must be a SELECT");
+  try {
+    const s = `CREATE ${body.replace === true ? "OR REPLACE " : ""}VIEW ${qi(name)} AS ${selectSql}`;
+    await runStmt(c, s);
+    return c.json({ code: true, data: { executed: [s] } });
+  } catch (e: any) {
+    return fail(c, String(e?.message || e));
+  }
+}
+
+/** 创建触发器。 */
+async function adminerCreateTrigger(c: any): Promise<Response> {
+  if (!currentAdmin(c)) return deny(c);
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    /* empty */
+  }
+  const name = String(body.name || "").trim();
+  const table = String(body.table || "").trim();
+  const timing = String(body.timing || "BEFORE").toUpperCase();
+  const event = String(body.event || "INSERT").toUpperCase();
+  const sql = String(body.sql || "").trim();
+  if (!name || !table) return fail(c, "missing name/table");
+  if (!["BEFORE", "AFTER", "INSTEAD OF"].includes(timing)) return fail(c, "bad timing");
+  if (!["INSERT", "UPDATE", "DELETE"].includes(event)) return fail(c, "bad event");
+  if (!sql) return fail(c, "missing trigger body");
+  try {
+    const body = sql.replace(/;+\s*$/, "");
+    const s = `CREATE TRIGGER ${qi(name)} ${timing} ${event} ON ${qi(table)} BEGIN ${body}; END`;
+    await runStmt(c, s);
+    return c.json({ code: true, data: { executed: [s] } });
+  } catch (e: any) {
+    return fail(c, String(e?.message || e));
+  }
+}
+
 // ---------- dispatcher ----------
 
 export async function handleAdminer(c: any, act: string, appHost: string, staticPath: string): Promise<Response> {
@@ -863,10 +979,16 @@ export async function handleAdminer(c: any, act: string, appHost: string, static
         return adminerData(c);
       case "query":
         return adminerQuery(c);
+      case "search":
+        return adminerSearch(c);
       case "row":
         return adminerRow(c);
       case "create":
         return adminerCreate(c);
+      case "createView":
+        return adminerCreateView(c);
+      case "createTrigger":
+        return adminerCreateTrigger(c);
       case "alter":
         return adminerAlter(c);
       case "drop":
@@ -919,12 +1041,16 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <div id="foot"><div id="menu">
   <h1><a href="javascript:void(0)" id="h1">Adminer</a> <span class="version" id="version">D1</span></h1>
   <p id="dbs"><span>SQLite / D1</span></p>
+  <p id="tableFilter" style="display:none"><input type="text" id="tableFilterInput" oninput="filterTables(this.value)" placeholder="filter" style="width:92%"></p>
   <div id="tables"><p class="error">Loading...</p></div>
   <p class="links">
     <a href="javascript:void(0)" data-nav="sql">SQL command</a><br>
+    <a href="javascript:void(0)" data-nav="search">Search</a><br>
     <a href="javascript:void(0)" data-nav="import">Import</a><br>
     <a href="javascript:void(0)" data-nav="export">Export</a><br>
-    <a href="javascript:void(0)" data-nav="create">Create table</a>
+    <a href="javascript:void(0)" data-nav="create">Create table</a><br>
+    <a href="javascript:void(0)" data-nav="createView">Create view</a><br>
+    <a href="javascript:void(0)" data-nav="createTrigger">Create trigger</a>
   </p>
 </div></div>
 <div class="toggle-menu"></div>
@@ -934,8 +1060,8 @@ var apiBase = ${JSON.stringify(apiBase)};
 var DEBUG = ${debug ? 1 : 0};
 var TYPE_LIST = ['INTEGER','TEXT','REAL','BLOB','NUMERIC','BOOLEAN','DATE','DATETIME','TIMESTAMP','VARCHAR','CHAR','DECIMAL','DOUBLE','FLOAT','BIGINT','SMALLINT','CLOB','JSON'];
 var LANG = {
-  en: { sqlCommand:'SQL command', import:'Import', export:'Export', createTable:'Create table', alterTable:'Alter table', selectData:'Select data', structure:'Structure', newItem:'New item', edit:'edit', del:'delete', save:'Save', cancel:'Cancel', refresh:'Refresh', execute:'Execute', clear:'Clear', rows:'row(s)', page:'Page', prev:'<', next:'>', indexes:'Indexes', foreignKeys:'Foreign keys', triggers:'Triggers', ddl:'Create code', columns:'Columns', name:'Name', type:'Type', nullable:'Nullable', default:'Default', primaryKey:'Primary key', unique:'Unique', importSql:'Import SQL / CSV', importHint:'Paste SQL statements (or CSV data with a header row), or choose a file.', loading:'Loading...', noTables:'No tables', noRows:'No rows', views:'Views', db:'D1', table:'Table', tableName:'Table name', format:'Format', file:'File', executed:'statement(s) executed', actions:'Actions', where:'WHERE', rowsPerPage:'Rows', size:'Size', addColumn:'Add column', dropColumn:'Drop column', renameColumn:'Rename column', renameTable:'Rename table', addIndex:'Add index', dropIndex:'Drop index', column:'Column', length:'Length', notnull:'Not NULL', autoIncrement:'Auto increment', add:'Add', remove:'Remove', drop:'Drop', empty:'Empty', confirmDrop:'Drop this object? This cannot be undone.', confirmEmpty:'Delete ALL rows in this table?', confirmDelete:'Delete this row?', newTableName:'New name', from:'From', to:'To', ifNotExists:'IF NOT EXISTS', affected:'row(s) affected', selectTable:'Select a table from the left.' },
-  zh: { sqlCommand:'SQL 命令', import:'导入', export:'导出', createTable:'新建数据表', alterTable:'修改表', selectData:'浏览数据', structure:'结构', newItem:'新建记录', edit:'编辑', del:'删除', save:'保存', cancel:'取消', refresh:'刷新', execute:'执行', clear:'清空', rows:'行', page:'第', prev:'<', next:'>', indexes:'索引', foreignKeys:'外键', triggers:'触发器', ddl:'建表语句', columns:'字段', name:'名称', type:'类型', nullable:'可空', default:'默认值', primaryKey:'主键', unique:'唯一', importSql:'导入 SQL / CSV', importHint:'粘贴 SQL 语句（或带表头的 CSV 数据），也可选择文件。', loading:'加载中...', noTables:'没有数据表', noRows:'没有数据', views:'视图', db:'D1', table:'表', tableName:'表名', format:'格式', file:'文件', executed:'条语句已执行', actions:'操作', where:'条件', rowsPerPage:'每页', size:'宽度', addColumn:'添加字段', dropColumn:'删除字段', renameColumn:'重命名字段', renameTable:'重命名表', addIndex:'添加索引', dropIndex:'删除索引', column:'字段', length:'长度', notnull:'非空', autoIncrement:'自增', add:'添加', remove:'删除', drop:'删除表', empty:'清空', confirmDrop:'确定删除该对象？不可恢复。', confirmEmpty:'确定删除该表全部数据？', confirmDelete:'确定删除该行？', newTableName:'新名称', from:'从', to:'到', ifNotExists:'若不存在', affected:'行受影响', selectTable:'请从左侧选择数据表。' }
+  en: { sqlCommand:'SQL command', import:'Import', export:'Export', createTable:'Create table', alterTable:'Alter table', selectData:'Select data', structure:'Structure', newItem:'New item', edit:'edit', del:'delete', save:'Save', cancel:'Cancel', refresh:'Refresh', execute:'Execute', clear:'Clear', rows:'row(s)', page:'Page', prev:'<', next:'>', indexes:'Indexes', foreignKeys:'Foreign keys', triggers:'Triggers', ddl:'Create code', columns:'Columns', name:'Name', type:'Type', nullable:'Nullable', default:'Default', primaryKey:'Primary key', unique:'Unique', importSql:'Import SQL / CSV', importHint:'Paste SQL statements (or CSV data with a header row), or choose a file.', loading:'Loading...', noTables:'No tables', noRows:'No rows', views:'Views', db:'D1', table:'Table', tableName:'Table name', format:'Format', file:'File', executed:'statement(s) executed', actions:'Actions', where:'WHERE', rowsPerPage:'Rows', size:'Size', addColumn:'Add column', dropColumn:'Drop column', renameColumn:'Rename column', renameTable:'Rename table', addIndex:'Add index', dropIndex:'Drop index', column:'Column', length:'Length', notnull:'Not NULL', autoIncrement:'Auto increment', add:'Add', remove:'Remove', drop:'Drop', empty:'Empty', confirmDrop:'Drop this object? This cannot be undone.', confirmEmpty:'Delete ALL rows in this table?', confirmDelete:'Delete this row?', newTableName:'New name', from:'From', to:'To', ifNotExists:'IF NOT EXISTS', affected:'row(s) affected', selectTable:'Select a table from the left.', search:'Search', searchHint:'Search text across all tables', clone:'clone', print:'Print', createView:'Create view', createTrigger:'Create trigger', first:'<<', last:'>>', structureOnly:'Structure only', dataOnly:'Data only', both:'Structure + data', skipErrors:'Skip errors', history:'History', filter:'Filter', viewName:'View name', selectSql:'SELECT statement', triggerName:'Trigger name', timing:'Timing', event:'Event', triggerBody:'Trigger body (SQL statements)', refTable:'Reference table', refColumn:'Reference column', foreignKey:'Foreign key', noMatches:'No matches', copied:'row copied' },
+  zh: { sqlCommand:'SQL 命令', import:'导入', export:'导出', createTable:'新建数据表', alterTable:'修改表', selectData:'浏览数据', structure:'结构', newItem:'新建记录', edit:'编辑', del:'删除', save:'保存', cancel:'取消', refresh:'刷新', execute:'执行', clear:'清空', rows:'行', page:'第', prev:'<', next:'>', indexes:'索引', foreignKeys:'外键', triggers:'触发器', ddl:'建表语句', columns:'字段', name:'名称', type:'类型', nullable:'可空', default:'默认值', primaryKey:'主键', unique:'唯一', importSql:'导入 SQL / CSV', importHint:'粘贴 SQL 语句（或带表头的 CSV 数据），也可选择文件。', loading:'加载中...', noTables:'没有数据表', noRows:'没有数据', views:'视图', db:'D1', table:'表', tableName:'表名', format:'格式', file:'文件', executed:'条语句已执行', actions:'操作', where:'条件', rowsPerPage:'每页', size:'宽度', addColumn:'添加字段', dropColumn:'删除字段', renameColumn:'重命名字段', renameTable:'重命名表', addIndex:'添加索引', dropIndex:'删除索引', column:'字段', length:'长度', notnull:'非空', autoIncrement:'自增', add:'添加', remove:'删除', drop:'删除表', empty:'清空', confirmDrop:'确定删除该对象？不可恢复。', confirmEmpty:'确定删除该表全部数据？', confirmDelete:'确定删除该行？', newTableName:'新名称', from:'从', to:'到', ifNotExists:'若不存在', affected:'行受影响', selectTable:'请从左侧选择数据表。', search:'搜索', searchHint:'在所有表中搜索文本', clone:'克隆', print:'打印', createView:'新建视图', createTrigger:'新建触发器', first:'<<', last:'>>', structureOnly:'仅结构', dataOnly:'仅数据', both:'结构+数据', skipErrors:'跳过错误继续', history:'历史', filter:'过滤', viewName:'视图名', selectSql:'SELECT 语句', triggerName:'触发器名', timing:'时机', event:'事件', triggerBody:'触发器体（SQL 语句）', refTable:'引用表', refColumn:'引用列', foreignKey:'外键', noMatches:'无匹配', copied:'行已复制' }
 };
 var L = (navigator.language && navigator.language.indexOf('zh') === 0) ? LANG.zh : LANG.en;
 function t(k){ return (L[k] !== undefined ? L[k] : (LANG.en[k] !== undefined ? LANG.en[k] : k)); }
@@ -976,25 +1102,37 @@ function tabBtn(label, code, active){ return '<a href="javascript:void(0)" oncli
 function notEditable(){ alert(t('selectTable')); }
 function typeOptions(sel){ var h = ''; TYPE_LIST.forEach(function(x){ h += '<option value="' + x + '"' + (x === sel ? ' selected' : '') + '>' + x + '</option>'; }); return h; }
 
+var tableList = [];
 function loadTables(){
+  var box = $('tables');
+  $('tableFilter').style.display = '';
+  $('tableFilterInput').placeholder = t('filter');
   apiGet('tables').then(function(res){
-    var box = $('tables');
     if (!res || !res.code) { box.innerHTML = '<p class="error">' + esc(res && res.data) + '</p>'; return; }
-    var list = res.data || [], tablesHtml = '', viewsHtml = '';
-    list.forEach(function(it){
-      var a = '<a href="javascript:void(0)" data-table="' + esc(it.name) + '"' + (state.table === it.name ? ' class="active"' : '') + ' title="' + esc(it.name) + '">' + esc(it.name) + '</a>';
-      if (it.type === 'view') viewsHtml += a; else tablesHtml += a;
-    });
-    box.innerHTML = tablesHtml + (viewsHtml ? '<br><b>' + esc(t('views')) + '</b>' + viewsHtml : '');
+    tableList = res.data || [];
+    renderTableList('');
   });
   apiGet('info').then(function(res){ if (res && res.code && res.data) $('version').textContent = 'SQLite ' + (res.data.version || ''); });
 }
+function renderTableList(filter){
+  var box = $('tables'), tablesHtml = '', viewsHtml = '', kw = (filter || '').toLowerCase();
+  tableList.forEach(function(it){
+    if (kw && String(it.name).toLowerCase().indexOf(kw) < 0) return;
+    var a = '<a href="javascript:void(0)" data-table="' + esc(it.name) + '"' + (state.table === it.name ? ' class="active"' : '') + ' title="' + esc(it.name) + '">' + esc(it.name) + '</a>';
+    if (it.type === 'view') viewsHtml += a; else tablesHtml += a;
+  });
+  box.innerHTML = (tablesHtml || viewsHtml) ? tablesHtml + (viewsHtml ? '<br><b>' + esc(t('views')) + '</b>' + viewsHtml : '') : '<p>' + esc(t('noTables')) + '</p>';
+}
+function filterTables(v){ renderTableList(v); }
 
 function nav(view){
   if (view === 'sql') return showSql();
+  if (view === 'search') return showSearch();
   if (view === 'import') return showImport();
   if (view === 'export') return showExport();
   if (view === 'create') return showCreate();
+  if (view === 'createView') return showCreateView();
+  if (view === 'createTrigger') return showCreateTrigger();
 }
 function tableTabs(active){
   tabs(
@@ -1006,16 +1144,32 @@ function tableTabs(active){
   );
 }
 
+function sqlHistory(){ try { return JSON.parse(localStorage.getItem('adminer_sql_history') || '[]'); } catch(e){ return []; } }
+function sqlHistoryPush(sql){
+  var h = sqlHistory(); h = h.filter(function(x){ return x !== sql; }); h.unshift(sql); h = h.slice(0, 20);
+  try { localStorage.setItem('adminer_sql_history', JSON.stringify(h)); } catch(e){}
+}
 function showSql(){
   state.view = 'sql'; state.table = ''; setTitle(t('sqlCommand')); setCrumb([t('sqlCommand')]); tabs('');
+  var hist = sqlHistory(), histHtml = '';
+  if (hist.length) {
+    histHtml = '<select id="sqlHist" onchange="useHistory()"><option value="">' + esc(t('history')) + '</option>';
+    hist.forEach(function(x, i){ histHtml += '<option value="' + i + '">' + esc(String(x).slice(0, 80)) + '</option>'; });
+    histHtml += '</select> ';
+  }
   $('page').innerHTML = '<form onsubmit="return runSql();"><textarea id="sql" rows="8" style="width:100%"></textarea>' +
-    '<p><input type="submit" value="' + esc(t('execute')) + '"> <input type="button" value="' + esc(t('clear')) + '" onclick="clearSql()"></p></form><div id="result"></div>';
+    '<p>' + histHtml + '<input type="submit" value="' + esc(t('execute')) + '"> <input type="button" value="' + esc(t('clear')) + '" onclick="clearSql()"></p></form><div id="result"></div>';
   var s = $('sql'); if (s) s.focus();
+}
+function useHistory(){
+  var sel = $('sqlHist'), hist = sqlHistory();
+  if (sel && sel.value !== '' && hist[sel.value]) { $('sql').value = hist[sel.value]; }
 }
 function clearSql(){ var s = $('sql'); if (s) s.value = ''; $('result').innerHTML = ''; }
 function runSql(sqlOverride){
   var sql = sqlOverride || $('sql').value;
   if (!sql || !sql.trim()) return false;
+  if (!sqlOverride) sqlHistoryPush(sql);
   $('sql').value = sql;
   $('result').innerHTML = '<p>' + t('loading') + '</p>';
   apiPost('query', { sql: sql }).then(function(res){ renderQueryResults('result', res); });
@@ -1076,16 +1230,22 @@ function renderData(){
   h += '<input type="button" value="' + esc(t('export')) + '" onclick="exportTable()"> ';
   h += '<input type="button" value="' + esc(t('empty')) + '" onclick="emptyTable()"> ';
   h += '<input type="button" value="' + esc(t('drop')) + '" onclick="dropObject()"> ';
+  h += '<input type="button" value="' + esc(t('print')) + '" onclick="printView()"> ';
   h += '</p>';
   h += '<p>' + esc(t('where')) + ': <input type="text" id="whereInput" style="width:40%" value="' + esc(d.where) + '"> ';
   h += '<input type="button" value="' + esc(t('refresh')) + '" onclick="applyWhere()"> ';
   h += esc(t('rowsPerPage')) + ' <input type="number" class="size" id="sizeInput" value="' + d.size + '" onchange="applySize()"> ';
+  h += '<input type="button" value="' + esc(t('first')) + '" ' + (d.page <= 1 ? 'disabled' : 'onclick="gotoPage(1)"') + '> ';
   h += '<input type="button" value="' + esc(t('prev')) + '" ' + (d.page <= 1 ? 'disabled' : 'onclick="gotoPage(' + (d.page - 1) + ')"') + '> ';
   h += '<input type="button" value="' + esc(t('next')) + '" ' + (d.page >= pages ? 'disabled' : 'onclick="gotoPage(' + (d.page + 1) + ')"') + '> ';
+  h += '<input type="button" value="' + esc(t('last')) + '" ' + (d.page >= pages ? 'disabled' : 'onclick="gotoPage(' + pages + ')"') + '> ';
   h += esc(t('page')) + ' ' + d.page + '/' + pages + ' (' + d.total + ' ' + esc(t('rows')) + ')</p>';
+  var orderCols = (d.order || '').split(',').filter(Boolean);
+  var orderDirs = (d.dir || '').split(',');
   h += '<table class="nowrap checkable"><thead><tr>';
   colNames.forEach(function(c){
-    var mark = (d.order === c) ? (d.dir === 'asc' ? ' \u2191' : ' \u2193') : '';
+    var oi = orderCols.indexOf(c);
+    var mark = oi >= 0 ? (orderDirs[oi] === 'desc' ? ' \u2193' : ' \u2191') + (orderCols.length > 1 ? (oi + 1) : '') : '';
     h += '<th><a href="javascript:void(0)" data-sort="' + esc(c) + '">' + esc(c) + mark + '</a></th>';
   });
   if (editable) h += '<th>' + esc(t('actions')) + '</th>';
@@ -1093,7 +1253,7 @@ function renderData(){
   d.rows.forEach(function(row, i){
     h += '<tr class="' + (i % 2 ? 'odd' : 'even') + '">';
     colNames.forEach(function(c){ var v = row[c]; h += '<td>' + (v === null || v === undefined ? '<i>NULL</i>' : esc(v)) + '</td>'; });
-    if (editable) h += '<td><a href="javascript:void(0)" onclick="showRow(state.rows[' + i + '])">' + esc(t('edit')) + '</a> <a href="javascript:void(0)" onclick="deleteRow(' + i + ')">' + esc(t('del')) + '</a></td>';
+    if (editable) h += '<td><a href="javascript:void(0)" onclick="showRow(state.rows[' + i + '])">' + esc(t('edit')) + '</a> <a href="javascript:void(0)" onclick="cloneRow(' + i + ')">' + esc(t('clone')) + '</a> <a href="javascript:void(0)" onclick="deleteRow(' + i + ')">' + esc(t('del')) + '</a></td>';
     h += '</tr>';
   });
   h += '</tbody></table>';
@@ -1103,7 +1263,27 @@ function renderData(){
 function gotoPage(p){ state.page = p; loadData(); }
 function applyWhere(){ state.where = $('whereInput').value; state.page = 1; loadData(); }
 function applySize(){ var v = parseInt($('sizeInput').value, 10); if (v > 0 && v <= 1000) { state.size = v; state.page = 1; loadData(); } }
-function sortBy(c){ if (state.order === c) { state.dir = (state.dir === 'asc' ? 'desc' : 'asc'); } else { state.order = c; state.dir = 'asc'; } state.page = 1; loadData(); }
+function sortBy(c, additive){
+  var cols = (state.order || '').split(',').filter(Boolean);
+  var dirs = (state.dir || '').split(',').filter(Boolean);
+  var i = cols.indexOf(c);
+  if (additive) {
+    if (i >= 0) { dirs[i] = (dirs[i] === 'desc' ? 'asc' : 'desc'); }
+    else { cols.push(c); dirs.push('asc'); }
+  } else {
+    if (cols.length === 1 && i === 0) { dirs[0] = (dirs[0] === 'desc' ? 'asc' : 'desc'); }
+    else { cols = [c]; dirs = ['asc']; }
+  }
+  state.order = cols.join(','); state.dir = dirs.join(',');
+  state.page = 1; loadData();
+}
+function printView(){ window.print(); }
+function cloneRow(i){
+  var src = state.rows[i], values = {};
+  state.columns.forEach(function(c){ values[c.name] = (state.pk.indexOf(c.name) >= 0) ? null : src[c.name]; });
+  window.__cloneValues = values;
+  showRow(null);
+}
 
 function rowLocator(row){
   var loc = { pk:{}, rowid:null };
@@ -1118,14 +1298,20 @@ function showRow(row){
   tableTabs('row');
   var h = '<form onsubmit="return saveRow(event)"><table class="nowrap"><tbody>';
   state.columns.forEach(function(c){
-    var v = row ? row[c.name] : null;
+    var v = row ? row[c.name] : (window.__cloneValues ? window.__cloneValues[c.name] : null);
+    var isText = /TEXT|CLOB|CHAR/i.test(c.type || '');
     var nullChecked = row && (v === null || v === undefined) ? ' checked' : '';
     h += '<tr><th>' + esc(c.name) + '<div class="field-type">' + esc(c.type || '') + (c.notnull ? ' NOT NULL' : '') + (c.pk ? ' [PK]' : '') + '</div></th>';
-    h += '<td><input data-col="' + esc(c.name) + '" value="' + (v === null || v === undefined ? '' : esc(v)) + '"> <label><input type="checkbox" data-null="' + esc(c.name) + '"' + nullChecked + '> NULL</label></td></tr>';
+    if (isText) {
+      h += '<td><textarea data-col="' + esc(c.name) + '" rows="2" style="width:90%">' + (v === null || v === undefined ? '' : esc(v)) + '</textarea> <label><input type="checkbox" data-null="' + esc(c.name) + '"' + nullChecked + '> NULL</label></td></tr>';
+    } else {
+      h += '<td><input data-col="' + esc(c.name) + '" value="' + (v === null || v === undefined ? '' : esc(v)) + '"> <label><input type="checkbox" data-null="' + esc(c.name) + '"' + nullChecked + '> NULL</label></td></tr>';
+    }
   });
   h += '</tbody></table><p><input type="submit" value="' + esc(t('save')) + '"> <input type="button" value="' + esc(t('cancel')) + '" onclick="showTable(state.table, state.page)"></p></form>';
   $('page').innerHTML = h;
   window.__editRow = row || null;
+  window.__cloneValues = null;
 }
 function saveRow(ev){
   ev.preventDefault();
@@ -1166,8 +1352,8 @@ function renderStructure(res){
   });
   h += '</tbody></table>';
   if ((d.indexes || []).length) {
-    h += '<h3>' + esc(t('indexes')) + '</h3><table class="nowrap"><thead><tr><th>' + esc(t('name')) + '</th><th>' + esc(t('unique')) + '</th><th>' + esc(t('columns')) + '</th></tr></thead><tbody>';
-    d.indexes.forEach(function(ix){ h += '<tr><td>' + esc(ix.name) + '</td><td>' + (ix.unique ? 'YES' : '') + '</td><td>' + esc((ix.columns || []).join(', ')) + '</td></tr>'; });
+    h += '<h3>' + esc(t('indexes')) + '</h3><table class="nowrap"><thead><tr><th>' + esc(t('name')) + '</th><th>' + esc(t('unique')) + '</th><th>' + esc(t('columns')) + '</th><th>' + esc(t('actions')) + '</th></tr></thead><tbody>';
+    d.indexes.forEach(function(ix){ h += '<tr><td>' + esc(ix.name) + '</td><td>' + (ix.unique ? 'YES' : '') + '</td><td>' + esc((ix.columns || []).join(', ')) + '</td><td>' + (ix.origin === 'c' ? '<a href="javascript:void(0)" data-drop="index" data-drop-name="' + esc(ix.name) + '">' + esc(t('del')) + '</a>' : '') + '</td></tr>'; });
     h += '</tbody></table>';
   }
   if ((d.foreignKeys || []).length) {
@@ -1176,8 +1362,8 @@ function renderStructure(res){
     h += '</tbody></table>';
   }
   if ((d.triggers || []).length) {
-    h += '<h3>' + esc(t('triggers')) + '</h3><table class="nowrap"><thead><tr><th>' + esc(t('name')) + '</th><th>SQL</th></tr></thead><tbody>';
-    d.triggers.forEach(function(g){ h += '<tr><td>' + esc(g.name) + '</td><td>' + esc(g.sql) + '</td></tr>'; });
+    h += '<h3>' + esc(t('triggers')) + '</h3><table class="nowrap"><thead><tr><th>' + esc(t('name')) + '</th><th>SQL</th><th>' + esc(t('actions')) + '</th></tr></thead><tbody>';
+    d.triggers.forEach(function(g){ h += '<tr><td>' + esc(g.name) + '</td><td>' + esc(g.sql) + '</td><td><a href="javascript:void(0)" data-drop="trigger" data-drop-name="' + esc(g.name) + '">' + esc(t('del')) + '</a></td></tr>'; });
     h += '</tbody></table>';
   }
   h += '<h3>' + esc(t('ddl')) + '</h3><pre class="message">' + esc(d.sql) + '</pre>';
@@ -1190,6 +1376,10 @@ function dropObject(){
     state.table = ''; loadTables(); showSql();
   });
 }
+function dropObjectByName(type, name){
+  if (!confirm(t('confirmDrop'))) return;
+  doPost('drop', { type: type, name: name }, function(){ loadTables(); if (state.table) showStructure(); });
+}
 function emptyTable(){
   if (!state.table) return;
   if (!confirm(t('confirmEmpty'))) return;
@@ -1197,11 +1387,86 @@ function emptyTable(){
 }
 function exportTable(){ if (state.table) window.open(apiBase + 'export&table=' + encodeURIComponent(state.table), '_blank'); }
 
+function showSearch(){
+  state.view = 'search'; state.table = ''; setTitle(t('search')); setCrumb([t('search')]); tabs('');
+  $('page').innerHTML = '<p>' + esc(t('searchHint')) + '</p><form onsubmit="return runSearch()">' +
+    '<input type="text" id="searchInput" style="width:50%"> <input type="submit" value="' + esc(t('execute')) + '"></form><div id="result"></div>';
+  $('searchInput').focus();
+}
+function runSearch(){
+  var q = $('searchInput').value.trim();
+  if (!q) return false;
+  $('result').innerHTML = '<p>' + t('loading') + '</p>';
+  apiGet('search', { q: q }).then(function(res){
+    var box = $('result');
+    if (!res || !res.code) { box.innerHTML = '<p class="error">' + esc(res && res.data) + '</p>'; return; }
+    var results = (res.data && res.data.results) || [], h = '';
+    if (!results.length) { box.innerHTML = '<p>' + esc(t('noMatches')) + '</p>'; return; }
+    results.forEach(function(r){
+      h += '<h3>' + esc(r.table) + ' (' + r.rows.length + ' ' + esc(t('rows')) + ')</h3>';
+      h += tableHtml(r.columns, r.rows);
+    });
+    box.innerHTML = h;
+  });
+  return false;
+}
+
+function showCreateView(){
+  state.view = 'createView'; state.table = ''; setTitle(t('createView')); setCrumb([t('createView')]); tabs('');
+  $('page').innerHTML = '<form onsubmit="return submitCreateView(event)">' +
+    '<p>' + esc(t('viewName')) + ': <input id="cvName" autocomplete="off"> <label><input type="checkbox" id="cvReplace"> OR REPLACE</label></p>' +
+    '<p>' + esc(t('selectSql')) + ':</p>' +
+    '<textarea id="cvSql" rows="6" style="width:100%"></textarea>' +
+    '<p><input type="submit" value="' + esc(t('save')) + '"> <input type="button" value="' + esc(t('cancel')) + '" onclick="nav(&quot;sql&quot;)"></p></form><div id="result"></div>';
+}
+function submitCreateView(ev){
+  ev.preventDefault();
+  var name = $('cvName').value.trim();
+  var sql = $('cvSql').value.trim();
+  if (!name || !sql) return false;
+  doPost('createView', { name: name, sql: sql, replace: $('cvReplace').checked }, function(res){
+    $('result').innerHTML = '<p class="message">' + esc((res.data.executed || []).join('; ')) + '</p>';
+    loadTables();
+  });
+  return false;
+}
+
+function showCreateTrigger(){
+  state.view = 'createTrigger'; state.table = ''; setTitle(t('createTrigger')); setCrumb([t('createTrigger')]); tabs('');
+  $('page').innerHTML = '<p>' + t('loading') + '</p>';
+  apiGet('tables').then(function(res){
+    var list = (res && res.data) || [], opts = '';
+    list.forEach(function(it){ if (it.type !== 'view') opts += '<option value="' + esc(it.name) + '">' + esc(it.name) + '</option>'; });
+    $('page').innerHTML = '<form onsubmit="return submitCreateTrigger(event)">' +
+      '<p>' + esc(t('triggerName')) + ': <input id="ctName" autocomplete="off"></p>' +
+      '<p>' + esc(t('table')) + ': <select id="ctTable">' + opts + '</select> ' +
+      esc(t('timing')) + ': <select id="ctTiming"><option>BEFORE</option><option>AFTER</option><option>INSTEAD OF</option></select> ' +
+      esc(t('event')) + ': <select id="ctEvent"><option>INSERT</option><option>UPDATE</option><option>DELETE</option></select></p>' +
+      '<p>' + esc(t('triggerBody')) + ':</p>' +
+      '<textarea id="ctSql" rows="6" style="width:100%"></textarea>' +
+      '<p><input type="submit" value="' + esc(t('save')) + '"> <input type="button" value="' + esc(t('cancel')) + '" onclick="nav(&quot;sql&quot;)"></p></form><div id="result"></div>';
+  });
+}
+function submitCreateTrigger(ev){
+  ev.preventDefault();
+  var name = $('ctName').value.trim();
+  var table = $('ctTable').value;
+  var timing = $('ctTiming').value;
+  var event = $('ctEvent').value;
+  var sql = $('ctSql').value.trim();
+  if (!name || !table || !sql) return false;
+  doPost('createTrigger', { name: name, table: table, timing: timing, event: event, sql: sql }, function(res){
+    $('result').innerHTML = '<p class="message">' + esc((res.data.executed || []).join('; ')) + '</p>';
+    loadTables();
+  });
+  return false;
+}
+
 function showCreate(){
   state.view = 'create'; state.table = ''; setTitle(t('createTable')); setCrumb([t('createTable')]); tabs('');
   var h = '<form id="createForm" onsubmit="return submitCreate(event)">';
   h += '<p>' + esc(t('tableName')) + ': <input id="createName" autocomplete="off"> <label><input type="checkbox" id="createIfNotExists"> ' + esc(t('ifNotExists')) + '</label></p>';
-  h += '<table class="nowrap"><thead><tr><th>#</th><th>' + esc(t('name')) + '</th><th>' + esc(t('type')) + '</th><th>' + esc(t('length')) + '</th><th>' + esc(t('default')) + '</th><th>' + esc(t('notnull')) + '</th><th>' + esc(t('autoIncrement')) + '</th><th>' + esc(t('primaryKey')) + '</th><th></th></tr></thead><tbody id="cols"></tbody></table>';
+  h += '<table class="nowrap"><thead><tr><th>#</th><th>' + esc(t('name')) + '</th><th>' + esc(t('type')) + '</th><th>' + esc(t('length')) + '</th><th>' + esc(t('default')) + '</th><th>' + esc(t('notnull')) + '</th><th>' + esc(t('autoIncrement')) + '</th><th>' + esc(t('primaryKey')) + '</th><th>' + esc(t('refTable')) + '</th><th></th></tr></thead><tbody id="cols"></tbody></table>';
   h += '<p><input type="button" value="' + esc(t('addColumn')) + '" onclick="addColRow()"></p>';
   h += '<h3>' + esc(t('indexes')) + '</h3><table class="nowrap"><thead><tr><th>' + esc(t('name')) + '</th><th>' + esc(t('columns')) + '</th><th>' + esc(t('unique')) + '</th><th></th></tr></thead><tbody id="idxs"></tbody></table>';
   h += '<p><input type="button" value="' + esc(t('addIndex')) + '" onclick="addIdxRow()"></p>';
@@ -1219,6 +1484,7 @@ function addColRow(){
     '<td><input type="checkbox" data-f="notnull"></td>' +
     '<td><input type="checkbox" data-f="ai"></td>' +
     '<td><input type="checkbox" data-f="pk"></td>' +
+    '<td><input data-f="refTable" class="size"></td>' +
     '<td><input type="button" value="x" onclick="removeRow(this)"></td>';
   $('cols').appendChild(tr); renumber();
 }
@@ -1237,7 +1503,10 @@ function submitCreate(ev){
   for (var i = 0; i < trs.length; i++){
     var g = function(f){ return trs[i].querySelector('[data-f="' + f + '"]'); };
     var cn = g('name').value.trim(); if (!cn) continue;
-    cols.push({ name:cn, type:g('type').value, length:g('length').value, default:g('default').value, notnull:g('notnull').checked, autoIncrement:g('ai').checked, pk:g('pk').checked });
+    var refTable = (g('refTable') ? g('refTable').value.trim() : '');
+    var colObj = { name:cn, type:g('type').value, length:g('length').value, default:g('default').value, notnull:g('notnull').checked, autoIncrement:g('ai').checked, pk:g('pk').checked };
+    if (refTable) colObj.foreignKey = { refTable: refTable };
+    cols.push(colObj);
   }
   var idxs = [], itrs = $('idxs').querySelectorAll('tr');
   for (var j = 0; j < itrs.length; j++){
@@ -1285,7 +1554,9 @@ function showExport(){
     var list = (res && res.data) || [], h = '<form onsubmit="return doExport();">';
     h += '<table class="nowrap"><thead><tr><th><input type="checkbox" id="chkAll" onchange="toggleAll(this)"></th><th>' + esc(t('name')) + '</th><th>' + esc(t('type')) + '</th></tr></thead><tbody>';
     list.forEach(function(it){ h += '<tr><td><input type="checkbox" class="expTbl" value="' + esc(it.name) + '"></td><td>' + esc(it.name) + '</td><td>' + esc(it.type) + '</td></tr>'; });
-    h += '</tbody></table><p>' + esc(t('format')) + ': <select id="expFmt"><option value="sql">SQL</option><option value="csv">CSV</option><option value="tsv">TSV</option><option value="json">JSON</option><option value="xml">XML</option></select> <input type="submit" value="' + esc(t('export')) + '"></p></form>';
+    h += '</tbody></table><p>' + esc(t('format')) + ': <select id="expFmt"><option value="sql">SQL</option><option value="csv">CSV</option><option value="tsv">TSV</option><option value="json">JSON</option><option value="xml">XML</option></select> ';
+    h += '<select id="expMode"><option value="both">' + esc(t('both')) + '</option><option value="structure">' + esc(t('structureOnly')) + '</option><option value="data">' + esc(t('dataOnly')) + '</option></select> ';
+    h += '<input type="submit" value="' + esc(t('export')) + '"></p></form>';
     $('page').innerHTML = h;
   });
 }
@@ -1293,7 +1564,7 @@ function toggleAll(box){ var c = document.querySelectorAll('.expTbl'); for (var 
 function doExport(){
   var sel = document.querySelectorAll('.expTbl'), names = [];
   for (var i = 0; i < sel.length; i++){ if (sel[i].checked) names.push(sel[i].value); }
-  var u = apiBase + 'export&format=' + $('expFmt').value + (names.length ? ('&tables=' + encodeURIComponent(names.join(','))) : '');
+  var u = apiBase + 'export&format=' + $('expFmt').value + '&mode=' + $('expMode').value + (names.length ? ('&tables=' + encodeURIComponent(names.join(','))) : '');
   window.open(u, '_blank');
   return false;
 }
@@ -1309,6 +1580,7 @@ function showImport(){
     h += '<span id="impTableWrap" style="display:none">' + esc(t('table')) + ': <select id="impTable">' + opts + '</select></span></p>';
     h += '<p>' + esc(t('file')) + ': <input type="file" id="impFile"></p>';
     h += '<p><textarea id="impSql" rows="12" style="width:100%" placeholder="' + esc(t('importHint')) + '"></textarea></p>';
+    h += '<p><label><input type="checkbox" id="impSkip"> ' + esc(t('skipErrors')) + '</label></p>';
     h += '<p><input type="submit" value="' + esc(t('execute')) + '"></p></form><div id="result"></div>';
     $('page').innerHTML = h;
   });
@@ -1317,24 +1589,28 @@ function importFmtChange(){ var f = $('impFmt').value; $('impTableWrap').style.d
 function doImport(ev){
   ev.preventDefault();
   var fmt = $('impFmt').value, table = $('impTable') ? $('impTable').value : '', file = $('impFile').files[0], text = $('impSql').value;
+  var skip = $('impSkip') ? $('impSkip').checked : false;
   $('result').innerHTML = '<p>' + t('loading') + '</p>';
   var p;
   if (file){
-    var fd = new FormData(); fd.append('format', fmt); fd.append('table', table); fd.append('file', file);
+    var fd = new FormData(); fd.append('format', fmt); fd.append('table', table); fd.append('skipErrors', skip ? '1' : '0'); fd.append('file', file);
     p = fetch(apiBase + 'import', { method:'POST', body:fd, credentials:'include' }).then(function(r){ return r.json(); });
   } else {
-    p = apiPost('import', { format:fmt, table:table, sql:text });
+    p = apiPost('import', { format:fmt, table:table, skipErrors:skip, sql:text });
   }
   p.then(function(res){
     if (!res || !res.code) { $('result').innerHTML = '<p class="error">' + esc(res && res.data) + '</p>'; return; }
-    $('result').innerHTML = '<p class="message">' + (res.data.executed || 0) + ' ' + esc(t('executed')) + '</p>';
+    var errs = (res.data && res.data.errors) || [];
+    var h = '<p class="message">' + (res.data.executed || 0) + ' ' + esc(t('executed')) + '</p>';
+    if (errs.length) h += '<p class="error">' + errs.length + ' error(s)</p>';
+    $('result').innerHTML = h;
     loadTables();
   });
   return false;
 }
 
 function applyLang(){
-  var map = { sql:t('sqlCommand'), import:t('import'), export:t('export'), create:t('createTable') };
+  var map = { sql:t('sqlCommand'), search:t('search'), import:t('import'), export:t('export'), create:t('createTable'), createView:t('createView'), createTrigger:t('createTrigger') };
   var as = $('menu').querySelectorAll('a[data-nav]');
   for (var i = 0; i < as.length; i++){ var n = as[i].getAttribute('data-nav'); if (map[n]) as[i].textContent = map[n]; }
   document.documentElement.lang = (L === LANG.zh) ? 'zh' : 'en';
@@ -1349,7 +1625,8 @@ document.addEventListener('click', function(e){
   while (el && el.nodeType === 1) {
     if (el.hasAttribute('data-table')) { showTable(el.getAttribute('data-table')); return; }
     if (el.hasAttribute('data-nav')) { nav(el.getAttribute('data-nav')); return; }
-    if (el.hasAttribute('data-sort')) { sortBy(el.getAttribute('data-sort')); return; }
+    if (el.hasAttribute('data-sort')) { sortBy(el.getAttribute('data-sort'), e.shiftKey); return; }
+    if (el.hasAttribute('data-drop')) { dropObjectByName(el.getAttribute('data-drop'), el.getAttribute('data-drop-name')); return; }
     el = el.parentNode;
   }
 });
