@@ -415,6 +415,15 @@ export async function initDatabase(db: D1Database): Promise<void> {
       modifyTime INTEGER NOT NULL DEFAULT 0
     )`,
 
+    // 数据备份记录 (镜像 001 backup 表; 备份内容存 R2 .backup/)
+    `CREATE TABLE IF NOT EXISTS backup (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'db',
+      size INTEGER NOT NULL DEFAULT 0,
+      createTime INTEGER NOT NULL DEFAULT 0
+    )`,
+
     // Indexes
     `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(share_token)`,

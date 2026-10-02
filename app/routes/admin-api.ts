@@ -4,7 +4,7 @@
  */
 import { Hono } from "hono";
 import { authRequired, hashPassword, isAdmin } from "../lib/auth";
-import { getUserByUsername, userSearch, setSetting, addAuditLog, getPluginMeta, setPluginStatus, setPluginConfig, getIoSourceList, getIoSourceById } from "../lib/db";
+import { getUserByUsername, userSearch, setSetting, getSetting, addAuditLog, getPluginMeta, setPluginStatus, setPluginConfig, getIoSourceList, getIoSourceById } from "../lib/db";
 import { parseKodPassword } from "../lib/mcrypt";
 import { t } from "../lib/i18n";
 import { userDefaultInit } from "../lib/user-init";
@@ -386,6 +386,114 @@ async function r2TotalUsed(bucket: R2Bucket): Promise<{ size: number; fileNum: n
  * 返回 io_source 列表, 字段: id/name/driver/sizeMax(GB)/sizeUse/fileNum/fileUse/default/system/status/groupType
  * fileUse 语义对齐 001 parseData: 本次是否成功获取文件使用统计(usage=1 时前端才启用删除按钮)
  */
+// 系统回收站自动清空 (001 adminStorage::systemRecycleClear: 清理超期回收站文件)
+adminApi.all("/storage/systemRecycleClear", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const clearDay = parseInt((await getSetting(c.env.DB, "systemRecycleClear")) ?? "0", 10);
+  if (clearDay <= 0) return c.json(ok("explorer.success", { removed: 0 }));
+  const cutoff = Date.now() - clearDay * 24 * 3600 * 1000;
+  // 收集所有 baseKey 前缀 (用户空间 + 部门空间)
+  const prefixes: string[] = [];
+  const users = await c.env.DB.prepare("SELECT username FROM users").all<{ username: string }>().catch(() => ({ results: [] }));
+  for (const u of users.results) prefixes.push(`${u.username}/.recycle/`);
+  const groups = await c.env.DB.prepare("SELECT id FROM groups").all<{ id: number }>().catch(() => ({ results: [] }));
+  for (const g of groups.results) prefixes.push(`__group__/${g.id}/.recycle/`);
+  let removed = 0;
+  for (const prefix of prefixes) {
+    let cursor: string | undefined;
+    do {
+      const listed = await c.env.FILES.list({ prefix, cursor, limit: 1000 });
+      for (const o of listed.objects) {
+        if (new Date(o.uploaded).getTime() < cutoff) { await c.env.FILES.delete(o.key); removed++; }
+      }
+      cursor = listed.truncated ? listed.cursor : undefined;
+    } while (cursor);
+  }
+  return c.json(ok("explorer.success", { removed }));
+});
+
+// ============ 数据备份 (001 adminBackup) ============
+
+const BACKUP_TABLES = ["users", "user_option", "verify_code", "groups", "roles", "user_groups", "group_roles", "auths", "jobs", "sessions", "settings", "user_fav", "user_tag", "user_tag_source", "shares", "share", "share_to", "share_report", "audit_logs", "light_app", "plugin", "io_source", "comment", "comment_praise", "comment_meta", "notice", "user_notice", "group_meta", "group_tag_file", "source_meta", "source_history", "source_auth", "task", "task_result", "plugin_cache"];
+
+// 备份配置读写
+adminApi.all("/backup/config", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const q = await allParams(c);
+  if (q.data !== undefined && q.data !== null && q.data !== "") {
+    await setSetting(c.env.DB, "backupConfig", String(q.data));
+    return c.json(ok("explorer.success"));
+  }
+  const raw = await getSetting(c.env.DB, "backupConfig");
+  try { return c.json(ok(raw ? JSON.parse(raw) : { enable: "0" })); } catch { return c.json(ok({ enable: "0" })); }
+});
+
+// 手动备份 (D1 全表导出为 JSON 存 R2 .backup/)
+adminApi.all("/backup/start", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const q = await allParams(c);
+  const type = q.type || "db";
+  const dump: Record<string, any[]> = {};
+  for (const table of BACKUP_TABLES) {
+    const rows = await c.env.DB.prepare(`SELECT * FROM ${table}`).all<any>().catch(() => ({ results: [] }));
+    dump[table] = rows.results || [];
+  }
+  const json = JSON.stringify(dump);
+  const ts = Math.floor(Date.now() / 1000);
+  const name = `backup_db_${ts}`;
+  await c.env.FILES.put(`.backup/${name}.json`, json, { httpMetadata: { contentType: "application/json" } });
+  const res = await c.env.DB.prepare("INSERT INTO backup (name, type, size, createTime) VALUES (?, ?, ?, ?)").bind(name, type, json.length, ts).run();
+  return c.json(ok("explorer.success", { id: res.meta?.last_row_id }));
+});
+
+// 备份列表
+adminApi.all("/backup/get", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const rows = await c.env.DB.prepare("SELECT * FROM backup ORDER BY id DESC").all<any>().catch(() => ({ results: [] }));
+  return c.json(ok(rows.results || []));
+});
+
+// 删除备份
+adminApi.all("/backup/remove", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const q = await allParams(c);
+  const id = parseInt(q.id, 10) || 0;
+  const row: any = await c.env.DB.prepare("SELECT * FROM backup WHERE id = ?").bind(id).first().catch(() => null);
+  if (row) await c.env.FILES.delete(`.backup/${row.name}.json`).catch(() => {});
+  await c.env.DB.prepare("DELETE FROM backup WHERE id = ?").bind(id).run();
+  return c.json(ok("explorer.success"));
+});
+
+// 恢复备份
+adminApi.all("/backup/restore", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const q = await allParams(c);
+  const id = parseInt(q.id, 10) || 0;
+  const row: any = await c.env.DB.prepare("SELECT * FROM backup WHERE id = ?").bind(id).first().catch(() => null);
+  if (!row) return c.json(fail("explorer.dataNotFull"));
+  const obj = await c.env.FILES.get(`.backup/${row.name}.json`).catch(() => null);
+  if (!obj) return c.json(fail("备份文件不存在"));
+  let dump: Record<string, any[]>;
+  try { dump = JSON.parse(await obj.text()); } catch { return c.json(fail("备份文件损坏")); }
+  for (const [table, rows] of Object.entries(dump)) {
+    if (!BACKUP_TABLES.includes(table) || !Array.isArray(rows) || rows.length === 0) continue;
+    await c.env.DB.prepare(`DELETE FROM ${table}`).run().catch(() => {});
+    for (const r of rows) {
+      const keys = Object.keys(r);
+      const cols = keys.map((k) => `"${k}"`).join(", ");
+      const placeholders = keys.map(() => "?").join(", ");
+      await c.env.DB.prepare(`INSERT INTO ${table} (${cols}) VALUES (${placeholders})`).bind(...keys.map((k) => r[k])).run().catch(() => {});
+    }
+  }
+  return c.json(ok("explorer.success"));
+});
+
 adminApi.all("/storage/get", async (c) => {
   const q = await allParams(c);
   const usage = String(q.usage ?? "") === "1";
@@ -652,6 +760,21 @@ async function userGroupSet(c: any, userID: number, groupInfo: Record<string, an
     ).bind(userID, groupID, authID).run();
   }
 }
+
+// 编辑成员前置权限检查 (001 adminMember::authCheck: 内置超级管理员/系统管理员角色不可被编辑)
+adminApi.all("/member/authCheck", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const q = await allParams(c);
+  const userID = q.userID ? parseInt(q.userID, 10) : null;
+  const roleID = q.roleID ? parseInt(q.roleID, 10) : 0;
+  if (userID !== null && userID === 1) return c.json(fail("admin.member.editNoAuth"));
+  if (roleID) {
+    const role = await c.env.DB.prepare("SELECT administrator FROM roles WHERE id = ?").bind(roleID).first<{ administrator: number }>().catch(() => null);
+    if (role && Number(role.administrator) === 1) return c.json(fail("admin.member.editNoAuth"));
+  }
+  return c.json(ok("explorer.success"));
+});
 
 /**
  * 添加用户 - admin/member/add
@@ -1306,6 +1429,17 @@ async function scanUserFileTypes(bucket: R2Bucket, prefix: string) {
  * 首页统计卡片 - admin/analysis/option
  * type: user | file | access | server
  */
+// 计划任务写入统计快照 (001 adminAnalysis::record: regist/store)
+adminApi.all("/analysis/record", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const q = await allParams(c);
+  const type = String(q.type || "regist");
+  if (!["regist", "store"].includes(type)) return c.json(fail("explorer.error"));
+  await setSetting(c.env.DB, `analysis_record_${type}`, String(Math.floor(Date.now() / 1000)));
+  return c.json(ok("explorer.success"));
+});
+
 adminApi.all("/analysis/option", async (c) => {
   const q = await allParams(c);
   const type = q.type || "user";
@@ -1561,6 +1695,38 @@ adminApi.all("/setting/set", async (c) => {
   return c.json(ok("explorer.success"));
 });
 
+// 测试邮件发送 (001 adminSetting::mailTest; worker 无 SMTP 发送能力, 返回提示)
+adminApi.all("/setting/mailTest", async (c) => {
+  return c.json(fail("邮件服务未配置, 暂不支持测试发送"));
+});
+
+// 添加菜单 (001 adminSetting::addMenu: 原版为返回入参的空操作)
+adminApi.all("/setting/addMenu", async (c) => {
+  return c.json(ok("explorer.success"));
+});
+
+// 清空缓存 (001 adminSetting::clearCache: 清理过期 plugin_cache / verify_code)
+adminApi.all("/setting/clearCache", async (c) => {
+  const q = await allParams(c);
+  const type = String(q.type || "");
+  const now = Math.floor(Date.now() / 1000);
+  if (!type || type === "plugin") {
+    await c.env.DB.prepare("DELETE FROM plugin_cache WHERE expire_at > 0 AND expire_at < ?").bind(now).run();
+  }
+  if (!type || type === "verifyCode") {
+    await c.env.DB.prepare("DELETE FROM verify_code WHERE time > 0 AND time < ?").bind(now).run();
+  }
+  if (!type || type === "taskResult") {
+    await c.env.DB.prepare("DELETE FROM task_result WHERE expire_at > 0 AND expire_at < ?").bind(now).run();
+  }
+  return c.json(ok("explorer.success"));
+});
+
+// MySQL 转 mb4 编码 (001 adminSetting::updateMysqlCharset: D1/SQLite 天然 UTF-8, 直接成功)
+adminApi.all("/setting/updateMysqlCharset", async (c) => {
+  return c.json(ok("explorer.success"));
+});
+
 // ============ admin/log ============
 
 /** audit_logs.action → MbesBox 标准操作类型 + 中文标题 */
@@ -1688,6 +1854,11 @@ function pluginNeedConfig(pkg: any, config: Record<string, any>): boolean {
   }
   return false;
 }
+
+// 主程序升级 (001 adminPlugin::appUpdate: worker 无法在线升级主程序, 返回提示)
+adminApi.all("/plugin/appUpdate", async (c) => {
+  return c.json(fail("当前部署环境不支持在线升级主程序"));
+});
 
 adminApi.all("/plugin/appList", async (c) => {
   const lang = detectLang(c);
@@ -1917,6 +2088,21 @@ adminApi.all("/notice/remove", async (c) => {
   await c.env.DB.prepare("DELETE FROM notice WHERE id = ?").bind(id).run();
   await c.env.DB.prepare("DELETE FROM user_notice WHERE noticeID = ?").bind(id).run();
   return c.json(ok("explorer.success"));
+});
+
+// 用户通知详情 (001 adminNotice::noticeInfo: user_notice 详情 + 补公告 content)
+adminApi.all("/notice/noticeInfo", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const q = await allParams(c);
+  const id = parseInt(q.id, 10) || 0;
+  if (!id) return c.json(fail("explorer.share.errorParam"));
+  const notice: any = await c.env.DB.prepare("SELECT * FROM user_notice WHERE id = ?").bind(id).first().catch(() => null);
+  if (!notice) return c.json(ok(null));
+  const src: any = await c.env.DB.prepare("SELECT content FROM notice WHERE id = ?").bind(notice.noticeID).first().catch(() => null);
+  if (!src) return c.json(ok(null));
+  notice.content = src.content;
+  return c.json(ok(notice));
 });
 
 // 排序

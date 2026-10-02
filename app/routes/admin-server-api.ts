@@ -167,4 +167,19 @@ adminServerApi.all("/server/srvPinfo", async (c) => {
   return c.json(ok(base));
 });
 
+// ============ admin/server/recoverySave & recoveryFileSave ============
+
+// 从备份恢复 (001 adminServer::recoverySave/recoveryFileSave: 完整恢复由 admin/backup 承担)
+adminServerApi.all("/server/recoverySave", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  return c.json(fail("恢复请使用数据备份管理功能 (admin/backup)"));
+});
+
+adminServerApi.all("/server/recoveryFileSave", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  return c.json(fail("恢复请使用数据备份管理功能 (admin/backup)"));
+});
+
 export { adminServerApi };
