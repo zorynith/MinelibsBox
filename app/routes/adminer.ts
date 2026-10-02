@@ -1029,12 +1029,14 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <title>Adminer</title>
 <link rel="stylesheet" href="${pluginHost}adminer/adminer.css">
 <style>
+#menu #dbs{color:#fff;font-size:13px;}
+#menu .links{width:auto !important;margin:0 !important;}
+#menu #tables{top:185px !important;}
 #page input[type=button]{margin:0 5px 6px 0;padding:5px 11px;border:1px solid #d0cdc4;border-radius:3px;background:#fff;color:#2c3e50;cursor:pointer;vertical-align:middle;}
 #page input[type=button]:hover{background:#eef3f8;}
 #page input[type=button]:disabled{opacity:.45;cursor:default;}
 #page p{line-height:2.2;}
 td a{margin-right:8px;}
-
 </style>
 </head>
 <body class="ltr js">
@@ -1048,7 +1050,7 @@ td a{margin-right:8px;}
 </div>
 <div id="foot" class="foot"><div id="menu">
   <h1><a href="javascript:void(0)" id="h1">Adminer</a> <span class="version" id="version">D1</span></h1>
-  <p id="dbs"><span>SQLite / D1</span></p>
+  <p id="dbs">SQLite / D1</p>
   <p id="tableFilter" style="display:none"><input type="text" id="tableFilterInput" oninput="filterTables(this.value)" placeholder="filter" style="width:92%"></p>
   <p class="links">
     <a href="javascript:void(0)" data-nav="sql">SQL command</a>
@@ -1058,7 +1060,6 @@ td a{margin-right:8px;}
   </p>
   <ul id="tables"></ul>
 </div></div>
-<div class="toggle-menu"></div>
 <div id="adminerDebug" style="display:none;position:fixed;left:0;right:0;bottom:0;max-height:35%;overflow:auto;background:#1e1e1e;color:#d4d4d4;font:12px/1.5 monospace;padding:8px 12px;border-top:2px solid #e8a33d;z-index:9999"></div>
 <script>
 var apiBase = ${JSON.stringify(apiBase)};
@@ -1233,11 +1234,6 @@ function renderData(){
   var d = state, colNames = d.columns.map(function(c){ return c.name; });
   var pages = Math.max(1, Math.ceil(d.total / d.size)), editable = d.type !== 'view';
   var h = '';
-  h += '<p class="links">';
-  h += '<input type="button" value="' + esc(t('empty')) + '" onclick="emptyTable()"> ';
-  h += '<input type="button" value="' + esc(t('drop')) + '" onclick="dropObject()"> ';
-  h += '<input type="button" value="' + esc(t('print')) + '" onclick="printView()"> ';
-  h += '</p>';
   h += '<p>' + esc(t('where')) + ': <input type="text" id="whereInput" style="width:50%" value="' + esc(d.where) + '"> ';
   h += '<input type="button" value="' + esc(t('refresh')) + '" onclick="applyWhere()"></p>';
   h += '<p>' + esc(t('rowsPerPage')) + ' <input type="number" class="size" id="sizeInput" value="' + d.size + '" onchange="applySize()"> ';
@@ -1350,7 +1346,7 @@ function renderStructure(res){
   var d = res.data, h = '';
   h += '<p class="links"><input type="button" value="' + esc(t('selectData')) + '" onclick="showTable(state.table)"> ';
   h += '<input type="button" value="' + esc(t('alterTable')) + '" onclick="showAlter()"> ';
-  h += '<input type="button" value="' + esc(t('export')) + '" onclick="exportTable()"> ';
+  h += '<input type="button" value="' + esc(t('empty')) + '" onclick="emptyTable()"> ';
   h += '<input type="button" value="' + esc(t('drop')) + '" onclick="dropObject()"></p>';
   h += '<h3>' + esc(t('columns')) + '</h3><table class="nowrap checkable"><thead><tr><th>#</th><th>' + esc(t('name')) + '</th><th>' + esc(t('type')) + '</th><th>' + esc(t('nullable')) + '</th><th>' + esc(t('default')) + '</th><th>' + esc(t('primaryKey')) + '</th></tr></thead><tbody>';
   (d.columns || []).forEach(function(c){
