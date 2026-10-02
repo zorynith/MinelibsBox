@@ -15,6 +15,7 @@ import type { AuthUser } from "../lib/auth";
 import { getUserById, addAuditLog, getSetting } from "../lib/db";
 import { getUserFileKey, listDirectory, getFileMimeType, keyFromBase } from "../lib/r2";
 import { resolveFileSource } from "../lib/source";
+import { getGroupAuthValue } from "../lib/source-auth";
 import { md5, mcryptDecode } from "../lib/mcrypt";
 import type { ShareRow } from "../lib/share";
 import {
@@ -459,6 +460,24 @@ function extractShareID(item: any): number | null {
     }
   }
   return null;
+}
+
+/** 协作分享可设置的权限位不能超过自己在文档的权限 (001 userShare::checkSetAuthAllow)。 */
+async function checkSetAuthAllow(env: Env, user: AuthUser, path: string, authTo: any[]): Promise<boolean> {
+  if (!authTo || authTo.length === 0) return true;
+  // 仅部门文档需要检查(个人空间/io 全权限)
+  const groupMatch = path.match(/^\{source:(\d+)\}/);
+  if (!groupMatch) return true;
+  const groupID = parseInt(groupMatch[1], 10);
+  const selfAuth = await getGroupAuthValue(env, user, groupID);
+  for (const item of authTo) {
+    if (!item || !item.authID) continue;
+    const row = await env.DB.prepare("SELECT auth FROM auths WHERE id = ?").bind(Number(item.authID)).first<{ auth: number }>().catch(() => null);
+    if (!row) continue;
+    const targetAuth = Number(row.auth) || 0;
+    if ((targetAuth | selfAuth) !== selfAuth) return false;
+  }
+  return true;
 }
 
 /** 分享者空间下真实路径是否可作为分享源。 */
@@ -1122,6 +1141,12 @@ shareApi.all("/userShare/add", async (c) => {
   // 内部协作分享: authTo 目标 (isShareTo=1)
   const authTo = parseAuthTo(params.authTo);
   const isShareTo = authTo.length > 0 ? 1 : 0;
+
+  // 协作分享可设置的权限不能超过自己在文档的权限 (001 checkSetAuthAllow)
+  if (authTo.length > 0) {
+    const allow = await checkSetAuthAllow(c.env, user, path, authTo);
+    if (!allow) return c.json({ code: false, data: "admin.auth.errorAdmin" });
+  }
 
   const id = await addShare(c.env.DB, {
     userID: user.id,
