@@ -130,7 +130,10 @@ async function shareListDir(env: Env, owner: AuthUser, source: SourceRef | null,
     const listed = await io.list(prefix).catch(() => null);
     if (!listed) return null;
     const folders = listed.folders.map((k) => ({ name: k.split("/").filter(Boolean).pop() || k }));
-    const files = listed.files.map((f) => ({ name: f.key.split("/").pop() || f.key, size: f.size }));
+    // 过滤目录占位对象自身 (key 恰等于 prefix), 对齐 explorer list/path 的处理
+    const files = listed.files
+      .filter((f) => f.key !== prefix && f.key !== prefix.replace(/\/$/, ""))
+      .map((f) => ({ name: f.key.split("/").pop() || f.key, size: f.size }));
     return { folders, files };
   }
   const listed = await env.FILES.list({ prefix, delimiter: "/" });
@@ -368,7 +371,19 @@ async function buildManageShareInfo(env: Env, share: ShareRow, source: { type: "
           isReadable: true,
           isWriteable: true,
         }
-      : null,
+      : {
+          // 源解析失败（如历史数据 sourcePath 格式异常 / 源已被删除）时返回占位 sourceInfo，
+          // 避免前端据此提示"该路径不存在"阻断分享管理。
+          name: share.sourcePath.split("/").filter(Boolean).pop() || share.title || "分享",
+          path: share.sourcePath,
+          type: "folder",
+          isFolder: true,
+          ext: "folder",
+          size: 0,
+          modifyTime: share.modifyTime,
+          isReadable: true,
+          isWriteable: true,
+        },
   };
 }
 
