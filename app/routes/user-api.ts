@@ -116,7 +116,19 @@ userApi.post("/index/loginSubmit", async (c) => {
   // Must append, otherwise it overwrites the kod_session Set-Cookie above.
   c.header("Set-Cookie", `accessToken=${sessionId}; Path=/; Max-Age=${maxAge}; SameSite=Lax`, { append: true });
 
-  return c.json({ code: true, data: { userID: user.id, name: user.username, nickname: user.nickname } });
+  // 001: show_json('ok', true, accessToken) —— info 为 accessToken, 官方客户端登录后据此认证。
+  // worker accessToken 即会话 id (与 kod_session cookie 等价), 供客户端通过 query accessToken 携带。
+  return c.json({
+    code: true,
+    data: { userID: user.id, name: user.username, nickname: user.nickname },
+    info: sessionId,
+  });
+});
+
+// accessTokenGet - 001 user/index/accessTokenGet: 返回当前会话 accessToken (官方客户端登录后调用)
+userApi.get("/index/accessTokenGet", authRequired, async (c) => {
+  const sessionId = getSessionId(c) || "";
+  return c.json({ code: true, data: sessionId });
 });
 
 // logout
@@ -488,7 +500,7 @@ userApi.get("/view/options", async (c) => {
         groupCompany: 0, shareLinkExpireTime: 0, userLoginLimit: 5,
         pathShowUrlParam: 0, ioReadMax: 31457280,
         staticPath: staticPath,
-        kodApiServer: "",
+        kodApiServer: "https://api.kodcloud.com/?",
         allowHeaderCookie: "1", searchContent: 1, searchMutil: 1,
         allowSEO: 1, systemBackup: 1, bigFileForce: 0, fileViewLog: 0,
         appType: {
@@ -620,6 +632,9 @@ userApi.get("/view/options", async (c) => {
     if (k.startsWith("common.copyright.")) continue; // language-pack keys, not options
     sysOptions[k] = v;
   }
+  // kodApiServer 等平台级配置在 system.settings 层, 同样允许后台覆盖(壁纸/插件/邮件等依赖)
+  const sysSettings = (options as any).system.settings;
+  if (settingsMap.kodApiServer !== undefined) sysSettings.kodApiServer = settingsMap.kodApiServer;
 
   // options?full=1 also includes the complete language pack (mirrors 001 user/view/options)
   const full = c.req.query("full") === "1";

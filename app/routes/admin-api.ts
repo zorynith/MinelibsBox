@@ -1919,6 +1919,11 @@ adminApi.all("/plugin/getConfig", async (c) => {
     fileSort: { display: "{{LNG['admin.plugin.fileSort']}}", desc: "{{LNG['admin.plugin.fileSortDesc']}}" },
   };
   for (const [key, item] of Object.entries<any>(pkg.configItem || {})) {
+    // 字符串项(如 client 插件的 sep001 说明)原样保留, 仅解析 {{LNG['...']}} 占位符
+    if (typeof item === "string") {
+      formData[key] = resolveLngRaw(item, sysLang);
+      continue;
+    }
     if (!item || typeof item !== "object") continue;
     const def = commonConfigDefault[key];
     const merged: any = { ...item };
