@@ -15,6 +15,8 @@ import type { AuthUser } from "../lib/auth";
 import { getUserById, addAuditLog, getSetting } from "../lib/db";
 import { getUserFileKey, listDirectory, getFileMimeType, keyFromBase } from "../lib/r2";
 import { resolveFileSource } from "../lib/source";
+import type { SourceRef } from "../lib/source";
+import { ioClientOf } from "../lib/io";
 import { getGroupAuthValue } from "../lib/source-auth";
 import { md5, mcryptDecode } from "../lib/mcrypt";
 import JSZip from "jszip";
@@ -36,6 +38,7 @@ import {
   generateShareHash,
   normShareSourcePath,
   resolveShareSource,
+  resolveShareStorage,
   shareLinkRoot,
   getUnlockedShares,
   setSharePassUnlocked,
@@ -63,6 +66,78 @@ const L = {  notExist: "分享不存在！",
 };
 
 // ============ helpers ============
+
+/** 把 ReadableStream 收集为 Uint8Array。 */
+async function shareStreamBytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) { chunks.push(value); total += value.byteLength; }
+  }
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const ch of chunks) { out.set(ch, off); off += ch.byteLength; }
+  return out;
+}
+
+/** 分享源 + 子路径 → 完整 relPath（目录保留尾斜杠）。 */
+function shareJoinRel(baseRel: string, rel: string, isDir = false): string {
+  const base = baseRel.replace(/\/+$/, "");
+  if (!rel) return isDir ? base + "/" : base;
+  return isDir ? base + "/" + rel.replace(/\/+$/, "") + "/" : base + "/" + rel;
+}
+
+/** 计算存储 key：io 挂载用 baseKey，个人空间用 username 前缀（发布目录 relPath 已是完整 key）。 */
+function shareKeyOf(owner: AuthUser, source: SourceRef | null, relPath: string): string {
+  if (source) return keyFromBase(source.baseKey, relPath);
+  if (relPath.startsWith("__publish__/")) return relPath;
+  return getUserFileKey(owner.username, relPath);
+}
+
+/** head 分享对象（R2 或外部挂载）。 */
+async function shareHeadOf(env: Env, owner: AuthUser, source: SourceRef | null, relPath: string): Promise<{ size: number; contentType: string; lastModified: string | null } | null> {
+  const key = shareKeyOf(owner, source, relPath);
+  const io = source ? ioClientOf(source) : null;
+  if (io) return io.head(key).catch(() => null);
+  const o = await env.FILES.head(key).catch(() => null);
+  if (!o) return null;
+  return { size: o.size, contentType: o.httpMetadata?.contentType || "", lastModified: o.uploaded ? o.uploaded.toISOString() : null };
+}
+
+/** 读取分享对象完整字节（R2 或外部挂载）。 */
+async function shareReadBytes(env: Env, owner: AuthUser, source: SourceRef | null, relPath: string): Promise<Uint8Array | null> {
+  const key = shareKeyOf(owner, source, relPath);
+  const io = source ? ioClientOf(source) : null;
+  if (io) {
+    const g = await io.get(key).catch(() => null);
+    if (!g) return null;
+    return shareStreamBytes(g.body);
+  }
+  const o = await env.FILES.get(key).catch(() => null);
+  if (!o) return null;
+  return new Uint8Array(await o.arrayBuffer());
+}
+
+/** 列出分享目录（R2 或外部挂载）。 */
+async function shareListDir(env: Env, owner: AuthUser, source: SourceRef | null, relPath: string): Promise<{ folders: { name: string }[]; files: { name: string; size: number; uploaded?: string }[] } | null> {
+  const key = shareKeyOf(owner, source, relPath);
+  const prefix = key.endsWith("/") ? key : key + "/";
+  const io = source ? ioClientOf(source) : null;
+  if (io) {
+    const listed = await io.list(prefix).catch(() => null);
+    if (!listed) return null;
+    const folders = listed.folders.map((k) => ({ name: k.split("/").filter(Boolean).pop() || k }));
+    const files = listed.files.map((f) => ({ name: f.key.split("/").pop() || f.key, size: f.size }));
+    return { folders, files };
+  }
+  const listed = await env.FILES.list({ prefix, delimiter: "/" });
+  const folders = (listed.delimitedPrefixes || []).map((p) => ({ name: p.split("/").filter(Boolean).pop() || p }));
+  const files = listed.objects.filter((o) => o.key !== prefix).map((o) => ({ name: o.key.split("/").pop() || o.key, size: o.size, uploaded: o.uploaded ? o.uploaded.toISOString() : undefined }));
+  return { folders, files };
+}
 
 /** 分享项真实路径 → R2 key：发布临时目录展开为 __publish__ 前缀，其余为用户空间。 */
 export function shareStorageKey(username: string, realPath: string): string {
@@ -296,7 +371,7 @@ function shareError(c: AppContext, code: number | false, msg: string, info?: any
 }
 
 type InitResult =
-  | { ok: true; share: ShareRow; owner: AuthUser; source: { type: "folder" | "file"; name: string; realPath: string } }
+  | { ok: true; share: ShareRow; owner: AuthUser; source: { type: "folder" | "file"; name: string; realPath: string }; storage: { source: SourceRef | null; relPath: string } }
   | { ok: false; response: Response };
 
 /**
@@ -311,8 +386,9 @@ async function initShare(c: AppContext, params: Record<string, any>): Promise<In
   const owner = (await getUserById(c.env.DB, share.userID)) as AuthUser | null;
   if (!owner || (owner.status ?? 1) !== 1) return shareError(c, 30100, L.notExist);
 
-  const source = await resolveShareSource(c.env, owner, share);
-  if (!source) return shareError(c, 30100, L.notExist);
+  const storage = await resolveShareStorage(c.env, owner, share);
+  if (!storage) return shareError(c, 30100, L.notExist);
+  const source = { type: storage.type, name: storage.name, realPath: storage.realPath };
 
   const opts = shareOptions(share);
   const now = Math.floor(Date.now() / 1000);
@@ -349,7 +425,7 @@ async function initShare(c: AppContext, params: Record<string, any>): Promise<In
     }
   }
 
-  return { ok: true, share, owner, source };
+  return { ok: true, share, owner, source, storage: { source: storage.source, relPath: storage.relPath } };
 }
 
 /** 权限检测（001 authCheck）：notView/notDownload/上传/编辑。返回错误消息或 null。 */
@@ -381,7 +457,7 @@ async function shareFileOutHandler(c: AppContext, disposition: "inline" | "attac
   const params = await reqParams(c);
   const init = await initShare(c, params);
   if (!init.ok) return await tipsHtml(c, init.response);
-  const { share, owner } = init;
+  const { share, owner, storage } = init;
   const rel = parseShareLinkRel(share, typeof params.path === "string" ? params.path : "");
   if (rel === null) return c.json({ code: false, data: L.noPermission });
 
@@ -391,15 +467,14 @@ async function shareFileOutHandler(c: AppContext, disposition: "inline" | "attac
   const errMsg = authCheck(c, share, disposition === "attachment" ? "filedownload" : "fileout", params);
   if (errMsg) return await tipsHtml(c, c.json({ code: false, data: errMsg }));
 
-  const realPath = joinShareRealPath(share.sourcePath, rel);
-  const key = shareStorageKey(owner.username, realPath);
-  const obj = await c.env.FILES.get(key).catch(() => null);
-  if (!obj) return await tipsHtml(c, c.json({ code: false, data: L.pathNotExists }));
+  const fullRel = shareJoinRel(storage.relPath, rel);
+  const io = storage.source ? ioClientOf(storage.source) : null;
+  const key = shareKeyOf(owner, storage.source, fullRel);
 
   const isDownload = disposition === "attachment" || params.download === "1";
   if (isDownload) await incNumDownload(c.env.DB, share.shareID);
 
-  const fileName = realPath.split("/").filter(Boolean).pop() || "file";
+  const fileName = fullRel.split("/").filter(Boolean).pop() || "file";
   let name = typeof params.name === "string" && params.name ? params.name.replace(/^\/+/, "") : fileName;
   if (!name) name = fileName;
 
@@ -407,6 +482,15 @@ async function shareFileOutHandler(c: AppContext, disposition: "inline" | "attac
   headers.set("Content-Type", getFileMimeType(name));
   headers.set("Content-Disposition", `${disposition}; filename="${encodeURIComponent(name)}"`);
   if (disposition === "inline") headers.set("Cache-Control", "public, max-age=3600");
+
+  if (io) {
+    const g = await io.get(key).catch(() => null);
+    if (!g) return await tipsHtml(c, c.json({ code: false, data: L.pathNotExists }));
+    if (g.contentType) headers.set("Content-Type", g.contentType);
+    return new Response(g.body, { headers });
+  }
+  const obj = await c.env.FILES.get(key).catch(() => null);
+  if (!obj) return await tipsHtml(c, c.json({ code: false, data: L.pathNotExists }));
   obj.writeHttpMetadata(headers);
   return new Response(obj.body, { headers });
 }
@@ -544,26 +628,27 @@ shareApi.all("/share/pathList", async (c) => {
   const params = await reqParams(c);
   const init = await initShare(c, params);
   if (!init.ok) return init.response;
-  const { share, owner, source } = init;
+  const { share, owner, source, storage } = init;
 
   const rawPath = typeof params.path === "string" ? params.path : "";
   const rel = parseShareLinkRel(share, rawPath);
   if (rel === null) return c.json({ code: false, data: L.noPermission });
 
-  const realDir = joinShareRealPath(share.sourcePath, rel, true);
+  const fullDir = shareJoinRel(storage.relPath, rel, true);
   const virtualDir = shareLinkRoot(share.shareHash) + (rel ? rel.replace(/\/+$/, "") + "/" : "");
   const canEdit = await shareCanEdit(c.env, share);
 
   try {
-    const { folders, files } = await listDirectory(c.env.FILES, owner.username, realDir);
+    const list = await shareListDir(c.env, owner, storage.source, fullDir);
+    if (!list) return c.json({ code: false, data: L.pathNotExists });
+    const { folders, files } = list;
 
     const folderList = folders
-      .map((f) => f.key.split("/").filter(Boolean).pop() || "")
-      .filter((name) => name && !name.startsWith("."))
-      .map((name) =>
+      .filter((f) => f.name && !f.name.startsWith("."))
+      .map((f) =>
         shareItemInfo(share, source.name, {
-          name,
-          relPath: (rel ? rel.replace(/\/+$/, "") + "/" : "") + name,
+          name: f.name,
+          relPath: (rel ? rel.replace(/\/+$/, "") + "/" : "") + f.name,
           isFolder: true,
           size: 0,
           modifyTime: new Date().toISOString(),
@@ -572,21 +657,17 @@ shareApi.all("/share/pathList", async (c) => {
       );
 
     const fileList = files
-      .filter((f) => {
-        const n = f.key.split("/").pop() || "";
-        return n !== ".keep" && !n.startsWith(".");
-      })
-      .map((f) => {
-        const name = f.key.split("/").pop() || f.key;
-        return shareItemInfo(share, source.name, {
-          name,
-          relPath: (rel ? rel.replace(/\/+$/, "") + "/" : "") + name,
+      .filter((f) => f.name !== ".keep" && !f.name.startsWith("."))
+      .map((f) =>
+        shareItemInfo(share, source.name, {
+          name: f.name,
+          relPath: (rel ? rel.replace(/\/+$/, "") + "/" : "") + f.name,
           isFolder: false,
           size: f.size,
-          modifyTime: f.uploaded ? new Date(f.uploaded).toISOString() : new Date().toISOString(),
+          modifyTime: f.uploaded ? f.uploaded : new Date().toISOString(),
           canEdit,
-        });
-      });
+        })
+      );
 
     const curRel = rel.replace(/\/+$/, "");
     const current = {
@@ -621,7 +702,7 @@ shareApi.all("/share/pathInfo", async (c) => {
   const params = await reqParams(c);
   const init = await initShare(c, params);
   if (!init.ok) return init.response;
-  const { share, owner, source } = init;
+  const { share, owner, source, storage } = init;
 
   const items = parseDataArr(params.dataArr);
   if (items.length === 0) return c.json({ code: false, data: L.error });
@@ -633,12 +714,11 @@ shareApi.all("/share/pathInfo", async (c) => {
     if (rel === null) continue;
     // 空 rel 表示分享源本身（文件分享的根路径）
     const isFolder = rel.endsWith("/") || (rel === "" && init.source.type === "folder");
-    const realPath = joinShareRealPath(share.sourcePath, rel, isFolder);
+    const fullRel = shareJoinRel(storage.relPath, rel, isFolder);
     const name = rel === "" ? source.name : rel.replace(/\/+$/, "").split("/").pop() || "";
     if (isFolder) {
-      const key = shareStorageKey(owner.username, realPath);
-      const listed = await c.env.FILES.list({ prefix: key, limit: 1 });
-      if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) continue;
+      const list = await shareListDir(c.env, owner, storage.source, fullRel);
+      if (!list || (list.folders.length === 0 && list.files.length === 0)) continue;
       result.push(
         shareItemInfo(share, source.name, {
           name,
@@ -650,15 +730,14 @@ shareApi.all("/share/pathInfo", async (c) => {
         })
       );
     } else {
-      const key = shareStorageKey(owner.username, realPath);
-      const obj = await c.env.FILES.head(key);
-      if (!obj) continue;
+      const head = await shareHeadOf(c.env, owner, storage.source, fullRel);
+      if (!head) continue;
       const info = shareItemInfo(share, source.name, {
         name,
         relPath: rel,
         isFolder: false,
-        size: obj.size,
-        modifyTime: obj.uploaded ? new Date(obj.uploaded).toISOString() : new Date().toISOString(),
+        size: head.size,
+        modifyTime: head.lastModified || new Date().toISOString(),
         canEdit,
       });
       const canDownload = shareOptions(share).notDownload !== "1";
@@ -688,7 +767,7 @@ shareApi.all("/share/fileOutBy", async (c) => {
   const params = await reqParams(c);
   const init = await initShare(c, params);
   if (!init.ok) return await tipsHtml(c, init.response);
-  const { share, owner } = init;
+  const { share, owner, storage } = init;
   const rel = parseShareLinkRel(share, typeof params.path === "string" ? params.path : "");
   if (rel === null) return c.json({ code: false, data: L.noPermission });
 
@@ -702,16 +781,24 @@ shareApi.all("/share/fileOutBy", async (c) => {
   const errMsg = authCheck(c, share, "fileout", params);
   if (errMsg) return await tipsHtml(c, c.json({ code: false, data: errMsg }));
 
-  const realPath = joinShareRealPath(share.sourcePath, realRel);
-  const key = shareStorageKey(owner.username, realPath);
-  const obj = await c.env.FILES.get(key).catch(() => null);
-  if (!obj) return await tipsHtml(c, c.json({ code: false, data: L.pathNotExists }));
+  const fullRel = shareJoinRel(storage.relPath, realRel);
+  const io = storage.source ? ioClientOf(storage.source) : null;
+  const key = shareKeyOf(owner, storage.source, fullRel);
 
   const name = realRel.split("/").filter(Boolean).pop() || "file";
   const headers = new Headers();
   headers.set("Content-Type", getFileMimeType(name));
   headers.set("Content-Disposition", `inline; filename="${encodeURIComponent(name)}"`);
   headers.set("Cache-Control", "public, max-age=3600");
+
+  if (io) {
+    const g = await io.get(key).catch(() => null);
+    if (!g) return await tipsHtml(c, c.json({ code: false, data: L.pathNotExists }));
+    if (g.contentType) headers.set("Content-Type", g.contentType);
+    return new Response(g.body, { headers });
+  }
+  const obj = await c.env.FILES.get(key).catch(() => null);
+  if (!obj) return await tipsHtml(c, c.json({ code: false, data: L.pathNotExists }));
   obj.writeHttpMetadata(headers);
   return new Response(obj.body, { headers });
 });
@@ -737,8 +824,15 @@ function shareZipList(entries: Array<{ name: string; dir: boolean; size: number;
   return list;
 }
 
-/** 分享场景 R2 Range 读取 (central directory 快速列目录) */
-async function shareRangeRead(c: AppContext, key: string, start: number, endInclusive: number): Promise<ZipCentralRangeResult> {
+/** 分享场景 Range 读取 (R2 或外部挂载, central directory 快速列目录) */
+async function shareRangeRead(c: AppContext, owner: AuthUser, source: SourceRef | null, relPath: string, start: number, endInclusive: number): Promise<ZipCentralRangeResult> {
+  const key = shareKeyOf(owner, source, relPath);
+  const io = source ? ioClientOf(source) : null;
+  if (io) {
+    const g = await io.get(key, { range: [start, endInclusive] }).catch(() => null);
+    if (!g) return { bytes: null, totalSize: null };
+    return { bytes: await shareStreamBytes(g.body), totalSize: g.totalSize ?? null };
+  }
   const head = await c.env.FILES.head(key).catch(() => null);
   if (!head) return { bytes: null, totalSize: null };
   const r = await c.env.FILES.get(key, { range: { offset: start, length: endInclusive - start + 1 } }).catch(() => null);
@@ -746,24 +840,30 @@ async function shareRangeRead(c: AppContext, key: string, start: number, endIncl
   return { bytes: new Uint8Array(await r.arrayBuffer()), totalSize: head.size };
 }
 
-/** 定位分享 zip 文件并返回其 R2 key + 全量字节 */
-async function shareZipObject(c: AppContext, share: ShareRow, owner: AuthUser, rel: string): Promise<{ key: string; bytes: ArrayBuffer } | null> {
-  const realPath = joinShareRealPath(share.sourcePath, rel);
-  const key = shareStorageKey(owner.username, realPath);
+/** 定位分享 zip 文件并返回其 key + 全量字节 (R2 或外部挂载) */
+async function shareZipObject(c: AppContext, owner: AuthUser, storage: { source: SourceRef | null; relPath: string }, rel: string): Promise<{ key: string; bytes: Uint8Array } | null> {
+  const fullRel = shareJoinRel(storage.relPath, rel);
+  const io = storage.source ? ioClientOf(storage.source) : null;
+  const key = shareKeyOf(owner, storage.source, fullRel);
+  if (io) {
+    const g = await io.get(key).catch(() => null);
+    if (!g) return null;
+    return { key, bytes: await shareStreamBytes(g.body) };
+  }
   const obj = await c.env.FILES.get(key).catch(() => null);
   if (!obj) return null;
   const bytes = await obj.arrayBuffer().catch(() => null);
   if (!bytes) return null;
-  return { key, bytes };
+  return { key, bytes: new Uint8Array(bytes) };
 }
 
 /** 读取分享 zip 内单个文件内容 (按 index 数组末位); 非 zip 内文件返回 null */
-async function shareFileGetZipInner(c: AppContext, share: ShareRow, owner: AuthUser, rawPath: string): Promise<Response | null> {
+async function shareFileGetZipInner(c: AppContext, share: ShareRow, owner: AuthUser, storage: { source: SourceRef | null; relPath: string }, rawPath: string): Promise<Response | null> {
   const zipInner = parseZipInnerPath(rawPath);
   if (!zipInner) return null;
   const rel = parseShareLinkRel(share, zipInner.zipPath);
   if (rel === null) return null;
-  const zo = await shareZipObject(c, share, owner, rel);
+  const zo = await shareZipObject(c, owner, storage, rel);
   if (!zo) return null;
   const zip = await JSZip.loadAsync(zo.bytes, { decodeFileName: zipDecodeFileName });
   const entries = Object.values(zip.files);
@@ -795,25 +895,25 @@ shareApi.all("/share/fileGet", async (c) => {
   const params = await reqParams(c);
   const init = await initShare(c, params);
   if (!init.ok) return init.response;
-  const { share, owner } = init;
+  const { share, owner, storage } = init;
   const errMsg = authCheck(c, share, "fileget", params);
   if (errMsg) return c.json({ code: false, data: errMsg });
 
   const path = typeof params.path === "string" ? params.path : "";
   // zip 预览面板内条目: path 是完整 unzipList URL 串
-  const zipRes = await shareFileGetZipInner(c, share, owner, path);
+  const zipRes = await shareFileGetZipInner(c, share, owner, storage, path);
   if (zipRes) return zipRes;
 
   const rel = parseShareLinkRel(share, path);
   if (rel === null) return c.json({ code: false, data: L.pathNotExists });
   // 空 rel 表示分享源本身（文件分享的根路径）
-  const realPath = joinShareRealPath(share.sourcePath, rel);
-  const key = shareStorageKey(owner.username, realPath);
-  const obj = await c.env.FILES.get(key).catch(() => null);
-  if (!obj) return c.json({ code: false, data: L.pathNotExists });
+  const fullRel = shareJoinRel(storage.relPath, rel);
+  const bytes = await shareReadBytes(c.env, owner, storage.source, fullRel);
+  if (!bytes) return c.json({ code: false, data: L.pathNotExists });
+  const head = await shareHeadOf(c.env, owner, storage.source, fullRel);
 
   const name = rel.split("/").filter(Boolean).pop() || (rel === "" ? share.title : "");
-  const content = await obj.text().catch(() => "");
+  const content = new TextDecoder().decode(bytes);
   return c.json({
     code: 1,
     data: {
@@ -821,7 +921,7 @@ shareApi.all("/share/fileGet", async (c) => {
       path: shareLinkRoot(share.shareHash) + rel,
       pathDisplay: share.title + "/" + rel,
       ext: name.includes(".") ? name.split(".").pop()!.toLowerCase() : "",
-      size: obj.size,
+      size: head?.size ?? bytes.byteLength,
       charset: "utf-8",
       base64: "0",
       pageInfo: { page: 1, pageNum: 1, pageTotal: 1 },
@@ -1168,28 +1268,25 @@ async function shareUnzipListHandler(c: AppContext): Promise<Response> {
   const params = await reqParams(c);
   const init = await initShare(c, params);
   if (!init.ok) return init.response;
-  const { share, owner } = init;
+  const { share, owner, storage } = init;
   const errMsg = authCheck(c, share, "fileget", params);
   if (errMsg) return c.json({ code: false, data: errMsg });
 
   const path = typeof params.path === "string" ? params.path : "";
   const rel = parseShareLinkRel(share, path);
   if (rel === null) return c.json({ code: false, data: L.pathNotExists });
-  const realPath = joinShareRealPath(share.sourcePath, rel);
-  const key = shareStorageKey(owner.username, realPath);
+  const fullRel = shareJoinRel(storage.relPath, rel);
 
   // 优先只读 central directory (Range 下载, 规避全量下载慢)
   const central = await readZipCentralDirectory({
-    readRange: (s, e) => shareRangeRead(c, key, s, e),
+    readRange: (s, e) => shareRangeRead(c, owner, storage.source, fullRel, s, e),
   }).catch(() => null);
   if (central && central.length > 0) return c.json({ code: true, data: shareZipList(central) });
 
   // 回退: 全量下载 + JSZip 解析
-  const obj = await c.env.FILES.get(key).catch(() => null);
-  if (!obj) return c.json({ code: false, data: L.pathNotExists });
-  const bytes = await obj.arrayBuffer().catch(() => null);
-  if (!bytes) return c.json({ code: false, data: L.pathNotExists });
-  const zip = await JSZip.loadAsync(bytes, { decodeFileName: zipDecodeFileName });
+  const zo = await shareZipObject(c, owner, storage, rel);
+  if (!zo) return c.json({ code: false, data: L.pathNotExists });
+  const zip = await JSZip.loadAsync(zo.bytes, { decodeFileName: zipDecodeFileName });
   const entries = Object.values(zip.files);
   const list = shareZipList(entries.map((e: any) => ({
     name: e.name,
@@ -1208,11 +1305,11 @@ shareApi.all("/share/fileGetHash", async (c) => {
   const params = await reqParams(c);
   const init = await initShare(c, params);
   if (!init.ok) return init.response;
-  const { share, owner } = init;
+  const { share, owner, storage } = init;
   const errMsg = authCheck(c, share, "fileget", params);
   if (errMsg) return c.json({ code: false, data: errMsg });
   const path = typeof params.path === "string" ? params.path : "";
-  const zipRes = await shareFileGetZipInner(c, share, owner, path);
+  const zipRes = await shareFileGetZipInner(c, share, owner, storage, path);
   if (zipRes) return zipRes;
   return c.json({ code: false, data: L.pathNotExists });
 });

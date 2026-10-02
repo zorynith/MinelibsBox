@@ -13,6 +13,8 @@
 import { md5, mcryptDecode } from "./mcrypt";
 import { resolveFileSource } from "./source";
 import type { AuthUser } from "./auth";
+import { ioClientOf } from "./io";
+import type { SourceRef } from "./source";
 
 export interface ShareRow {
   shareID: number;
@@ -241,12 +243,21 @@ export function setSharePassUnlocked(c: any, shareHash: string): void {
 
 // ============ 分享源 ============
 
-/** 校验分享源仍存在（R2 head），返回源信息（type/name/...），不存在返回 null。 */
-export async function resolveShareSource(
+/** 分享源解析结果: source=null 表示 R2 个人空间/发布目录, 非 null 表示部门/io 挂载的 SourceRef。 */
+export interface ShareStorageRef {
+  source: SourceRef | null;
+  relPath: string;
+  type: "folder" | "file";
+  name: string;
+  realPath: string;
+}
+
+/** 校验分享源仍存在，返回存储引用（R2 或外部挂载）；不存在返回 null。 */
+export async function resolveShareStorage(
   env: Env,
   owner: AuthUser,
   share: ShareRow
-): Promise<{ type: "folder" | "file"; name: string; realPath: string } | null> {
+): Promise<ShareStorageRef | null> {
   const path = normShareSourcePath(share.sourcePath);
   const isFolder = path.endsWith("/");
   // 发布临时目录: {publish:<userID>:<tempName>} -> __publish__/<userID>/<tempName>
@@ -256,45 +267,67 @@ export async function resolveShareSource(
       const prefix = pub.key.endsWith("/") ? pub.key : pub.key + "/";
       const listed = await env.FILES.list({ prefix, limit: 1 });
       if (listed.objects.length > 0 || (listed.delimitedPrefixes || []).length > 0) {
-        return { type: "folder", name: pub.name, realPath: path };
+        return { source: null, relPath: pub.key, type: "folder", name: pub.name, realPath: path };
       }
       return null;
     }
     const obj = await env.FILES.head(pub.key);
     if (!obj) return null;
-    return { type: "file", name: pub.name, realPath: path };
+    return { source: null, relPath: pub.key, type: "file", name: pub.name, realPath: path };
   }
-  // 部门/io 虚拟路径: 用 resolveFileSource 解析到 baseKey + relPath
+  // 部门/io 虚拟路径: 用 resolveFileSource 解析到 baseKey + relPath, io 挂载走外部存储驱动
   if (path.startsWith("{source:") || path.startsWith("{io:")) {
     const r = await resolveFileSource(env, owner, path);
     if (!r.ok) return null;
     const { keyFromBase } = await import("./r2");
     const rel = r.relPath;
     const key = keyFromBase(r.source.baseKey, rel);
+    const io = ioClientOf(r.source);
     if (isFolder) {
       const prefix = key.endsWith("/") ? key : key + "/";
-      const listed = await env.FILES.list({ prefix, limit: 1 });
-      if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) return null;
+      if (io) {
+        const listed = await io.list(prefix).catch(() => null);
+        if (!listed || (listed.folders.length === 0 && listed.files.length === 0)) return null;
+      } else {
+        const listed = await env.FILES.list({ prefix, limit: 1 });
+        if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) return null;
+      }
       const name = rel === "/" ? r.source.displayName : rel.split("/").filter(Boolean).pop() || rel;
-      return { type: "folder", name, realPath: path };
+      return { source: r.source, relPath: rel, type: "folder", name, realPath: path };
     }
-    const obj = await env.FILES.head(key);
-    if (!obj) return null;
+    if (io) {
+      const head = await io.head(key).catch(() => null);
+      if (!head) return null;
+    } else {
+      const obj = await env.FILES.head(key);
+      if (!obj) return null;
+    }
     const name = rel.split("/").filter(Boolean).pop() || rel;
-    return { type: "file", name, realPath: path };
+    return { source: r.source, relPath: rel, type: "file", name, realPath: path };
   }
   const { getUserFileKey } = await import("./r2");
   if (isFolder) {
     const key = getUserFileKey(owner.username, path);
     const listed = await env.FILES.list({ prefix: key, limit: 1 });
     if (listed.objects.length > 0 || (listed.delimitedPrefixes || []).length > 0) {
-      return { type: "folder", name: path.split("/").filter(Boolean).pop() || path, realPath: path };
+      return { source: null, relPath: path, type: "folder", name: path.split("/").filter(Boolean).pop() || path, realPath: path };
     }
     return null;
   }
   const obj = await env.FILES.head(getUserFileKey(owner.username, path));
   if (!obj) return null;
-  return { type: "file", name: path.split("/").filter(Boolean).pop() || path, realPath: path };
+  return { source: null, relPath: path, type: "file", name: path.split("/").filter(Boolean).pop() || path, realPath: path };
+}
+
+/** 校验分享源仍存在，返回源信息（type/name/...），不存在返回 null。 */
+export async function resolveShareSource(
+  env: Env,
+  owner: AuthUser,
+  share: ShareRow
+): Promise<{ type: "folder" | "file"; name: string; realPath: string } | null> {
+  const s = await resolveShareStorage(env, owner, share);
+  if (!s) return null;
+  return { type: s.type, name: s.name, realPath: s.realPath };
 }
 
 /** 解析发布临时目录路径 {publish:<userID>:<tempName>} → R2 key 前缀。 */
