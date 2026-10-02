@@ -280,16 +280,23 @@ async function buildSharePageData(
   env: Env,
   share: ShareRow,
   owner: AuthUser,
-  source: { type: "folder" | "file"; name: string; realPath: string }
+  source: { type: "folder" | "file"; name: string; realPath: string },
+  storage?: { source: SourceRef | null; relPath: string }
 ): Promise<Record<string, unknown>> {
   const canEdit = await shareCanEdit(env, share);
   let size = 0;
   let modifyTime = share.modifyTime;
   if (source.type === "file") {
-    const obj = await env.FILES.head(shareStorageKey(owner.username, source.realPath));
-    if (obj) {
-      size = obj.size;
-      if (obj.uploaded) modifyTime = new Date(obj.uploaded).toISOString();
+    const head = storage ? await shareHeadOf(env, owner, storage.source, storage.relPath) : null;
+    if (head) {
+      size = head.size;
+      if (head.lastModified) modifyTime = head.lastModified;
+    } else if (!storage) {
+      const obj = await env.FILES.head(shareStorageKey(owner.username, source.realPath));
+      if (obj) {
+        size = obj.size;
+        if (obj.uploaded) modifyTime = new Date(obj.uploaded).toISOString();
+      }
     }
   }
   const info: Record<string, unknown> = {
@@ -393,17 +400,17 @@ async function initShare(c: AppContext, params: Record<string, any>): Promise<In
   const opts = shareOptions(share);
   const now = Math.floor(Date.now() / 1000);
   if (share.timeTo && share.timeTo > 0 && share.timeTo < now) {
-    const info = await buildSharePageData(c.env, share, owner, source);
+    const info = await buildSharePageData(c.env, share, owner, source, { source: storage.source, relPath: storage.relPath });
     return shareError(c, 30101, L.expiredTips, info);
   }
   if (opts.downloadNumber && Number(opts.downloadNumber) <= share.numDownload) {
-    const info = await buildSharePageData(c.env, share, owner, source);
+    const info = await buildSharePageData(c.env, share, owner, source, { source: storage.source, relPath: storage.relPath });
     return shareError(c, 30102, L.downExceedTips, info);
   }
 
   const user = c.get("currentUser") as AuthUser | undefined;
   if (opts.onlyLogin === "1" && !user) {
-    const info = await buildSharePageData(c.env, share, owner, source);
+    const info = await buildSharePageData(c.env, share, owner, source, { source: storage.source, relPath: storage.relPath });
     return shareError(c, 30103, L.loginTips, info);
   }
 
@@ -419,7 +426,7 @@ async function initShare(c: AppContext, params: Record<string, any>): Promise<In
           return shareError(c, false, L.errorPwd);
         }
       } else {
-        const info = await buildSharePageData(c.env, share, owner, source);
+        const info = await buildSharePageData(c.env, share, owner, source, { source: storage.source, relPath: storage.relPath });
         return shareError(c, 30104, L.needPwd, info);
       }
     }
@@ -577,15 +584,26 @@ async function resolveShareSourceForUser(env: Env, user: AuthUser, path: string)
     const rel = r.relPath;
     const isFolder = rel.endsWith("/");
     const key = keyFromBase(r.source.baseKey, rel);
+    const io = ioClientOf(r.source);
     if (isFolder) {
       const prefix = key.endsWith("/") ? key : key + "/";
-      const listed = await env.FILES.list({ prefix, limit: 1 });
-      if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) return null;
+      if (io) {
+        const listed = await io.list(prefix).catch(() => null);
+        if (!listed || (listed.folders.length === 0 && listed.files.length === 0)) return null;
+      } else {
+        const listed = await env.FILES.list({ prefix, limit: 1 });
+        if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) return null;
+      }
       const name = rel === "/" ? r.source.displayName : rel.split("/").filter(Boolean).pop() || rel;
       return { type: "folder", name, realPath: path };
     }
-    const obj = await env.FILES.head(key);
-    if (!obj) return null;
+    if (io) {
+      const head = await io.head(key).catch(() => null);
+      if (!head) return null;
+    } else {
+      const obj = await env.FILES.head(key);
+      if (!obj) return null;
+    }
     const name = rel.split("/").filter(Boolean).pop() || rel;
     return { type: "file", name, realPath: path };
   }
@@ -620,7 +638,7 @@ shareApi.all("/share/get", async (c) => {
   const init = await initShare(c, params);
   if (!init.ok) return init.response;
   await incNumView(c.env.DB, init.share.shareID);
-  return c.json({ code: 1, data: await buildSharePageData(c.env, init.share, init.owner, init.source) });
+  return c.json({ code: 1, data: await buildSharePageData(c.env, init.share, init.owner, init.source, init.storage) });
 });
 
 // pathList - 目录浏览
@@ -1259,7 +1277,7 @@ shareApi.all("/share/zipDownload", async (c) => {
     const rel = parseShareLinkRel(init.share, it.path);
     if (rel === null) continue;
     const name = rel ? rel.replace(/\/+$/, "").split("/").pop()! : init.source.name;
-    await shareZipCollect(c, init.owner, init.share, init.source, rel, "/" + name, out);
+    await shareZipCollect(c, init.owner, init.share, init.source, init.storage, rel, "/" + name, out);
   }
   return c.json({ code: true, data: out });
 });
@@ -1367,13 +1385,24 @@ shareApi.all("/userShare/add", async (c) => {
   const relPath = srcRes.relPath;
   const srcIsFolder = relPath.endsWith("/");
   const existKey = keyFromBase(src.baseKey, relPath);
+  const srcIo = src.type === "io" ? ioClientOf(src) : null;
   if (srcIsFolder) {
     const prefix = existKey.endsWith("/") ? existKey : existKey + "/";
-    const listed = await c.env.FILES.list({ prefix, limit: 1 });
-    if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) return c.json({ code: false, data: L.pathNotExists });
+    if (srcIo) {
+      const listed = await srcIo.list(prefix).catch(() => null);
+      if (!listed || (listed.folders.length === 0 && listed.files.length === 0)) return c.json({ code: false, data: L.pathNotExists });
+    } else {
+      const listed = await c.env.FILES.list({ prefix, limit: 1 });
+      if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) return c.json({ code: false, data: L.pathNotExists });
+    }
   } else {
-    const obj = await c.env.FILES.head(existKey);
-    if (!obj) return c.json({ code: false, data: L.pathNotExists });
+    if (srcIo) {
+      const head = await srcIo.head(existKey).catch(() => null);
+      if (!head) return c.json({ code: false, data: L.pathNotExists });
+    } else {
+      const obj = await c.env.FILES.head(existKey);
+      if (!obj) return c.json({ code: false, data: L.pathNotExists });
+    }
   }
   const srcName = relPath === "/" ? src.displayName : relPath.split("/").filter(Boolean).pop() || "";
   const sourcePath = src.type === "group" ? `{source:${src.sourceId}}${relPath}` : src.type === "io" ? `{io:${src.sourceId}}${relPath}` : relPath;
@@ -2295,12 +2324,13 @@ async function runSharePaste(
   return c.json({ code: 1, data: copyType === "cute" ? "移动成功" : "复制成功", info: out });
 }
 
-/** 递归收集分享内文件清单（供前端 zipClient 自行打包）。 */
+/** 递归收集分享内文件清单（供前端 zipClient 自行打包，R2 或外部挂载）。 */
 async function shareZipCollect(
   c: AppContext,
   owner: AuthUser,
   share: ShareRow,
   source: { type: "folder" | "file"; name: string; realPath: string },
+  storage: { source: SourceRef | null; relPath: string },
   rel: string,
   zipName: string,
   out: Record<string, unknown>[]
@@ -2308,37 +2338,30 @@ async function shareZipCollect(
   const isFolder = rel.endsWith("/") || (rel === "" && source.type === "folder");
   const now = new Date().toISOString();
   if (!isFolder) {
-    const realPath = joinShareRealPath(share.sourcePath, rel);
-    const obj = await c.env.FILES.head(shareStorageKey(owner.username, realPath));
+    const fullRel = shareJoinRel(storage.relPath, rel);
+    const head = await shareHeadOf(c.env, owner, storage.source, fullRel);
     out.push({
       path: zipName,
       folder: false,
       filePath: shareLinkRoot(share.shareHash) + rel,
-      size: obj?.size ?? 0,
-      modifyTime: obj?.uploaded ? new Date(obj.uploaded).toISOString() : now,
+      size: head?.size ?? 0,
+      modifyTime: head?.lastModified ? new Date(head.lastModified).toISOString() : now,
     });
     return;
   }
   out.push({ path: zipName, folder: true, modifyTime: now });
-  const realDir = joinShareRealPath(share.sourcePath, rel, true);
-  let folders: { key: string }[] = [];
-  let files: { key: string; size: number; uploaded?: Date }[] = [];
-  try {
-    const r = await listDirectory(c.env.FILES, owner.username, realDir);
-    folders = r.folders;
-    files = r.files;
-  } catch {
-    return;
-  }
+  const fullDir = shareJoinRel(storage.relPath, rel, true);
+  const list = await shareListDir(c.env, owner, storage.source, fullDir);
+  if (!list) return;
   const baseRel = rel.replace(/\/+$/, "");
-  for (const f of folders) {
-    const n = f.key.split("/").filter(Boolean).pop() || "";
+  for (const f of list.folders) {
+    const n = f.name;
     if (!n || n.startsWith(".")) continue;
     const zipBase = zipName.replace(/\/+$/, "");
-    await shareZipCollect(c, owner, share, source, (baseRel ? baseRel + "/" : "") + n + "/", zipBase + "/" + n + "/", out);
+    await shareZipCollect(c, owner, share, source, storage, (baseRel ? baseRel + "/" : "") + n + "/", zipBase + "/" + n + "/", out);
   }
-  for (const f of files) {
-    const n = f.key.split("/").pop() || "";
+  for (const f of list.files) {
+    const n = f.name;
     if (n === ".keep" || n.startsWith(".")) continue;
     const zipBase = zipName.replace(/\/+$/, "");
     out.push({
@@ -2346,7 +2369,7 @@ async function shareZipCollect(
       folder: false,
       filePath: shareLinkRoot(share.shareHash) + (baseRel ? baseRel + "/" : "") + n,
       size: f.size,
-      modifyTime: f.uploaded ? new Date(f.uploaded).toISOString() : now,
+      modifyTime: f.uploaded ? f.uploaded : now,
     });
   }
 }
