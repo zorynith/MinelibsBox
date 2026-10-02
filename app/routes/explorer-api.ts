@@ -3188,11 +3188,157 @@ explorerApi.all("/index/fileSave", async (c) => {
   // 001 auth: 保存文件需 edit 权限
   const saveAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
   if (!saveAuth.ok) return c.json({ code: false, data: saveAuth.error });
+  // 001: 保存前将旧内容写入历史版本
+  await saveFileHistory(c, src.source, src.relPath, path, user.id);
   const okWrite = await writeObject(c, src.source, src.relPath, content, "text/plain; charset=utf-8");
   if (!okWrite) return c.json({ code: false, data: "保存失败" });
   await addAuditLog(c.env.DB, "fileSave", user.id, path, null, null, null);
   invalidateSpaceUsageByBase(src.source.baseKey);
   return c.json({ code: true, data: "ok" });
+});
+
+// ============ 文件历史版本 (001 explorer/history + historyLocal) ============
+
+/** 保存当前文件内容为历史版本（写入新内容前调用; 失败不影响主流程）。 */
+async function saveFileHistory(c: AppContext, src: SourceRef, relPath: string, path: string, userId: number): Promise<void> {
+  try {
+    const oldBytes = await readObjectBytes(c, src, relPath);
+    if (!oldBytes || oldBytes.byteLength === 0) return;
+    const now = Math.floor(Date.now() / 1000);
+    const res = await c.env.DB.prepare(
+      "INSERT INTO source_history (path, fileKey, size, detail, createUser, createTime) VALUES (?, ?, ?, '', ?, ?)"
+    ).bind(path, "", oldBytes.byteLength, userId, now).run();
+    const historyId = res.meta?.last_row_id as number | undefined;
+    if (!historyId) return;
+    const fileKey = `.history/${historyId}`;
+    const ok = await writeObject(c, src, fileKey, oldBytes, "application/octet-stream");
+    if (ok) {
+      await c.env.DB.prepare("UPDATE source_history SET fileKey = ? WHERE id = ?").bind(fileKey, historyId).run();
+    } else {
+      await c.env.DB.prepare("DELETE FROM source_history WHERE id = ?").bind(historyId).run();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 解析 history 请求的文件源并校验 edit 权限; 失败返回 Response。 */
+async function historyResolve(c: AppContext, user: Vars["currentUser"], path: string): Promise<{ src: SourceRef; relPath: string } | Response> {
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const auth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  if (!auth.ok) return c.json({ code: false, data: auth.error });
+  return { src: src.source, relPath: src.relPath };
+}
+
+function historyRow(row: any): Record<string, unknown> {
+  return { id: row.id, path: row.path, size: row.size, detail: row.detail, createUser: row.createUser, createTime: row.createTime };
+}
+
+explorerApi.all("/history/get", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path || "");
+  if (!path) return c.json({ code: false, data: "参数错误" });
+  const r = await historyResolve(c, user, path);
+  if (r instanceof Response) return r;
+  const rows = await c.env.DB.prepare("SELECT * FROM source_history WHERE path = ? ORDER BY id DESC").bind(path).all<any>();
+  return c.json({ code: true, data: { list: rows.results.map(historyRow) } });
+});
+
+explorerApi.all("/history/remove", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path || "");
+  const id = parseInt(String(params.id || ""), 10);
+  if (!path || !Number.isInteger(id) || id <= 0) return c.json({ code: false, data: "参数错误" });
+  const r = await historyResolve(c, user, path);
+  if (r instanceof Response) return r;
+  const row = await c.env.DB.prepare("SELECT * FROM source_history WHERE id = ? AND path = ?").bind(id, path).first<any>();
+  if (!row) return c.json({ code: false, data: "explorer.dataError" });
+  if (row.fileKey) await c.env.FILES.delete(keyFromBase(r.src.baseKey, row.fileKey)).catch(() => {});
+  await c.env.DB.prepare("DELETE FROM source_history WHERE id = ?").bind(id).run();
+  return c.json({ code: true, data: "explorer.success" });
+});
+
+explorerApi.all("/history/clear", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path || "");
+  if (!path) return c.json({ code: false, data: "参数错误" });
+  const r = await historyResolve(c, user, path);
+  if (r instanceof Response) return r;
+  const rows = await c.env.DB.prepare("SELECT * FROM source_history WHERE path = ?").bind(path).all<any>();
+  for (const row of rows.results) {
+    if (row.fileKey) await c.env.FILES.delete(keyFromBase(r.src.baseKey, row.fileKey)).catch(() => {});
+  }
+  await c.env.DB.prepare("DELETE FROM source_history WHERE path = ?").bind(path).run();
+  return c.json({ code: true, data: "explorer.success" });
+});
+
+explorerApi.all("/history/rollback", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path || "");
+  const id = parseInt(String(params.id || ""), 10);
+  if (!path || !Number.isInteger(id) || id <= 0) return c.json({ code: false, data: "参数错误" });
+  const r = await historyResolve(c, user, path);
+  if (r instanceof Response) return r;
+  const row = await c.env.DB.prepare("SELECT * FROM source_history WHERE id = ? AND path = ?").bind(id, path).first<any>();
+  if (!row || !row.fileKey) return c.json({ code: false, data: "explorer.dataError" });
+  const histBytes = await readObjectBytes(c, r.src, row.fileKey);
+  if (!histBytes) return c.json({ code: false, data: "explorer.dataError" });
+  // 回退前保存当前内容为历史（可再回退）
+  await saveFileHistory(c, r.src, r.relPath, path, user.id);
+  const ok = await writeObject(c, r.src, r.relPath, histBytes, "application/octet-stream");
+  if (!ok) return c.json({ code: false, data: "保存失败" });
+  invalidateSpaceUsageByBase(r.src.baseKey);
+  return c.json({ code: true, data: "explorer.success" });
+});
+
+explorerApi.all("/history/setDetail", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path || "");
+  const id = parseInt(String(params.id || ""), 10);
+  if (!path || !Number.isInteger(id) || id <= 0) return c.json({ code: false, data: "参数错误" });
+  const r = await historyResolve(c, user, path);
+  if (r instanceof Response) return r;
+  const detail = String(params.detail || "").slice(0, 1024);
+  await c.env.DB.prepare("UPDATE source_history SET detail = ? WHERE id = ? AND path = ?").bind(detail, id, path).run();
+  return c.json({ code: true, data: "explorer.success" });
+});
+
+explorerApi.all("/history/fileOut", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path || "");
+  const id = parseInt(String(params.id || ""), 10);
+  if (!path || !Number.isInteger(id) || id <= 0) return c.json({ code: false, data: "参数错误" });
+  const r = await historyResolve(c, user, path);
+  if (r instanceof Response) return r;
+  const row = await c.env.DB.prepare("SELECT * FROM source_history WHERE id = ? AND path = ?").bind(id, path).first<any>();
+  if (!row || !row.fileKey) return c.json({ code: false, data: "explorer.dataError" });
+  const bytes = await readObjectBytes(c, r.src, row.fileKey);
+  if (!bytes) return c.json({ code: false, data: "explorer.dataError" });
+  const name = path.split("/").filter(Boolean).pop() || "file";
+  const download = params.download === "1";
+  const headers: Record<string, string> = { "Content-Type": "application/octet-stream" };
+  if (download) headers["Content-Disposition"] = `attachment; filename="${encodeURIComponent(name)}"`;
+  return new Response(bytes.buffer as ArrayBuffer, { headers });
+});
+
+explorerApi.all("/history/fileInfo", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path || "");
+  const id = parseInt(String(params.id || ""), 10);
+  if (!path || !Number.isInteger(id) || id <= 0) return c.json({ code: false, data: "参数错误" });
+  const r = await historyResolve(c, user, path);
+  if (r instanceof Response) return r;
+  const row = await c.env.DB.prepare("SELECT * FROM source_history WHERE id = ? AND path = ?").bind(id, path).first<any>();
+  if (!row) return c.json({ code: false, data: "explorer.dataError" });
+  return c.json({ code: true, data: historyRow(row) });
 });
 
 // ============ editor ============

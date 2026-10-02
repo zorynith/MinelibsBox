@@ -392,6 +392,17 @@ export async function initDatabase(db: D1Database): Promise<void> {
       expire_at INTEGER NOT NULL DEFAULT 0
     )`,
 
+    // 文件历史版本 (镜像 001 io_source_history; path=文件虚拟路径, fileKey=历史版本在 R2 的 key)
+    `CREATE TABLE IF NOT EXISTS source_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT NOT NULL,
+      fileKey TEXT NOT NULL,
+      size INTEGER NOT NULL DEFAULT 0,
+      detail TEXT NOT NULL DEFAULT '',
+      createUser INTEGER NOT NULL DEFAULT 0,
+      createTime INTEGER NOT NULL DEFAULT 0
+    )`,
+
     // Indexes
     `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(share_token)`,
@@ -414,6 +425,7 @@ export async function initDatabase(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_audit_logs_time ON audit_logs(created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_task_result_expire ON task_result(expire_at)`,
     `CREATE INDEX IF NOT EXISTS idx_plugin_cache_expire ON plugin_cache(expire_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_source_history_path ON source_history(path)`,
   ];
 
   // 批量建表/索引: 单次 D1 round-trip 完成, 显著降低 worker 冷启动时间
