@@ -46,7 +46,7 @@ async function taskQueueInfo(db: D1Database): Promise<Record<string, unknown>> {
 }
 
 /** 001 taskListUser: 查询任务列表并按 001 规则清理过期任务 */
-async function taskListUser(db: D1Database, userID: number | false): Promise<any[]> {
+export async function taskListUser(db: D1Database, userID: number | false): Promise<any[]> {
   const now = Math.floor(Date.now() / 1000);
   const where = userID ? "WHERE userID = ?" : "";
   const binds = userID ? [userID] : [];
@@ -65,7 +65,7 @@ async function taskListUser(db: D1Database, userID: number | false): Promise<any
   return keep;
 }
 
-async function taskListData(c: any, userID: number | false): Promise<{ list: Record<string, unknown>[]; taskInfo: Record<string, unknown> | null }> {
+export async function taskListData(c: any, userID: number | false): Promise<{ list: Record<string, unknown>[]; taskInfo: Record<string, unknown> | null }> {
   const rows = await taskListUser(c.env.DB, userID);
   const list: Record<string, unknown>[] = [];
   for (const row of rows.slice(0, 50)) {

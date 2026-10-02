@@ -494,6 +494,17 @@ adminApi.all("/backup/restore", async (c) => {
   return c.json(ok("explorer.success"));
 });
 
+// 终止备份任务 (001 adminBackup::kill; worker 备份为同步执行无后台进程, 兼容返回)
+adminApi.all("/backup/kill", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const q = await allParams(c);
+  const id = parseInt(q.id, 10) || 0;
+  const row = await c.env.DB.prepare("SELECT * FROM backup WHERE id = ?").bind(id).first().catch(() => null);
+  if (!row) return c.json(fail("explorer.error"));
+  return c.json(ok("explorer.success"));
+});
+
 adminApi.all("/storage/get", async (c) => {
   const q = await allParams(c);
   const usage = String(q.usage ?? "") === "1";

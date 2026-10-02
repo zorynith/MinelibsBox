@@ -17,6 +17,10 @@ import { getUserFileKey, listDirectory, getFileMimeType, keyFromBase } from "../
 import { resolveFileSource } from "../lib/source";
 import { getGroupAuthValue } from "../lib/source-auth";
 import { md5, mcryptDecode } from "../lib/mcrypt";
+import JSZip from "jszip";
+import { readZipCentralDirectory } from "../lib/zip-central";
+import type { ZipCentralRangeResult } from "../lib/zip-central";
+import { safeZipEntryName, zipDecodeFileName, parseZipInnerPath } from "./explorer-api";
 import type { ShareRow } from "../lib/share";
 import {
   shareOptions,
@@ -712,6 +716,80 @@ shareApi.all("/share/fileOutBy", async (c) => {
   return new Response(obj.body, { headers });
 });
 
+// ============ 分享页 zip 浏览 (001 explorer/share unzipList + fileGetHash) ============
+
+/** central directory 条目 -> 前端 unzipList 列表格式 (对齐 explorer/index/unzipList) */
+function shareZipList(entries: Array<{ name: string; dir: boolean; size: number; mtimeSec: number }>): Record<string, unknown>[] {
+  const list: Record<string, unknown>[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const en = entries[i];
+    const filename = safeZipEntryName(en.name);
+    if (!filename) continue;
+    list.push({
+      filename,
+      stored_filename: filename,
+      folder: en.dir,
+      index: i,
+      mtime: en.mtimeSec,
+      size: en.size,
+    });
+  }
+  return list;
+}
+
+/** 分享场景 R2 Range 读取 (central directory 快速列目录) */
+async function shareRangeRead(c: AppContext, key: string, start: number, endInclusive: number): Promise<ZipCentralRangeResult> {
+  const head = await c.env.FILES.head(key).catch(() => null);
+  if (!head) return { bytes: null, totalSize: null };
+  const r = await c.env.FILES.get(key, { range: { offset: start, length: endInclusive - start + 1 } }).catch(() => null);
+  if (!r) return { bytes: null, totalSize: null };
+  return { bytes: new Uint8Array(await r.arrayBuffer()), totalSize: head.size };
+}
+
+/** 定位分享 zip 文件并返回其 R2 key + 全量字节 */
+async function shareZipObject(c: AppContext, share: ShareRow, owner: AuthUser, rel: string): Promise<{ key: string; bytes: ArrayBuffer } | null> {
+  const realPath = joinShareRealPath(share.sourcePath, rel);
+  const key = shareStorageKey(owner.username, realPath);
+  const obj = await c.env.FILES.get(key).catch(() => null);
+  if (!obj) return null;
+  const bytes = await obj.arrayBuffer().catch(() => null);
+  if (!bytes) return null;
+  return { key, bytes };
+}
+
+/** 读取分享 zip 内单个文件内容 (按 index 数组末位); 非 zip 内文件返回 null */
+async function shareFileGetZipInner(c: AppContext, share: ShareRow, owner: AuthUser, rawPath: string): Promise<Response | null> {
+  const zipInner = parseZipInnerPath(rawPath);
+  if (!zipInner) return null;
+  const rel = parseShareLinkRel(share, zipInner.zipPath);
+  if (rel === null) return null;
+  const zo = await shareZipObject(c, share, owner, rel);
+  if (!zo) return null;
+  const zip = await JSZip.loadAsync(zo.bytes, { decodeFileName: zipDecodeFileName });
+  const entries = Object.values(zip.files);
+  const last = zipInner.indexArray[zipInner.indexArray.length - 1];
+  const entry = entries[last];
+  if (!entry || entry.dir) return null;
+  const entryBytes = await entry.async("uint8array").catch(() => null);
+  if (!entryBytes) return null;
+  const name = zipInner.name || safeZipEntryName(entry.name);
+  const content = new TextDecoder().decode(entryBytes);
+  return c.json({
+    code: true,
+    data: {
+      name,
+      path: rawPath,
+      pathDisplay: name,
+      ext: name.includes(".") ? name.split(".").pop()!.toLowerCase() : "",
+      size: entryBytes.byteLength,
+      charset: "utf-8",
+      base64: "0",
+      pageInfo: { page: 1, pageNum: 1, pageTotal: 1 },
+      content,
+    },
+  });
+}
+
 // fileGet - 读取文本内容（编辑器预览）
 shareApi.all("/share/fileGet", async (c) => {
   const params = await reqParams(c);
@@ -721,7 +799,12 @@ shareApi.all("/share/fileGet", async (c) => {
   const errMsg = authCheck(c, share, "fileget", params);
   if (errMsg) return c.json({ code: false, data: errMsg });
 
-  const rel = parseShareLinkRel(share, typeof params.path === "string" ? params.path : "");
+  const path = typeof params.path === "string" ? params.path : "";
+  // zip 预览面板内条目: path 是完整 unzipList URL 串
+  const zipRes = await shareFileGetZipInner(c, share, owner, path);
+  if (zipRes) return zipRes;
+
+  const rel = parseShareLinkRel(share, path);
   if (rel === null) return c.json({ code: false, data: L.pathNotExists });
   // 空 rel 表示分享源本身（文件分享的根路径）
   const realPath = joinShareRealPath(share.sourcePath, rel);
@@ -1080,8 +1163,59 @@ shareApi.all("/share/zipDownload", async (c) => {
   }
   return c.json({ code: true, data: out });
 });
-shareApi.all("/share/unzipList", (c) => c.json({ code: false, data: "暂不支持" }));
-shareApi.all("/share/unzipListHash", (c) => c.json({ code: false, data: "暂不支持" }));
+// unzipList / unzipListHash - 返回分享 zip 内文件列表 (扁平数组, 对齐前端 makeTree)
+async function shareUnzipListHandler(c: AppContext): Promise<Response> {
+  const params = await reqParams(c);
+  const init = await initShare(c, params);
+  if (!init.ok) return init.response;
+  const { share, owner } = init;
+  const errMsg = authCheck(c, share, "fileget", params);
+  if (errMsg) return c.json({ code: false, data: errMsg });
+
+  const path = typeof params.path === "string" ? params.path : "";
+  const rel = parseShareLinkRel(share, path);
+  if (rel === null) return c.json({ code: false, data: L.pathNotExists });
+  const realPath = joinShareRealPath(share.sourcePath, rel);
+  const key = shareStorageKey(owner.username, realPath);
+
+  // 优先只读 central directory (Range 下载, 规避全量下载慢)
+  const central = await readZipCentralDirectory({
+    readRange: (s, e) => shareRangeRead(c, key, s, e),
+  }).catch(() => null);
+  if (central && central.length > 0) return c.json({ code: true, data: shareZipList(central) });
+
+  // 回退: 全量下载 + JSZip 解析
+  const obj = await c.env.FILES.get(key).catch(() => null);
+  if (!obj) return c.json({ code: false, data: L.pathNotExists });
+  const bytes = await obj.arrayBuffer().catch(() => null);
+  if (!bytes) return c.json({ code: false, data: L.pathNotExists });
+  const zip = await JSZip.loadAsync(bytes, { decodeFileName: zipDecodeFileName });
+  const entries = Object.values(zip.files);
+  const list = shareZipList(entries.map((e: any) => ({
+    name: e.name,
+    dir: e.dir,
+    size: e.dir ? 0 : ((e._data?.uncompressedSize ?? 0)),
+    mtimeSec: e.date ? Math.floor(e.date.getTime() / 1000) : 0,
+  })));
+  return c.json({ code: true, data: list });
+}
+
+shareApi.all("/share/unzipList", shareUnzipListHandler);
+shareApi.all("/share/unzipListHash", shareUnzipListHandler);
+
+// fileGetHash - 压缩包内文本文件请求 (001 分享页 zip 内文件读取, 复用 fileGet 的 zip 分支)
+shareApi.all("/share/fileGetHash", async (c) => {
+  const params = await reqParams(c);
+  const init = await initShare(c, params);
+  if (!init.ok) return init.response;
+  const { share, owner } = init;
+  const errMsg = authCheck(c, share, "fileget", params);
+  if (errMsg) return c.json({ code: false, data: errMsg });
+  const path = typeof params.path === "string" ? params.path : "";
+  const zipRes = await shareFileGetZipInner(c, share, owner, path);
+  if (zipRes) return zipRes;
+  return c.json({ code: false, data: L.pathNotExists });
+});
 // fileDownloadRemove - 下载 explorer/index/zipDownload 生成的临时 zip (带登录态), 下载后删除
 shareApi.all("/share/fileDownloadRemove", async (c) => {
   const user = c.get("currentUser");

@@ -11,6 +11,7 @@ import { detectLang, loadLangPack, normalizeLang } from "../lib/i18n-lang";
 import { renderPluginsJs, mergePluginLang } from "../lib/plugins";
 import { taskResultGet } from "../lib/task-result-cache";
 import { accountApi } from "./user-account-api";
+import { taskListData } from "./admin-task-api";
 import { getAppHost, getStaticHost } from "../lib/user-system";
 
 const userApi = new Hono<{ Bindings: Env; Variables: { currentUser: import("../lib/auth").AuthUser } }>();
@@ -790,6 +791,23 @@ async function taskActionHandler(c: any): Promise<Response> {
 userApi.all("/setting/taskAction", authRequired, async (c) => taskActionHandler(c));
 // 分享页任务轮询 (guest 可访问; 001 user/view/taskAction 无登录要求)
 userApi.all("/view/taskAction", async (c) => taskActionHandler(c));
+
+// ============ taskList / taskKillAll (user/setting) ============
+// 复刻 001 user/setting/taskList|taskKillAll -> admin.task.taskList|taskKillAll 传当前用户ID
+userApi.all("/setting/taskList", authRequired, async (c) => {
+  const user = c.get("currentUser");
+  const { list, taskInfo } = await taskListData(c, user.id);
+  return c.json({ code: true, data: list, info: taskInfo });
+});
+
+userApi.all("/setting/taskKillAll", authRequired, async (c) => {
+  const user = c.get("currentUser");
+  const now = Math.floor(Date.now() / 1000);
+  await c.env.DB.prepare("UPDATE task SET status = 'kill', timeUpdate = ? WHERE userID = ?")
+    .bind(now, user.id).run().catch(() => null);
+  const { list, taskInfo } = await taskListData(c, user.id);
+  return c.json({ code: true, data: list, info: taskInfo });
+});
 
 // ============ account (setting/regist/bind/view) ============
 userApi.route("/", accountApi);

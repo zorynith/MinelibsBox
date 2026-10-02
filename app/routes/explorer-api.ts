@@ -2791,7 +2791,7 @@ function dirOfVPath(vPath: string): string {
 }
 
 /** 去除 zip 条目中的危险路径段 (.. / . / 反斜杠)。 */
-function safeZipEntryName(name: string): string {
+export function safeZipEntryName(name: string): string {
   const n = (name || "").replace(/\\/g, "/");
   const parts = n.split("/").filter((s) => s && s !== "." && s !== "..");
   return parts.join("/");
@@ -2802,7 +2802,7 @@ function safeZipEntryName(name: string): string {
  * JSZip 默认把未置 UTF-8 flag 的条目按 UTF-8 解码 -> 中文 zip 文件名乱码;
  * 这里优先严格 UTF-8, 失败回退 GBK (Windows 老 zip), 最后 latin1 兜底。
  */
-function zipDecodeFileName(bytes: Uint8Array | ArrayLike<number> | string[]): string {
+export function zipDecodeFileName(bytes: Uint8Array | ArrayLike<number> | string[]): string {
   let u8: Uint8Array;
   if (bytes instanceof Uint8Array) u8 = bytes;
   else if (Array.isArray(bytes)) u8 = new Uint8Array(bytes.map((b) => (typeof b === "number" ? b : 0)));
@@ -2823,7 +2823,7 @@ function zipDecodeFileName(bytes: Uint8Array | ArrayLike<number> | string[]): st
  * 前端 makeTree 生成: `explorer/index/unzipList?path={source:home}/x.zip&index=[{index,name}...]&name=/inner.txt`
  * 返回 zip 真实路径 + 条目索引数组; 无法解析返回 null。
  */
-function parseZipInnerPath(raw: string): { zipPath: string; indexArray: number[]; name: string } | null {
+export function parseZipInnerPath(raw: string): { zipPath: string; indexArray: number[]; name: string } | null {
   const m = raw.match(/[?&]path=([^&]*)/);
   const im = raw.match(/[?&]index=([^&]*)/);
   if (!m || !im) return null;
