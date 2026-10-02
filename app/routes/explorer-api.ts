@@ -20,7 +20,7 @@ import { keyFromBase, listDirectory, listAllFiles, deleteDirectory, getFileMimeT
 import { resolveFileSource, userSource, toRealPath, groupChainMeta } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { getGroupAuthValue, getPersonalAuthValue, hasAuth, AUTH_SHOW, AUTH_VIEW, AUTH_DOWNLOAD, AUTH_UPLOAD, AUTH_EDIT, AUTH_REMOVE, AUTH_SHARE, AUTH_ROOT } from "../lib/source-auth";
-import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources, getSetting, getLightApps, addLightApp, updateLightApp, removeLightApp, getDefaultIoSource, getIoSourceById, getIoSourceList, getPluginMeta, setVerifyCode, getVerifyCode, deleteVerifyCode, getSourceMeta, setSourceMeta, setSourceMetaBulk } from "../lib/db";
+import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, deleteUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources, getSetting, getLightApps, addLightApp, updateLightApp, removeLightApp, getDefaultIoSource, getIoSourceById, getIoSourceList, getPluginMeta, setVerifyCode, getVerifyCode, deleteVerifyCode, getSourceMeta, setSourceMeta, setSourceMetaBulk } from "../lib/db";
 import type { LightAppItem } from "../lib/db";
 import { getGroupTag, sourceTagMap, getTags, isGroupAdmin } from "../lib/group-tag";
 import { ioClientOf } from "../lib/io";
@@ -1259,6 +1259,31 @@ async function safePasswordHash(db: D1Database, userId: number): Promise<string 
   return getUserOption(db, userId, "safe_password", "safe");
 }
 
+/** 关闭保险箱: 将保险箱内容移回个人空间根目录 (目标冲突追加 -copy 后缀)。 */
+async function moveSafeToUserRoot(env: Env, userId: number, username: string): Promise<void> {
+  const safePrefix = `__safe__/${userId}/`;
+  const userPrefix = `${username}/`;
+  let cursor: string | undefined;
+  do {
+    const listed = await env.FILES.list({ prefix: safePrefix, cursor, limit: 1000 });
+    for (const o of listed.objects) {
+      const rel = o.key.slice(safePrefix.length);
+      if (!rel) continue;
+      const obj = await env.FILES.get(o.key);
+      if (!obj) continue;
+      let destKey = userPrefix + rel;
+      if (await env.FILES.head(destKey)) {
+        const dot = destKey.lastIndexOf(".");
+        const suffix = `-copy${Date.now()}`;
+        destKey = dot > userPrefix.length ? destKey.slice(0, dot) + suffix + destKey.slice(dot) : destKey + suffix;
+      }
+      await env.FILES.put(destKey, obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata });
+      await env.FILES.delete(o.key);
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
+}
+
 explorerApi.all("/listSafe/action", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
@@ -1328,9 +1353,37 @@ explorerApi.all("/listSafe/action", async (c) => {
       await setUserOption(db, user.id, "safe_unlocked", "0", "safe");
       return c.json({ code: true, data: "已退出保险箱" });
     }
+    case "close": {
+      if (!(await safePasswordHash(db, user.id))) return c.json({ code: false, data: "保险箱尚未启用" });
+      await moveSafeToUserRoot(c.env, user.id, user.username);
+      await deleteUserOption(db, user.id, "safe_password", "safe");
+      await deleteUserOption(db, user.id, "safe_open", "safe");
+      await deleteUserOption(db, user.id, "safe_unlocked", "safe");
+      return c.json({ code: true, data: "保险箱已关闭" });
+    }
     default:
       return c.json({ code: false, data: "参数错误" });
   }
+});
+
+// listSafe/listRoot - 保险箱根目录 (未解锁返回提示列表)
+explorerApi.all("/listSafe/listRoot", async (c) => {
+  const user = c.get("currentUser");
+  const unlocked = await getUserOption(c.env.DB, user.id, "safe_unlocked", "safe");
+  if (unlocked !== "1") {
+    return c.json({ code: true, data: emptyListData("{block:safe}/", "私密保险箱", user.id) });
+  }
+  const src = await resolveFileSource(c.env, user, "{block:safe}/");
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  const res = await listDirectory(c.env.FILES, src.source.baseKey, "/");
+  const folderList = res.folders
+    .map((f) => f.key.split("/").filter(Boolean).pop() || "")
+    .filter((name) => name && !name.startsWith("."))
+    .map((name) => folderItem(name, "{block:safe}/", user.id, "私密保险箱", "safe"));
+  const fileList = res.files
+    .filter((f) => { const n = f.key.split("/").pop() || ""; return n !== ".keep" && !n.startsWith("."); })
+    .map((f) => fileItem(f, "{block:safe}/", user.id, "私密保险箱", "safe"));
+  return c.json({ code: true, data: { current: { name: "私密保险箱", path: "{block:safe}/", pathDisplay: "私密保险箱", type: "folder", isFolder: true }, folderList, fileList } });
 });
 
 // ============ list (main list + sidebar tree) ============
@@ -1460,6 +1513,24 @@ explorerApi.all("/list/path", async (c) => {
       .map((f) => f.key.split("/").filter(Boolean).pop() || "")
       .filter((name) => name && !name.startsWith("."))
       .map((name) => folderItem(name, virtualDir, user.id, pathDisplayBase));
+
+    // 001 listSafe.appendSafe: 个人空间根目录追加保险箱入口
+    if (dirPath === "/" && source.type === "user" && page === 1) {
+      const safeOpen = await getUserOption(c.env.DB, user.id, "safe_open", "safe");
+      if (safeOpen === "1") {
+        const safeUnlocked = await getUserOption(c.env.DB, user.id, "safe_unlocked", "safe");
+        folderList.push({
+          name: "私密保险箱",
+          path: "{block:safe}/",
+          type: "folder",
+          isFolder: true,
+          pathDesc: "私密保险箱",
+          pathSafe: safeUnlocked === "1" ? "isLogin" : "isNotLogin",
+          pathReadOnly: true,
+          metaInfo: { systemSort: 3000000000, systemSortHidden: true },
+        });
+      }
+    }
 
     const fileList: any[] = [];
     for (const f of files) {
@@ -4705,6 +4776,8 @@ explorerApi.all("/tag/filesAddToTag", async (c) => {
   const tagID = parseInt(String(body.tagID ?? ""), 10);
   const files = parseTagFiles(body.files);
   if (!Number.isInteger(tagID) || tagID <= 0 || files.length === 0) return c.json({ code: false, data: "参数错误" });
+  // 保险箱内容不支持添加标签 (001 listSafe.authCheckAllow)
+  if (files.some((f) => f.startsWith("{block:safe}"))) return c.json({ code: false, data: "explorer.pathNotSupport" });
   const numericIds: number[] = [];
   const plain: string[] = [];
   for (const f of files) {

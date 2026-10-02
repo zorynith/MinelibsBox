@@ -1087,6 +1087,8 @@ shareApi.all("/userShare/add", async (c) => {
   const params = await reqParams(c);
   const path = typeof params.path === "string" ? params.path : "";
   if (!path) return c.json({ code: false, data: "参数错误" });
+  // 保险箱内容不支持分享 (001 listSafe.authCheck)
+  if (path.startsWith("{block:safe}")) return c.json({ code: false, data: "保险箱内容不支持分享" });
   const isLink = String(params.isLink) === "1" ? 1 : 0;
 
   const realPath = toRealPath(path);
