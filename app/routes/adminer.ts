@@ -1046,17 +1046,17 @@ td a{margin-right:8px;}
   <p class="links" id="tabs"></p>
   <div id="page"></div>
 </div>
-<div id="foot"><div id="menu">
+<div id="foot" class="foot"><div id="menu">
   <h1><a href="javascript:void(0)" id="h1">Adminer</a> <span class="version" id="version">D1</span></h1>
   <p id="dbs"><span>SQLite / D1</span></p>
   <p id="tableFilter" style="display:none"><input type="text" id="tableFilterInput" oninput="filterTables(this.value)" placeholder="filter" style="width:92%"></p>
-  <div id="tables"><p class="error">Loading...</p></div>
   <p class="links">
-    <a href="javascript:void(0)" data-nav="sql">SQL command</a><br>
-    <a href="javascript:void(0)" data-nav="import">Import</a><br>
-    <a href="javascript:void(0)" data-nav="export">Export</a><br>
+    <a href="javascript:void(0)" data-nav="sql">SQL command</a>
+    <a href="javascript:void(0)" data-nav="import">Import</a>
+    <a href="javascript:void(0)" data-nav="export">Export</a>
     <a href="javascript:void(0)" data-nav="create">Create table</a>
   </p>
+  <ul id="tables"></ul>
 </div></div>
 <div class="toggle-menu"></div>
 <div id="adminerDebug" style="display:none;position:fixed;left:0;right:0;bottom:0;max-height:35%;overflow:auto;background:#1e1e1e;color:#d4d4d4;font:12px/1.5 monospace;padding:8px 12px;border-top:2px solid #e8a33d;z-index:9999"></div>
@@ -1113,7 +1113,7 @@ function loadTables(){
   $('tableFilter').style.display = '';
   $('tableFilterInput').placeholder = t('filter');
   apiGet('tables').then(function(res){
-    if (!res || !res.code) { box.innerHTML = '<p class="error">' + esc(res && res.data) + '</p>'; return; }
+    if (!res || !res.code) { box.innerHTML = '<li class="error">' + esc(res && res.data) + '</li>'; return; }
     tableList = res.data || [];
     renderTableList('');
   });
@@ -1124,9 +1124,9 @@ function renderTableList(filter){
   tableList.forEach(function(it){
     if (kw && String(it.name).toLowerCase().indexOf(kw) < 0) return;
     var a = '<a href="javascript:void(0)" data-table="' + esc(it.name) + '"' + (state.table === it.name ? ' class="active"' : '') + ' title="' + esc(it.name) + '">' + esc(it.name) + '</a>';
-    if (it.type === 'view') viewsHtml += a; else tablesHtml += a;
+    if (it.type === 'view') viewsHtml += '<li>' + a + '</li>'; else tablesHtml += '<li>' + a + '</li>';
   });
-  box.innerHTML = (tablesHtml || viewsHtml) ? tablesHtml + (viewsHtml ? '<br><b>' + esc(t('views')) + '</b>' + viewsHtml : '') : '<p>' + esc(t('noTables')) + '</p>';
+  box.innerHTML = (tablesHtml || viewsHtml) ? tablesHtml + (viewsHtml ? '<li><b>' + esc(t('views')) + '</b></li>' + viewsHtml : '') : '<li>' + esc(t('noTables')) + '</li>';
 }
 function filterTables(v){ renderTableList(v); }
 
