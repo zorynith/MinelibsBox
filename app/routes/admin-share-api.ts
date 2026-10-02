@@ -41,7 +41,7 @@ async function shareUserInfoOf(db: D1Database, userID: number): Promise<Record<s
 /** 分享条目封装: share 行 + options 对象 + 分享者 + 来源文件信息 */
 async function buildShareItem(env: Env, db: D1Database, row: any): Promise<Record<string, unknown>> {
   const owner: any = await getUserById(db, parseInt(String(row.userID ?? "0"), 10) || 0).catch(() => null);
-  const source = owner ? await resolveShareSource(env, { username: owner.username }, row).catch(() => null) : null;
+  const source = owner ? await resolveShareSource(env, owner, row).catch(() => null) : null;
   const isFolder = String(row.sourcePath || "").endsWith("/");
   return {
     ...row,

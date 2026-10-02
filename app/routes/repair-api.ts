@@ -51,11 +51,11 @@ async function resetShareTo(db: D1Database): Promise<number> {
 // ============ resetShare - 分享源在 R2 已不存在的分享清理 ============
 async function resetShare(env: Env): Promise<{ share: number; shareTo: number }> {
   const rows = (await env.DB.prepare(
-    "SELECT s.*, u.username FROM share s JOIN users u ON u.id = s.userID"
-  ).all()) as unknown as { results: (import("../lib/share").ShareRow & { username: string })[] };
+    "SELECT s.*, u.username, u.id AS ownerID, u.role AS ownerRole FROM share s JOIN users u ON u.id = s.userID"
+  ).all()) as unknown as { results: (import("../lib/share").ShareRow & { username: string; ownerID: number; ownerRole: string })[] };
   const removedIds: number[] = [];
   for (const share of rows.results) {
-    const source = await resolveShareSource(env, { username: share.username }, share);
+    const source = await resolveShareSource(env, { id: share.ownerID, username: share.username, role: share.ownerRole } as import("../lib/auth").AuthUser, share);
     if (!source) removedIds.push(share.shareID);
   }
   let shareToNum = 0;
@@ -150,9 +150,9 @@ async function clearUserRecycle(env: Env): Promise<number> {
 // ============ listFileNotExists - R2 已不存在的分享源列表 ============
 async function listFileNotExists(env: Env): Promise<Record<string, unknown>[]> {
   const rows = (await env.DB.prepare(
-    "SELECT s.shareID, s.title, s.sourcePath, u.username, s.createTime FROM share s JOIN users u ON u.id = s.userID"
+    "SELECT s.shareID, s.title, s.sourcePath, u.username, u.id AS ownerID, u.role AS ownerRole, s.createTime FROM share s JOIN users u ON u.id = s.userID"
   ).all()) as unknown as {
-    results: { shareID: number; title: string; sourcePath: string; username: string; createTime: string }[];
+    results: { shareID: number; title: string; sourcePath: string; username: string; ownerID: number; ownerRole: string; createTime: string }[];
   };
   const list: Record<string, unknown>[] = [];
   for (const r of rows.results) {
@@ -174,7 +174,7 @@ async function listFileNotExists(env: Env): Promise<Record<string, unknown>[]> {
       createTime: r.createTime,
       modifyTime: r.createTime,
     };
-    const source = await resolveShareSource(env, { username: r.username }, share);
+    const source = await resolveShareSource(env, { id: r.ownerID, username: r.username, role: r.ownerRole } as import("../lib/auth").AuthUser, share);
     if (!source) {
       list.push({
         shareID: r.shareID,

@@ -11,6 +11,8 @@
  *  - 外链落地页根路径 {shareItemLink:<shareHash>}/。
  */
 import { md5, mcryptDecode } from "./mcrypt";
+import { resolveFileSource } from "./source";
+import type { AuthUser } from "./auth";
 
 export interface ShareRow {
   shareID: number;
@@ -242,7 +244,7 @@ export function setSharePassUnlocked(c: any, shareHash: string): void {
 /** 校验分享源仍存在（R2 head），返回源信息（type/name/...），不存在返回 null。 */
 export async function resolveShareSource(
   env: Env,
-  owner: { username: string },
+  owner: AuthUser,
   share: ShareRow
 ): Promise<{ type: "folder" | "file"; name: string; realPath: string } | null> {
   const path = normShareSourcePath(share.sourcePath);
@@ -261,6 +263,25 @@ export async function resolveShareSource(
     const obj = await env.FILES.head(pub.key);
     if (!obj) return null;
     return { type: "file", name: pub.name, realPath: path };
+  }
+  // 部门/io 虚拟路径: 用 resolveFileSource 解析到 baseKey + relPath
+  if (path.startsWith("{source:") || path.startsWith("{io:")) {
+    const r = await resolveFileSource(env, owner, path);
+    if (!r.ok) return null;
+    const { keyFromBase } = await import("./r2");
+    const rel = r.relPath;
+    const key = keyFromBase(r.source.baseKey, rel);
+    if (isFolder) {
+      const prefix = key.endsWith("/") ? key : key + "/";
+      const listed = await env.FILES.list({ prefix, limit: 1 });
+      if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) return null;
+      const name = rel === "/" ? r.source.displayName : rel.split("/").filter(Boolean).pop() || rel;
+      return { type: "folder", name, realPath: path };
+    }
+    const obj = await env.FILES.head(key);
+    if (!obj) return null;
+    const name = rel.split("/").filter(Boolean).pop() || rel;
+    return { type: "file", name, realPath: path };
   }
   const { getUserFileKey } = await import("./r2");
   if (isFolder) {

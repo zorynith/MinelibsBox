@@ -480,19 +480,39 @@ async function checkSetAuthAllow(env: Env, user: AuthUser, path: string, authTo:
   return true;
 }
 
-/** 分享者空间下真实路径是否可作为分享源。 */
-async function resolveShareSourceForUser(env: Env, username: string, path: string): Promise<{ type: "folder" | "file"; name: string; realPath: string } | null> {
-  // 001 中 sourcePath 对文件夹带尾斜杠; 前端可能不带, 这里统一: 先按文件夹(尾斜杠)查, 再按文件查。
+/** 分享者空间下真实路径是否可作为分享源（支持个人空间 / 部门空间 / io 挂载）。 */
+async function resolveShareSourceForUser(env: Env, user: AuthUser, path: string): Promise<{ type: "folder" | "file"; name: string; realPath: string } | null> {
+  // 部门/io 虚拟路径: 用 resolveFileSource 解析到 baseKey + relPath
+  if (path.startsWith("{source:") || path.startsWith("{io:")) {
+    const r = await resolveFileSource(env, user, path);
+    if (!r.ok) return null;
+    const rel = r.relPath;
+    const isFolder = rel.endsWith("/");
+    const key = keyFromBase(r.source.baseKey, rel);
+    if (isFolder) {
+      const prefix = key.endsWith("/") ? key : key + "/";
+      const listed = await env.FILES.list({ prefix, limit: 1 });
+      if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) return null;
+      const name = rel === "/" ? r.source.displayName : rel.split("/").filter(Boolean).pop() || rel;
+      return { type: "folder", name, realPath: path };
+    }
+    const obj = await env.FILES.head(key);
+    if (!obj) return null;
+    const name = rel.split("/").filter(Boolean).pop() || rel;
+    return { type: "file", name, realPath: path };
+  }
+
+  // 个人空间: 相对路径 (001 中 sourcePath 对文件夹带尾斜杠)
   const norm = normShareSourcePath(path);
   const dirPath = norm.endsWith("/") ? norm : norm + "/";
-  const dirKey = getUserFileKey(username, dirPath);
+  const dirKey = getUserFileKey(user.username, dirPath);
   const dirListed = await env.FILES.list({ prefix: dirKey, limit: 1 });
   if (dirListed.objects.length > 0 || (dirListed.delimitedPrefixes || []).length > 0) {
     const name = dirPath.split("/").filter(Boolean).pop() || dirPath;
     return { type: "folder", name, realPath: dirPath };
   }
   const filePath = norm.replace(/\/+$/, "");
-  const obj = await env.FILES.head(getUserFileKey(username, filePath));
+  const obj = await env.FILES.head(getUserFileKey(user.username, filePath));
   if (!obj) return null;
   const name = filePath.split("/").filter(Boolean).pop() || filePath;
   return { type: "file", name, realPath: filePath };
@@ -1092,11 +1112,10 @@ shareApi.all("/userShare/get", async (c) => {
   const path = typeof params.path === "string" ? params.path : "";
   if (!path) return c.json({ code: true, data: false });
 
-  const realPath = toRealPath(path);
-  const share = await getShareBySourcePath(c.env.DB, user.id, realPath);
+  const share = await getShareBySourcePath(c.env.DB, user.id, path);
   if (!share) return c.json({ code: true, data: false });
 
-  const source = await resolveShareSourceForUser(c.env, user.username, share.sourcePath);
+  const source = await resolveShareSourceForUser(c.env, user, share.sourcePath);
   return c.json({ code: true, data: await buildManageShareInfo(c.env, share, source) });
 });
 
@@ -1110,9 +1129,24 @@ shareApi.all("/userShare/add", async (c) => {
   if (path.startsWith("{block:safe}")) return c.json({ code: false, data: "保险箱内容不支持分享" });
   const isLink = String(params.isLink) === "1" ? 1 : 0;
 
-  const realPath = toRealPath(path);
-  const source = await resolveShareSourceForUser(c.env, user.username, realPath);
-  if (!source) return c.json({ code: false, data: L.pathNotExists });
+  // 解析分享源（个人空间/部门空间/io 挂载），部门/io 保留虚拟前缀
+  const srcRes = await resolveFileSource(c.env, user, path);
+  if (!srcRes.ok) return c.json({ code: false, data: L.pathNotExists });
+  const src = srcRes.source;
+  const relPath = srcRes.relPath;
+  const srcIsFolder = relPath.endsWith("/");
+  const existKey = keyFromBase(src.baseKey, relPath);
+  if (srcIsFolder) {
+    const prefix = existKey.endsWith("/") ? existKey : existKey + "/";
+    const listed = await c.env.FILES.list({ prefix, limit: 1 });
+    if (listed.objects.length === 0 && (listed.delimitedPrefixes || []).length === 0) return c.json({ code: false, data: L.pathNotExists });
+  } else {
+    const obj = await c.env.FILES.head(existKey);
+    if (!obj) return c.json({ code: false, data: L.pathNotExists });
+  }
+  const srcName = relPath === "/" ? src.displayName : relPath.split("/").filter(Boolean).pop() || "";
+  const sourcePath = src.type === "group" ? `{source:${src.sourceId}}${relPath}` : src.type === "io" ? `{io:${src.sourceId}}${relPath}` : relPath;
+  const source: { type: "folder" | "file"; name: string; realPath: string } = { type: srcIsFolder ? "folder" : "file", name: srcName, realPath: sourcePath };
 
   let options: Record<string, any> = {};
   if (typeof params.options === "string" && params.options) {
@@ -1211,7 +1245,7 @@ shareApi.all("/userShare/edit", async (c) => {
   }
 
   const updated = await getShareById(c.env.DB, shareID);
-  const source = updated ? await resolveShareSourceForUser(c.env, user.username, updated.sourcePath) : null;
+  const source = updated ? await resolveShareSourceForUser(c.env, user, updated.sourcePath) : null;
   if (!updated) return c.json({ code: false, data: L.error });
   return c.json({ code: true, data: await buildManageShareInfo(c.env, updated, source) });
 });
