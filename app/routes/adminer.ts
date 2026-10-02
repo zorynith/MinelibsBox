@@ -1029,9 +1029,11 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <title>Adminer</title>
 <link rel="stylesheet" href="${pluginHost}adminer/adminer.css">
 <style>
+#menu{display:flex;flex-direction:column;}
 #menu #dbs{color:#fff;font-size:13px;}
-#menu .links{width:auto !important;margin:0 !important;}
-#menu #tables{top:185px !important;}
+#lang select{position:absolute !important;left:10px !important;right:auto !important;top:9px !important;width:auto !important;max-width:210px;background:transparent;border:none;color:#555;}
+#menu .links{width:auto !important;margin:0 !important;flex:none;}
+#menu #tables{position:static !important;top:auto !important;bottom:auto !important;left:auto !important;right:auto !important;margin:0 !important;flex:1 1 auto;overflow-y:auto !important;width:100%;}
 #page input[type=button]{margin:0 5px 6px 0;padding:5px 11px;border:1px solid #d0cdc4;border-radius:3px;background:#fff;color:#2c3e50;cursor:pointer;vertical-align:middle;}
 #page input[type=button]:hover{background:#eef3f8;}
 #page input[type=button]:disabled{opacity:.45;cursor:default;}
