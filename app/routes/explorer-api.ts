@@ -544,13 +544,35 @@ async function groupChain(env: Env, groupID: number): Promise<{ id: number; name
 // ============ 部门空间权限检测 (对齐 001 SourceAuth / auth.class.php autoCheck) ============
 
 /** 用户在指定 source 上的权限位掩码。个人空间=全权限; 部门空间=按 auths.auth 位掩码。 */
-async function sourceAuthValue(env: Env, user: Vars["currentUser"], source: SourceRef): Promise<number> {
+async function sourceAuthValue(env: Env, user: Vars["currentUser"], source: SourceRef, sourceID?: number): Promise<number> {
   if (source.type === "user") return getPersonalAuthValue();
   // 外部存储挂载: 对所有登录用户可读写
   if (source.type === "io") return getPersonalAuthValue();
   // 私密保险箱: 本人全权限
   if (source.type === "safe") return getPersonalAuthValue();
+  // 部门空间: 先查文档单独权限覆盖(001 SourceAuth), 再回退部门默认权限
+  if (sourceID) {
+    const override = await getUserSourceAuth(env, user, sourceID);
+    if (override !== null) return override;
+  }
   return getGroupAuthValue(env, user, source.targetID);
+}
+
+/** 查询文档(sourceID)对当前用户(或用户所在部门)的单独权限覆盖; 无覆盖返回 null。 */
+async function getUserSourceAuth(env: Env, user: Vars["currentUser"], sourceID: number): Promise<number | null> {
+  const rows = await env.DB.prepare(
+    "SELECT authID, authDefine FROM source_auth WHERE sourceID = ? AND (targetType = 1 AND targetID = ? OR targetType = 2)"
+  ).bind(String(sourceID), user.id).all<{ authID: number; authDefine: number }>().catch(() => null);
+  if (!rows || rows.results.length === 0) return null;
+  let result = 0;
+  for (const row of rows.results) {
+    if (row.authID) {
+      const a = await env.DB.prepare("SELECT auth FROM auths WHERE id = ?").bind(row.authID).first<{ auth: number }>().catch(() => null);
+      if (a) result |= Number(a.auth) || 0;
+    }
+    if (row.authDefine) result |= Number(row.authDefine) || 0;
+  }
+  return result;
 }
 
 /** 检测操作是否被授权; 否则返回 {ok:false,error}, 可附带 msg 覆盖默认错误提示。 */
@@ -560,8 +582,9 @@ async function requireSourceAuth(
   source: SourceRef,
   bit: number,
   error = "common.noPermission",
+  sourceID?: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const authValue = await sourceAuthValue(env, user, source);
+  const authValue = await sourceAuthValue(env, user, source, sourceID);
   if (!hasAuth(authValue, bit)) return { ok: false, error };
   return { ok: true };
 }
@@ -2719,8 +2742,8 @@ async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment
   if (rootDisabledActions(src.source, src.relPath, disposition === "attachment" ? "fileDownload" : "fileOut")) {
     return c.json({ code: false, data: "explorer.pathNotSupport" });
   }
-  // 001 auth: 下载/预览需 download 权限
-  const dlAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD);
+  // 001 auth: 下载/预览需 download 权限 (含文档单独权限覆盖)
+  const dlAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD, "common.noPermission", fileSourceID(path));
   if (!dlAuth.ok) return c.json({ code: false, data: dlAuth.error });
   const key = keyFromBase(src.source.baseKey, src.relPath);
   let obj: any = null;
@@ -3241,6 +3264,50 @@ explorerApi.all("/index/zipDownloadClient", async (c) => {
 });
 
 // fileSave - save text content to file
+// ============ index setAuth (文档单独权限, 001 explorerIndex::setAuth) ============
+
+explorerApi.all("/index/setAuth", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const path = String(params.path || "");
+  const action = String(params.action || "");
+  if (!path) return c.json({ code: false, data: "参数错误" });
+
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return c.json({ code: false, data: src.error });
+  if (src.source.type !== "group") return c.json({ code: false, data: "仅部门文档支持设置权限" });
+  // 需部门管理员权限 (001 auth.actionPathCheck root)
+  const rootAuth = await requireSourceAuth(c.env, user, src.source, AUTH_ROOT);
+  if (!rootAuth.ok) return c.json({ code: false, data: rootAuth.error });
+
+  const sourceID = fileSourceID(path);
+  const db = c.env.DB;
+
+  if (action === "getData") {
+    const list = await db.prepare("SELECT * FROM source_auth WHERE sourceID = ? ORDER BY id").bind(String(sourceID)).all<any>();
+    return c.json({ code: true, data: list.results.map((r: any) => ({ id: r.id, targetType: r.targetType, targetID: r.targetID, authID: r.authID, authDefine: r.authDefine })) });
+  }
+
+  if (action === "clearChildren") {
+    await db.prepare("DELETE FROM source_auth WHERE sourceID = ?").bind(String(sourceID)).run();
+    return c.json({ code: true, data: "explorer.success" });
+  }
+
+  // 默认: setAuth 设置权限
+  let auth: any[] = [];
+  if (typeof params.auth === "string" && params.auth) {
+    try { const p = JSON.parse(params.auth); if (Array.isArray(p)) auth = p; } catch { /* ignore */ }
+  }
+  const now = Math.floor(Date.now() / 1000);
+  await db.prepare("DELETE FROM source_auth WHERE sourceID = ?").bind(String(sourceID)).run();
+  for (const item of auth) {
+    if (!item || item.targetID === undefined || item.targetType === undefined) continue;
+    await db.prepare("INSERT INTO source_auth (sourceID, targetType, targetID, authID, authDefine, createTime, modifyTime) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(String(sourceID), Number(item.targetType), Number(item.targetID), Number(item.authID || 0), Number(item.authDefine || 0), now, now).run();
+  }
+  return c.json({ code: true, data: "explorer.success" });
+});
+
 explorerApi.all("/index/fileSave", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
@@ -3256,8 +3323,8 @@ explorerApi.all("/index/fileSave", async (c) => {
   if (rootDisabledActions(src.source, src.relPath, "fileSave")) {
     return c.json({ code: false, data: "explorer.pathNotSupport" });
   }
-  // 001 auth: 保存文件需 edit 权限
-  const saveAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  // 001 auth: 保存文件需 edit 权限 (含文档单独权限覆盖)
+  const saveAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, "common.noPermission", fileSourceID(path));
   if (!saveAuth.ok) return c.json({ code: false, data: saveAuth.error });
   // 001: 保存前将旧内容写入历史版本
   await saveFileHistory(c, src.source, src.relPath, path, user.id);
@@ -3450,8 +3517,8 @@ async function editorFileGetHandler(c: AppContext) {
 
   const src = await resolveFileSource(c.env, user, path);
   if (!src.ok) return c.json({ code: false, data: src.error });
-  // 001 auth: 读取文件需 view 权限
-  const getAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+  // 001 auth: 读取文件需 view 权限 (含文档单独权限覆盖)
+  const getAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, "common.noPermission", fileSourceID(path));
   if (!getAuth.ok) return c.json({ code: false, data: getAuth.error });
   const bytes = await readObjectBytes(c, src.source, src.relPath);
   if (!bytes) return c.json({ code: false, data: "common.pathNotExists" });
@@ -3494,8 +3561,8 @@ explorerApi.all("/editor/fileSave", async (c) => {
   if (rootDisabledActions(src.source, src.relPath, "fileSave")) {
     return c.json({ code: false, data: "explorer.pathNotSupport" });
   }
-  // 001 auth: 编辑器保存需 edit 权限
-  const editAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  // 001 auth: 编辑器保存需 edit 权限 (含文档单独权限覆盖)
+  const editAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, "common.noPermission", fileSourceID(path));
   if (!editAuth.ok) return c.json({ code: false, data: editAuth.error });
   const okWrite = await writeObject(c, src.source, src.relPath, content, "text/plain; charset=utf-8");
   if (!okWrite) return c.json({ code: false, data: "保存失败" });

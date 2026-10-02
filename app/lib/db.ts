@@ -403,6 +403,18 @@ export async function initDatabase(db: D1Database): Promise<void> {
       createTime INTEGER NOT NULL DEFAULT 0
     )`,
 
+    // 文档单独权限 (镜像 001 io_source_auth; sourceID=文档虚拟路径 sourceID, targetType 1=用户 2=部门)
+    `CREATE TABLE IF NOT EXISTS source_auth (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sourceID TEXT NOT NULL,
+      targetType INTEGER NOT NULL,
+      targetID INTEGER NOT NULL,
+      authID INTEGER NOT NULL DEFAULT 0,
+      authDefine INTEGER NOT NULL DEFAULT 0,
+      createTime INTEGER NOT NULL DEFAULT 0,
+      modifyTime INTEGER NOT NULL DEFAULT 0
+    )`,
+
     // Indexes
     `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(share_token)`,
@@ -426,6 +438,7 @@ export async function initDatabase(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_task_result_expire ON task_result(expire_at)`,
     `CREATE INDEX IF NOT EXISTS idx_plugin_cache_expire ON plugin_cache(expire_at)`,
     `CREATE INDEX IF NOT EXISTS idx_source_history_path ON source_history(path)`,
+    `CREATE INDEX IF NOT EXISTS idx_source_auth_sourceID ON source_auth(sourceID)`,
   ];
 
   // 批量建表/索引: 单次 D1 round-trip 完成, 显著降低 worker 冷启动时间
