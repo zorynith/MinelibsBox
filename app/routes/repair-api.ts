@@ -118,6 +118,34 @@ async function resetParentLevel(db: D1Database): Promise<number> {
   return updated;
 }
 
+// ============ 回收站清理 (001 SourceRecycle; worker 用 user_option recycleList 承载) ============
+
+/** 清空单个用户的回收站, 返回清除的文件/夹数。 */
+async function clearUserRecycleFor(env: Env, userId: number): Promise<number> {
+  const u = (await env.DB.prepare("SELECT id, username FROM users WHERE id = ?").bind(userId).first()) as unknown as
+    | { id: number; username: string }
+    | null;
+  if (!u) return 0;
+  const raw = await getUserOption(env.DB, u.id, "recycleList", "recycle");
+  if (!raw) return 0;
+  let list: Record<string, string> = {};
+  try {
+    list = JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return 0;
+  }
+  const keys: string[] = [];
+  for (const recycleVPath of Object.keys(list)) {
+    const rel = recycleVPath.replace(/^\{source:[^}]+\}/, "").replace(/^\{[^}]+\}/, "");
+    keys.push(getUserFileKey(u.username, rel));
+  }
+  for (const key of keys) {
+    await env.FILES.delete(key);
+  }
+  await setUserOption(env.DB, u.id, "recycleList", "{}", "recycle");
+  return keys.length;
+}
+
 // ============ clearUserRecycle - 物理清空所有用户回收站 ============
 async function clearUserRecycle(env: Env): Promise<number> {
   const users = (await env.DB.prepare("SELECT id, username FROM users").all()) as unknown as {
@@ -125,24 +153,7 @@ async function clearUserRecycle(env: Env): Promise<number> {
   };
   let cleared = 0;
   for (const u of users.results) {
-    const raw = await getUserOption(env.DB, u.id, "recycleList", "recycle");
-    if (!raw) continue;
-    let list: Record<string, string> = {};
-    try {
-      list = JSON.parse(raw) as Record<string, string>;
-    } catch {
-      continue;
-    }
-    const keys: string[] = [];
-    for (const recycleVPath of Object.keys(list)) {
-      const rel = recycleVPath.replace(/^\{source:[^}]+\}/, "").replace(/^\{[^}]+\}/, "");
-      keys.push(getUserFileKey(u.username, rel));
-    }
-    for (const key of keys) {
-      await env.FILES.delete(key);
-    }
-    await setUserOption(env.DB, u.id, "recycleList", "{}", "recycle");
-    cleared += keys.length;
+    cleared += await clearUserRecycleFor(env, u.id);
   }
   return cleared;
 }
@@ -234,6 +245,24 @@ repairApi.all("/repair/clearUserRecycle", async (c) => {
   return c.json(ok("回收站已清空:" + cleared + " 项"));
 });
 
+// clearMyRecycle - 清空当前(登录)用户回收站 (001 clearMyRecycle)
+repairApi.all("/repair/clearMyRecycle", async (c) => {
+  if (!adminGuard(c)) return c.json(fail("没有权限!"));
+  const user = c.get("currentUser");
+  const cleared = await clearUserRecycleFor(c.env, user.id);
+  return c.json(ok("回收站已清空:" + cleared + " 项"));
+});
+
+// clearUserRecycleNow - 清空指定用户回收站 (001 clearUserRecycleNow; 参数 userID)
+repairApi.all("/repair/clearUserRecycleNow", async (c) => {
+  if (!adminGuard(c)) return c.json(fail("没有权限!"));
+  const params = await allParams(c);
+  const userId = parseInt(params.userID || "0", 10) || 0;
+  if (!userId) return c.json(fail("请指定 userID"));
+  const cleared = await clearUserRecycleFor(c.env, userId);
+  return c.json(ok("回收站已清空:" + cleared + " 项"));
+});
+
 // resetParentLevel - 重算部门层级
 repairApi.all("/repair/resetParentLevel", async (c) => {
   if (!adminGuard(c)) return c.json(fail("没有权限!"));
@@ -262,11 +291,29 @@ repairApi.all("/repair/listFileNotExists", async (c) => {
   return c.json(ok(list));
 });
 
-// 依赖 Source/File 表的命令统一返回跳过
+// 依赖 001 Source/File 表、worker 数据模型无法等价复刻的命令, 统一返回跳过说明。
+const SKIP_REASON: Record<string, string> = {
+  clearErrorFile: "依赖 001 io_file 表 + 全量物理文件检查, worker(R2 无集中文件索引)无法等价复刻",
+  resetSourceEmpty: "依赖 001 io_source 表(sourceHash/parentLevel), worker 无对应表",
+  resetSourceFile: "依赖 001 io_source/io_file 表(fileID 关联), worker 无对应表",
+  resetFileHash: "依赖 001 io_file 表(hashSimple/hashMd5), worker 无对应表",
+  resetFileSource: "依赖 001 io_file/io_source 表, worker 无对应表",
+  resetFileLink: "依赖 001 io_file 表(linkCount 引用计数), worker 无对应表",
+  resetSourceHistory: "source_history 未存存储 baseKey, 无法定位历史版本 R2 对象",
+  sourceNameInit: "依赖 001 io_source 表(name/nameSort 自然排序), worker 文件名存于 R2 key",
+  sourceNameSort: "依赖 001 io_source 表(name/nameSort), worker 无对应表",
+  clearSource: "依赖 001 sourceID 概念, worker 文件用 path 定位无 sourceID",
+  resetSizeById: "worker 目录大小动态计算(R2 扫描), 无持久化大小字段",
+  clearSameFile: "依赖 001 io_file 表(hashMd5 去重), worker 无对应表",
+  resetParentLevelClear: "依赖 001 io_source 表(isDelete 状态), worker 无对应表",
+  updateSourceLevel: "依赖 001 io_source 表层级结构, worker 层级由 groups.parent_level 承载(见 resetParentLevel)",
+};
+
 repairApi.all("/repair/:other", async (c) => {
   if (!adminGuard(c)) return c.json(fail("没有权限!"));
   const act = c.req.param("other");
-  return c.json(ok(act + ": worker 数据模型中无对应表, 该命令跳过。"));
+  const reason = SKIP_REASON[act];
+  return c.json(ok(reason ? act + ": " + reason : act + ": worker 数据模型中无对应表, 该命令跳过。"));
 });
 
 export { repairApi };
