@@ -35,12 +35,14 @@ export function getSessionId(c: Context): string | null {
   const cookie = c.req.header("Cookie") || "";
   const match = cookie.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`));
   if (match) return match[1];
-  // 官方客户端/第三方: accessToken 即会话 id (query 参数 accessToken / kodTokenApi / header)
+  // 官方客户端/第三方: accessToken 即会话 id (query / header / cookie)
   const q = c.req.query();
   const token = q.accessToken || q.kodTokenApi || "";
   if (token) return token;
   const h = c.req.header("accessToken") || c.req.header("kodTokenApi");
   if (h) return h;
+  const cookieToken = cookie.match(/(?:^|;\s*)(?:accessToken|kodTokenApi)=([^;]+)/);
+  if (cookieToken) return cookieToken[1];
   return null;
 }
 

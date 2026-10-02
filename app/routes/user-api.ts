@@ -116,11 +116,11 @@ userApi.post("/index/loginSubmit", async (c) => {
   // Must append, otherwise it overwrites the kod_session Set-Cookie above.
   c.header("Set-Cookie", `accessToken=${sessionId}; Path=/; Max-Age=${maxAge}; SameSite=Lax`, { append: true });
 
-  // 001: show_json('ok', true, accessToken) —— info 为 accessToken, 官方客户端登录后据此认证。
+  // 001: show_json('ok', true, accessToken) —— data 固定 'ok', info 为 accessToken, 官方客户端据此认证。
   // worker accessToken 即会话 id (与 kod_session cookie 等价), 供客户端通过 query accessToken 携带。
   return c.json({
     code: true,
-    data: { userID: user.id, name: user.username, nickname: user.nickname },
+    data: "ok",
     info: sessionId,
   });
 });
