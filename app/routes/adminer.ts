@@ -1053,12 +1053,9 @@ td a{margin-right:8px;}
   <div id="tables"><p class="error">Loading...</p></div>
   <p class="links">
     <a href="javascript:void(0)" data-nav="sql">SQL command</a><br>
-    <a href="javascript:void(0)" data-nav="search">Search</a><br>
     <a href="javascript:void(0)" data-nav="import">Import</a><br>
     <a href="javascript:void(0)" data-nav="export">Export</a><br>
-    <a href="javascript:void(0)" data-nav="create">Create table</a><br>
-    <a href="javascript:void(0)" data-nav="createView">Create view</a><br>
-    <a href="javascript:void(0)" data-nav="createTrigger">Create trigger</a>
+    <a href="javascript:void(0)" data-nav="create">Create table</a>
   </p>
 </div></div>
 <div class="toggle-menu"></div>
@@ -1165,7 +1162,12 @@ function showSql(){
     hist.forEach(function(x, i){ histHtml += '<option value="' + i + '">' + esc(String(x).slice(0, 80)) + '</option>'; });
     histHtml += '</select> ';
   }
-  $('page').innerHTML = '<form onsubmit="return runSql();"><textarea id="sql" rows="8" style="width:100%"></textarea>' +
+  $('page').innerHTML = '<p class="links">' +
+    '<input type="button" value="' + esc(t('search')) + '" onclick="showSearch()"> ' +
+    '<input type="button" value="' + esc(t('createView')) + '" onclick="showCreateView()"> ' +
+    '<input type="button" value="' + esc(t('createTrigger')) + '" onclick="showCreateTrigger()"> ' +
+    '</p>' +
+    '<form onsubmit="return runSql();"><textarea id="sql" rows="8" style="width:100%"></textarea>' +
     '<p>' + histHtml + '<input type="submit" value="' + esc(t('execute')) + '"> <input type="button" value="' + esc(t('clear')) + '" onclick="clearSql()"></p></form><div id="result"></div>';
   var s = $('sql'); if (s) s.focus();
 }
@@ -1614,7 +1616,7 @@ function doImport(ev){
 }
 
 function applyLang(){
-  var map = { sql:t('sqlCommand'), search:t('search'), import:t('import'), export:t('export'), create:t('createTable'), createView:t('createView'), createTrigger:t('createTrigger') };
+  var map = { sql:t('sqlCommand'), import:t('import'), export:t('export'), create:t('createTable') };
   var as = $('menu').querySelectorAll('a[data-nav]');
   for (var i = 0; i < as.length; i++){ var n = as[i].getAttribute('data-nav'); if (map[n]) as[i].textContent = map[n]; }
   document.documentElement.lang = (L === LANG.zh) ? 'zh' : 'en';
