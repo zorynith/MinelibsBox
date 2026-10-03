@@ -1376,7 +1376,16 @@ shareApi.all("/userShare/get", async (c) => {
   const path = typeof params.path === "string" ? params.path : "";
   if (!path) return c.json({ code: true, data: false });
 
-  const share = await getShareBySourcePath(c.env.DB, user.id, path);
+  // "我分享的"/"外链分享" 列表里的项 path 是 {shareItem:<id>} 虚拟路径（非真实 sourcePath），
+  // 编辑分享/快速复制外链时前端会据此调用，这里先解析虚拟路径按 shareID 直查，避免误判为"无分享"。
+  let share: ShareRow | null = null;
+  const itemMatch = path.match(/^\{shareItem:(\d+)\}/);
+  if (itemMatch) {
+    const item = await getShareById(c.env.DB, parseInt(itemMatch[1], 10));
+    if (item && item.userID === user.id) share = item;
+  } else {
+    share = await getShareBySourcePath(c.env.DB, user.id, path);
+  }
   if (!share) return c.json({ code: true, data: false });
 
   const source = await resolveShareSourceForUser(c.env, user, share.sourcePath);
