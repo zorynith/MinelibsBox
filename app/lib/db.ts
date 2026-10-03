@@ -340,6 +340,16 @@ export async function initDatabase(db: D1Database): Promise<void> {
       UNIQUE (sourceID, key)
     )`,
 
+    // 最近访问 (mirrors 001 explorer listRecent: 记录用户最近打开的文件/文件夹)
+    `CREATE TABLE IF NOT EXISTS recent (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userID INTEGER NOT NULL,
+      path TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'file',
+      viewTime INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (userID, path)
+    )`,
+
     // Share targets (mirrors 001 share_to: 内部协作分享目标, targetType 1=user 2=group)
     `CREATE TABLE IF NOT EXISTS share_to (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1424,6 +1424,49 @@ explorerApi.all("/listView/dataSave", async (c) => {
   return c.json({ code: true, data: "explorer.success" });
 });
 
+// listRecent - 最近文档 (001 explorer/listRecent: listData / listRecentWith)
+async function handleListRecent(c: AppContext) {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const raw = typeof params.path === "string" && params.path ? String(params.path) : "{userRencent}";
+  const parsed = parseExplorerPath(raw);
+  return c.json({ code: true, data: await listRecentData(c, user, parsed) });
+}
+explorerApi.all("/listRecent/listData", handleListRecent);
+explorerApi.all("/listRecent/listRecentWith", handleListRecent);
+
+// listDriver - 存储挂载列表 (001 explorer/listDriver get/rootList; 仅管理员)
+function driverGroupShow(folderList: any[]): any[] {
+  const groups: any[] = [
+    { type: "io-type-default", title: "当前存储", filter: { driverDefault: { "=": "1" } } },
+  ];
+  const others = folderList.filter((x) => String(x.driverDefault ?? "0") !== "1");
+  if (others.length) groups.push({ type: "io-type-others", title: "其他", filter: { driverDefault: { "!=": "1" } } });
+  return groups;
+}
+async function listDriverRoot(c: AppContext): Promise<Response> {
+  const user = c.get("currentUser");
+  if (user.role !== "admin" && user.role !== "root") return c.json({ code: false, data: "explorer.noPermissionAction" });
+  const list = await getIoSourceList(c.env.DB);
+  const folderList = list
+    .filter((s: any) => parseInt(String(s.status ?? "0"), 10) === 1)
+    .map((s: any) => ({
+      name: s.name,
+      path: `{io:${s.id}}/`,
+      size: 0,
+      driverSpace: Math.round(parseInt(String(s.size_max ?? "0"), 10) * 1024 * 1024 * 1024),
+      driverDefault: parseInt(String(s.default ?? "0"), 10) === 1 ? "1" : "0",
+      driverType: s.driver,
+      ioDriver: s.driver,
+      ioType: s.driver,
+      icon: "io-" + String(s.driver || "").toLowerCase(),
+      isParent: true,
+    }));
+  return c.json({ code: true, data: { folderList, fileList: [], groupShow: driverGroupShow(folderList) } });
+}
+explorerApi.all("/listDriver/get", listDriverRoot);
+explorerApi.all("/listDriver/rootList", listDriverRoot);
+
 explorerApi.all("/list/path", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
@@ -1450,7 +1493,7 @@ explorerApi.all("/list/path", async (c) => {
     return c.json({ code: true, data: await listTagSourcesData(c, user, parsed) });
   }
   if (parsed.kind === "recent") {
-    return c.json({ code: true, data: emptyListData(parsed.thisPath, "最近文档", user.id) });
+    return c.json({ code: true, data: await listRecentData(c, user, parsed) });
   }
   if (parsed.kind === "virtual") {
     const cleanPath = parsed.thisPath.replace(/\/+$/, "");
@@ -2009,9 +2052,99 @@ function metaSourceID(path: string): number {
 }
 
 /** 001 explorerIndex::updateLastOpen: 记录文件最近打开时间 (仅文件)。 */
-async function updateLastOpen(db: D1Database, path: string): Promise<void> {
+async function updateLastOpen(db: D1Database, path: string, userID?: number): Promise<void> {
   if (!path || path.endsWith("/")) return;
   await setSourceMeta(db, metaSourceID(path), "viewTime", String(Math.floor(Date.now() / 1000)));
+  if (userID) await touchRecent(db, userID, path, "file");
+}
+
+/** 记录最近访问 (mirrors 001 listRecent; upsert 同一用户同一路径仅保留最新时间)。 */
+async function touchRecent(db: D1Database, userID: number, path: string, type: string): Promise<void> {
+  if (!userID || !path) return;
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .prepare(
+      "INSERT INTO recent (userID, path, type, viewTime) VALUES (?, ?, ?, ?) ON CONFLICT(userID, path) DO UPDATE SET type = excluded.type, viewTime = excluded.viewTime"
+    )
+    .bind(userID, path, type, now)
+    .run()
+    .catch(() => {});
+}
+
+/** 001 listRecent/listData: 按最近打开时间列出文件/文件夹。 */
+async function listRecentData(c: AppContext, user: Vars["currentUser"], parsed: ExplorerPath): Promise<Record<string, unknown>> {
+  const rows = (await c.env.DB.prepare("SELECT path, type, viewTime FROM recent WHERE userID = ? ORDER BY viewTime DESC LIMIT 500")
+    .bind(user.id)
+    .all()
+    .catch(() => ({ results: [] }))).results as Array<{ path: string; type: string; viewTime: number }>;
+  const folderList: Record<string, unknown>[] = [];
+  const fileList: Record<string, unknown>[] = [];
+  for (const r of rows || []) {
+    const raw = String(r.path || "").replace(/\/+$/, "");
+    if (!raw) continue;
+    const name = raw.split("/").filter(Boolean).pop() || raw;
+    let isFolder = raw.endsWith("/");
+    if (!isFolder) {
+      try {
+        const src = await resolveFileSource(c.env, user, raw);
+        if (!src.ok) continue;
+        if (src.source.type === "user" || src.source.type === "group" || src.source.type === "io" || src.source.type === "safe") {
+          const info = await headObject(c, src.source, normDirPath(src.relPath).replace(/^\//, ""));
+          if (!info) {
+            isFolder = await isFolderVirtualPath(c.env, src.source.baseKey, raw);
+            if (!isFolder) continue;
+          } else {
+            fileList.push({
+              name,
+              path: raw,
+              pathDisplay: displayPath(raw),
+              type: "file",
+              typeCat: kodFileType(name),
+              isFolder: false,
+              isWriteable: true,
+              isReadable: true,
+              isTruePath: true,
+              sourceID: fileSourceID(raw),
+              ext: name.includes(".") ? name.split(".").pop()!.toLowerCase() : "",
+              size: info.size,
+              modifyTime: info.lastModified || new Date().toISOString(),
+              createTime: info.lastModified || new Date().toISOString(),
+              viewTime: r.viewTime,
+            });
+            continue;
+          }
+        } else {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+    }
+    if (isFolder) {
+      folderList.push({
+        name,
+        path: raw + "/",
+        pathDisplay: displayPath(raw + "/"),
+        type: "folder",
+        isFolder: true,
+        isWriteable: true,
+        isReadable: true,
+        isTruePath: true,
+        sourceID: fileSourceID(raw + "/"),
+        viewTime: r.viewTime,
+      });
+    }
+  }
+  const totalNum = folderList.length + fileList.length;
+  return {
+    current: { name: "最近文档", path: parsed.thisPath, pathDisplay: displayPath(parsed.thisPath), type: "folder", isFolder: true, isWriteable: false, isReadable: true, isTruePath: true },
+    folderList,
+    fileList,
+    groupList: [],
+    pageInfo: { totalNum, pageNum: 500, page: 1, pageTotal: Math.max(1, Math.ceil(totalNum / 500)) },
+    thisPath: parsed.thisPath,
+    targetSpace: { sizeMax: 0, sizeUse: 0 },
+  };
 }
 
 function metaTruthy(v: unknown): boolean {
@@ -2141,8 +2274,9 @@ explorerApi.all("/index/pathAllowCheck", async (c) => {
 
 // updateLastOpen - 更新文件最近打开时间 (复刻 001 explorer/index::updateLastOpen)
 explorerApi.all("/index/updateLastOpen", async (c) => {
+  const user = c.get("currentUser");
   const params = await reqParams(c);
-  await updateLastOpen(c.env.DB, String(params.path ?? ""));
+  await updateLastOpen(c.env.DB, String(params.path ?? ""), user?.id);
   return c.json({ code: true, data: "explorer.success" });
 });
 
@@ -2757,7 +2891,7 @@ async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment
   if (!obj) return c.json({ code: false, data: "Not found" });
 
   // 001 fileOutUpdate -> updateLastOpen: 记录最近打开时间
-  await updateLastOpen(c.env.DB, path).catch(() => {});
+  await updateLastOpen(c.env.DB, path, user.id).catch(() => {});
 
   const name = (typeof params.name === "string" && params.name) ? params.name : path.split("/").filter(Boolean).pop() || "file";
   if (disposition === "attachment") {
