@@ -397,6 +397,25 @@ accountApi.post("/setting/uploadHeadImage", authRequired, async (c) => {
   const user = c.get("currentUser");
   const formData = await c.req.formData().catch(() => null);
   if (!formData) return c.json(fail("only support image"));
+
+  // 秒传/断点续传预检 (webuploader before-send checkHash): 与 explorer/upload/fileUpload 对齐,
+  // 返回预检信息让前端走"上传到 Kod"继续上传; 否则上传流程会被 reject 而静默失败。
+  const checkType = String(formData.get("checkType") || "");
+  if (checkType) {
+    return c.json({
+      code: 1,
+      data: "success",
+      info: {
+        checkChunkArray: {},
+        checkFileHash: { hashSimple: null, hashMd5: null },
+        uploadLinkInfo: false,
+        uploadToKod: true,
+        uploadChunkSize: "10",
+        kodDriverType: "Local",
+      },
+    });
+  }
+
   const file = formData.get("file") as File | null;
   if (!file) return c.json(fail("only support image"));
 

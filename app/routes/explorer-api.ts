@@ -4519,19 +4519,27 @@ function parseLightAppData(raw: unknown): LightAppItem | null {
     return null;
   }
   if (!d || typeof d !== "object" || Array.isArray(d) || !d.name) return null;
+  // 前端实际提交的是嵌套结构 { name, group, desc, content: { type, value, icon, options } }
+  // （见 static main.js parseData: t.content = _.pick(e, "type","value","icon")）；
+  // 这里展平 content 到顶层，兼容扁平结构与嵌套结构两种格式，避免 value/icon 丢失。
+  const content = d.content && typeof d.content === "object" ? d.content : {};
+  const flat = { ...d, ...content };
   const options: Record<string, any> = {};
-  const skip = new Set(["name", "group", "desc", "type", "value", "icon", "content"]);
-  for (const [k, v] of Object.entries(d)) {
+  const skip = new Set(["name", "group", "desc", "type", "value", "icon", "content", "options"]);
+  for (const [k, v] of Object.entries(flat)) {
     if (!skip.has(k)) options[k] = v;
   }
+  if (content.options && typeof content.options === "object") {
+    Object.assign(options, content.options);
+  }
   return {
-    name: String(d.name),
-    group: typeof d.group === "string" && d.group ? d.group : "tools",
-    desc: typeof d.desc === "string" ? d.desc : "",
+    name: String(flat.name),
+    group: typeof flat.group === "string" && flat.group ? flat.group : "tools",
+    desc: typeof flat.desc === "string" ? flat.desc : "",
     content: {
-      type: typeof d.type === "string" ? d.type : "url",
-      value: typeof d.value === "string" ? d.value : "",
-      icon: typeof d.icon === "string" ? d.icon : "",
+      type: typeof flat.type === "string" ? flat.type : "url",
+      value: typeof flat.value === "string" ? flat.value : "",
+      icon: typeof flat.icon === "string" ? flat.icon : "",
       options,
     },
   };
