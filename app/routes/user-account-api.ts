@@ -393,7 +393,9 @@ accountApi.post("/setting/setHeadImage", authRequired, async (c) => {
     return c.json(fail("common.illegalRequest"));
   }
   // 追加时间戳: 头像文件 URL 固定, 重新上传同名文件会命中 CDN/浏览器旧缓存
-  avatar += (avatar.indexOf("?") === -1 ? "?" : "&") + "t=" + Date.now();
+  if (!/[?&]t=/.test(avatar)) {
+    avatar += (avatar.indexOf("?") === -1 ? "?" : "&") + "t=" + Date.now();
+  }
   await userEdit(c.env.DB, user.id, { avatar });
   await addAuditLog(c.env.DB, "user.setHeadImage", user.id, null, null, null, avatar);
   const info = await buildUserInfo(c, user.id);
