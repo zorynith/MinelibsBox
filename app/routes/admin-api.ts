@@ -1811,7 +1811,7 @@ adminApi.all("/log/get", async (c) => {
   const total = totalRow?.total ?? 0;
 
   const rows = await c.env.DB.prepare(
-    `SELECT id, action, user_id, path, ip, detail, created_at FROM audit_logs ${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`
+    `SELECT id, action, user_id, path, ip, user_agent, detail, created_at FROM audit_logs ${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`
   ).bind(...args, pageNum, offset).all();
 
   const userIds = [...new Set((rows.results as any[]).map((r) => r.user_id).filter(Boolean))];
