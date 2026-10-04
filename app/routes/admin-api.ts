@@ -13,6 +13,7 @@ import { ioClientFromConfig } from "../lib/io";
 import { loadPluginPackage, loadPluginLang, buildPluginAppList, defaultPluginConfig, resolvePluginPackage, normalizePluginConfig, resolveLngRaw } from "../lib/plugins";
 import { detectLang, loadLangPack } from "../lib/i18n-lang";
 import { getStaticHost } from "../lib/user-system";
+import { handleUserNotice } from "../lib/user-notice";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const adminApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -2143,6 +2144,29 @@ adminApi.all("/notice/enable", async (c) => {
   const enable = p.enable === "1" || p.enable === "true" ? 1 : 0;
   await c.env.DB.prepare("UPDATE notice SET enable = ? WHERE id = ?").bind(enable, id).run();
   return c.json(ok("explorer.success"));
+});
+
+// 用户通知列表/已读/删除 (001 adminNotice::noticeGet/noticeEdit/noticeRemove)
+// 与 user/setting/notice 共用 app/lib/user-notice.ts 实现
+adminApi.all("/notice/noticeGet", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const p = await allParams(c);
+  return handleUserNotice(c, user, "get", parseInt(p.id, 10) || 0);
+});
+
+adminApi.all("/notice/noticeEdit", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const p = await allParams(c);
+  return handleUserNotice(c, user, "edit", parseInt(p.id, 10) || 0);
+});
+
+adminApi.all("/notice/noticeRemove", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  const p = await allParams(c);
+  return handleUserNotice(c, user, "remove", parseInt(p.id, 10) || 0);
 });
 
 export { adminApi };

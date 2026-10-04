@@ -167,6 +167,30 @@ adminServerApi.all("/server/srvPinfo", async (c) => {
   return c.json(ok(base));
 });
 
+// ============ admin/server/getServerInfo ============
+
+adminServerApi.all("/server/getServerInfo", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  return c.json(ok(await serverBaseInfo(c)));
+});
+
+// ============ admin/server/getDbInfo ============
+
+adminServerApi.all("/server/getDbInfo", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  return c.json(ok(await getDbInfo(c)));
+});
+
+// ============ admin/server/_dbType ============
+
+adminServerApi.all("/server/_dbType", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  return c.json(ok("sqlite"));
+});
+
 // ============ admin/server/recoverySave & recoveryFileSave ============
 
 // 从备份恢复 (001 adminServer::recoverySave/recoveryFileSave: 完整恢复由 admin/backup 承担)

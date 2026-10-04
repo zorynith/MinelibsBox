@@ -56,7 +56,13 @@ app.use("*", async (c, next) => {
     const restParams = parts.slice(1).join("&");
 
     if (segments.length >= 2) {
-      const newPath = "/api/" + segments.join("/");
+      // 001 控制器目录为 explorer/seo 与 explorer/shareOut, 但 Worker 用独立前缀
+      // (/seo, /shareOut) 避开 explorer 前缀下的鉴权中间件, 此处还原 001 原始 URL。
+      let targetSegs = segments;
+      if (segments[0] === "explorer" && (segments[1] === "seo" || segments[1] === "shareOut")) {
+        targetSegs = [segments[1], ...segments.slice(2)];
+      }
+      const newPath = "/api/" + targetSegs.join("/");
       url.pathname = newPath;
       url.search = restParams ? `?${restParams}` : "";
       const newReq = new Request(url.toString(), c.req.raw);
@@ -66,6 +72,11 @@ app.use("*", async (c, next) => {
 
   // Handle direct paths: /user/view/options -> /api/user/view/options
   const firstSeg = path.split("/")[1];
+  if (path.startsWith("/explorer/seo/") || path.startsWith("/explorer/shareOut/")) {
+    url.pathname = "/api" + path.replace("/explorer/", "/");
+    const newReq = new Request(url.toString(), c.req.raw);
+    return app.fetch(newReq, c.env, c.executionCtx);
+  }
   if (firstSeg && ["user", "explorer", "admin", "setting", "fav", "share", "desktop", "seo", "shareOut"].includes(firstSeg)) {
     url.pathname = "/api" + path;
     const newReq = new Request(url.toString(), c.req.raw);
