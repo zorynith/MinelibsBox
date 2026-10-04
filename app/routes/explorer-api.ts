@@ -35,6 +35,7 @@ import { listViewSave, listViewApply } from "../lib/list-view";
 import { mcryptEncode, mcryptDecode } from "../lib/mcrypt";
 import { parseShareItemPath, listUserShareVirtual, listShareItemDir, listShareToMeVirtual, shareItemFileOut } from "./share-api";
 import { checkAllowPassword, folderPasswordNeed, folderPasswordChildNeed, parentVirtualDir } from "../lib/folder-password";
+import { t } from "../lib/i18n";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const explorerApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -1122,6 +1123,162 @@ async function listFilesByType(c: AppContext, user: Vars["currentUser"], parsed:
   };
 }
 
+/** 001 listFileType 默认相册扫描类型。 */
+const PHOTO_DEFAULT_EXT = "jpg,jpeg,png,gif,bmp,heic,webp,mov,mp4";
+
+type PhotoItem = Record<string, unknown> & { imageTime: number };
+
+/** 相册图片时间处理 (001 resetImageTime); 缺少 EXIF 时回退到上传时间。 */
+function photoImageTime(uploaded: Date | undefined): number {
+  return uploaded ? Math.floor(uploaded.getTime() / 1000) : Math.floor(Date.now() / 1000);
+}
+
+/** 按 year/month/day 分组 + 分页 (001 groupData)。 */
+function groupPhotoData(fileList: PhotoItem[], params: Record<string, any>): {
+  fileList: PhotoItem[];
+  groupShow: Record<string, unknown>[];
+  pageInfo: Record<string, number>;
+} {
+  const sorted = [...fileList].sort((a, b) => b.imageTime - a.imageTime);
+  const groupBy = ["year", "month", "day"].includes(String(params.photoListBy)) ? String(params.photoListBy) : "month";
+  const pageNumRaw = parseInt(String(params.pageNum ?? "500"), 10);
+  const pageNum = !pageNumRaw || pageNumRaw <= 100 ? 100 : pageNumRaw;
+  const pageTotal = Math.max(1, Math.ceil(sorted.length / pageNum));
+  let page = parseInt(String(params.page ?? "1"), 10) || 1;
+  page = page <= 1 ? 1 : page >= pageTotal ? pageTotal : page;
+  const listPage = sorted.slice(pageNum * (page - 1), pageNum * page);
+
+  const groupMap = new Map<string, { type: string; title: string; desc: string; count: number; filter: Record<string, unknown> }>();
+  for (const file of listPage) {
+    const d = new Date(file.imageTime * 1000);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    let key: string;
+    let timeStart: number;
+    let timeTo: number;
+    if (groupBy === "year") {
+      key = String(y);
+      timeStart = Date.UTC(y, 0, 1) / 1000;
+      timeTo = Date.UTC(y + 1, 0, 1) / 1000;
+    } else if (groupBy === "day") {
+      key = `${y}-${m}-${day}`;
+      timeStart = Date.UTC(y, d.getUTCMonth(), d.getUTCDate()) / 1000;
+      timeTo = timeStart + 86400;
+    } else {
+      key = `${y}-${m}`;
+      timeStart = Date.UTC(y, d.getUTCMonth(), 1) / 1000;
+      timeTo = Date.UTC(y, d.getUTCMonth() + 1, 1) / 1000;
+    }
+    let g = groupMap.get(key);
+    if (!g) {
+      g = { type: "photo-group-" + timeStart, title: key, desc: "", count: 0, filter: { imageTime: { ">": timeStart, "<": timeTo } } };
+      groupMap.set(key, g);
+    }
+    g.count += 1;
+    g.desc = g.count + " " + t("common.items");
+  }
+  return { fileList: listPage, groupShow: [...groupMap.values()], pageInfo: { page, pageTotal, totalNum: sorted.length, pageNum } };
+}
+
+/** 001 listFileType::getPhoto - 相册模式列表 (个人空间 + photoConfig 配置)。 */
+async function listPhotoData(
+  c: AppContext,
+  user: Vars["currentUser"],
+  rawPath: string,
+  params: Record<string, any>
+): Promise<Record<string, unknown>> {
+  let option: Record<string, any> | null = null;
+  const rawOption = await getUserOption(c.env.DB, user.id, "photoConfig");
+  if (rawOption) {
+    try {
+      const o = JSON.parse(rawOption);
+      if (o && typeof o === "object") option = o;
+    } catch {
+      /* ignore */
+    }
+  }
+  let homePath = "/";
+  let sizeFrom = 100;
+  let fileType = PHOTO_DEFAULT_EXT;
+  if (option) {
+    if (typeof option.pathRoot === "string" && option.pathRoot) homePath = option.pathRoot;
+    if (option.fileSize !== undefined) sizeFrom = (parseInt(String(option.fileSize), 10) || 0) * 1024;
+    if (typeof option.fileType === "string" && option.fileType) fileType = option.fileType;
+  }
+
+  const sub = rawPath.replace(/^\{userFileType:photo\}/, "").replace(/^\/+/, "").replace(/\/+$/, "");
+  const scanRoot = sub ? "/" + sub : homePath;
+
+  // 仅支持个人空间路径; 其他根路径给出提示 (001 fileCanRead 失败分支)。
+  const isPersonal = scanRoot === "/" || (!scanRoot.startsWith("{") && !scanRoot.startsWith("/{"));
+  const photoCurrent = (name: string, pathDesc: string): Record<string, unknown> => ({
+    path: rawPath,
+    name,
+    pathDesc,
+    type: "folder",
+    pathAddress: [{ name: t("explorer.toolbar.photo"), path: rawPath }],
+  });
+  if (!isPersonal) {
+    return {
+      fileList: [],
+      folderList: [],
+      current: photoCurrent(t("explorer.toolbar.photo"), t("explorer.photo.desc")),
+      folderTips: t("explorer.noPermissionAction"),
+    };
+  }
+
+  const exts = new Set(fileType.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+  const baseKey = userSource(user).baseKey;
+  const all = await listAllFiles(c.env.FILES, baseKey).catch(() => [] as R2Object[]);
+  const rootPrefix = scanRoot === "/" ? "" : scanRoot.replace(/^\/+/, "").replace(/\/+$/, "") + "/";
+  const fileList: PhotoItem[] = [];
+  for (const o of all) {
+    if (o.key.endsWith("/")) continue;
+    const rel = o.key.slice(o.key.indexOf("/") + 1);
+    if (rootPrefix && !rel.startsWith(rootPrefix)) continue;
+    const name = rel.split("/").pop() || rel;
+    const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
+    if (!exts.has(ext)) continue;
+    if (sizeFrom > 0 && o.size < sizeFrom) continue;
+    const imageTime = photoImageTime(o.uploaded);
+    fileList.push({
+      name,
+      path: "{source:home}/" + rel,
+      pathDisplay: displayPath("{source:home}/" + rel),
+      type: "file",
+      typeCat: "image",
+      isFolder: false,
+      isWriteable: true,
+      isReadable: true,
+      isTruePath: true,
+      sourceID: fileSourceID("{source:home}/" + rel),
+      ext,
+      size: o.size,
+      modifyTime: o.uploaded ? o.uploaded.toISOString() : new Date().toISOString(),
+      createTime: o.uploaded ? o.uploaded.toISOString() : new Date().toISOString(),
+      imageTime,
+    });
+  }
+
+  const grouped = groupPhotoData(fileList, params);
+  const subName = sub ? sub.split("/").filter(Boolean).pop() || sub : "";
+  const name = subName ? t("explorer.toolbar.folder") + " - " + subName : t("explorer.toolbar.photo");
+  const pathDesc = sub ? displayPath("{source:home}/" + sub) : t("explorer.photo.desc");
+  return {
+    fileList: grouped.fileList,
+    folderList: [],
+    groupList: [],
+    groupShow: grouped.groupShow,
+    pageSizeArray: [100, 200, 500, 1000, 2000, 5000],
+    disableSort: 1,
+    listTypePhoto: 1,
+    listTypeSet: "icon",
+    current: photoCurrent(name, pathDesc),
+    pageInfo: grouped.pageInfo,
+  };
+}
+
 /** 判断一个前端路径（虚拟或真实）是否为文件夹，依据 R2 中是否存在该目录前缀的对象。 */
 async function isFolderVirtualPath(env: Env, baseKey: string, p: string): Promise<boolean> {
   const realPath = toRealPath(p).replace(/\/+$/, "");
@@ -1981,6 +2138,26 @@ explorerApi.all("/list/tree", async (c) => {
   } catch (err: any) {
     return c.json({ code: false, data: err.message });
   }
+});
+
+// ============ listFileType (001 explorer/listFileType) ============
+
+// block - 文件类型列表
+explorerApi.all("/listFileType/block", async (c) => {
+  return c.json({ code: true, data: blockFileType() });
+});
+
+// get - 按类型列出 (type=photo 时相册模式)
+explorerApi.all("/listFileType/get", async (c) => {
+  const user = c.get("currentUser");
+  const params = await reqParams(c);
+  const type = typeof params.type === "string" ? params.type : "";
+  const rawPath = typeof params.path === "string" && params.path ? params.path : `{userFileType:${type}}/`;
+  if (type === "photo") {
+    return c.json({ code: true, data: await listPhotoData(c, user, rawPath, params) });
+  }
+  const parsed: ExplorerPath = { kind: "fileType", realPath: "/", typeId: type, thisPath: rawPath };
+  return c.json({ code: true, data: await listFilesByType(c, user, parsed) });
 });
 
 // pathInfo - file/folder detail (right-click context menu)

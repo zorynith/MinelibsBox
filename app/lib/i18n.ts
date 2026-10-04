@@ -65,6 +65,12 @@ const ZH: Record<string, string> = {
   "explorer.shareOut.titlePathDesc": "外部站点分享给我的内容",
   "explorer.share.notExist": "分享不存在！",
   "admin.storage.localStore": "本地存储",
+  "common.items": "项内容",
+  "explorer.toolbar.photo": "我的相册",
+  "explorer.photo.desc": "用户相册归类",
+  "explorer.photo.pathRoot": "相册扫描目录",
+  "explorer.photo.fileType": "指定文件类型",
+  "explorer.toolbar.folder": "目录相册",
 };
 
 const EN: Record<string, string> = {
@@ -121,6 +127,12 @@ const EN: Record<string, string> = {
   "explorer.shareOut.titlePathDesc": "Content shared to me by external sites",
   "explorer.share.notExist": "Sharing does not exist!",
   "admin.storage.localStore": "Local storage",
+  "common.items": "Item content",
+  "explorer.toolbar.photo": "My Album",
+  "explorer.photo.desc": "User album classification",
+  "explorer.photo.pathRoot": "Album Scan Directory",
+  "explorer.photo.fileType": "Specify file type",
+  "explorer.toolbar.folder": "Catalog album",
 };
 
 /** Translate an i18n key to display text. Falls back to the key itself when unknown. */
