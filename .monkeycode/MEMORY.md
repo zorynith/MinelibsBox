@@ -271,6 +271,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - 线上 Worker 域名 minelibsbox.minelibs.workers.dev；本沙箱对 *.workers.dev 的 DNS 返回污染 IP（face:b00c），需先经 DoH（https://dns.google/resolve）取真实 Cloudflare IP，再用 `curl --resolve host:443:<ip>` 或 playwright `--host-resolver-rules=MAP host <ip>` 访问；playwright 需 `channel:'chromium'`（新版默认找缺失的 headless_shell）。
   - Photopea 插件 static 是途图图（tuyitu）定制版：pp.js 的 NJ.zC 仅当 NJ.rk()（localStorage key `0_token` 未过期）为真才执行启动回调，否则 setTimeout 轮询；未登录 ps.tuyitu.com 时停在启动欢迎页、不自动打开 files（fileUrl 仍会 200）。属插件原版行为，改用官方 https://www.photopea.com/#<config> 才免登录。
   - CADViewer 的 sharecad `/cadframe/load?url=` 页在顶层窗口会执行 `if(window.self===window.top)location.href="/Viewer"+hash`（hash 为空→丢文件），仅在 iframe 内才渲染查看器；故 renderCADViewer 必须返回承载 iframe 的 HTML，不能 302 跳到 sharecad。
+  - autoViewer（官方 3D/CAD Smart Viewer v1.11，纯前端 libredwg WASM）要求 DXF 结构完整：必须含 `HEADER` + `TABLES`（至少 `LTYPE`、`LAYER` 各一条记录）+ `ENTITIES`。仅 `ENTITIES` 段的精简 DXF 会一直卡在 `Rendering ...`；`TABLES` 段为空时会在官方 `index.js` 的 `resultParse`（约 line 5738）循环 `itemData.values.length` 抛 `Cannot read properties of undefined (reading 'length')`。属官方插件固有行为、非集成 bug，排查"DXF 打不开"应先检查文件是否缺段，而非改集成代码；测试用 DXF 需带完整 TABLES。线上主域 `https://cloud.minelibs.eu.org/`（workers.dev 需 DoH 取真实 IP 再 --resolve）。
 
 [User Instruction Summary]
 - Date: 2026-08-25
