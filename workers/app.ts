@@ -62,6 +62,10 @@ app.use("*", async (c, next) => {
       if (segments[0] === "explorer" && (segments[1] === "seo" || segments[1] === "shareOut")) {
         targetSegs = [segments[1], ...segments.slice(2)];
       }
+      // 001 explorer/historyLocal 与 explorer/history 方法完全一致, worker 统一走 /history
+      if (segments[0] === "explorer" && segments[1] === "historyLocal") {
+        targetSegs = ["explorer", "history", ...segments.slice(2)];
+      }
       const newPath = "/api/" + targetSegs.join("/");
       url.pathname = newPath;
       url.search = restParams ? `?${restParams}` : "";
@@ -74,6 +78,11 @@ app.use("*", async (c, next) => {
   const firstSeg = path.split("/")[1];
   if (path.startsWith("/explorer/seo/") || path.startsWith("/explorer/shareOut/")) {
     url.pathname = "/api" + path.replace("/explorer/", "/");
+    const newReq = new Request(url.toString(), c.req.raw);
+    return app.fetch(newReq, c.env, c.executionCtx);
+  }
+  if (path.startsWith("/explorer/historyLocal/")) {
+    url.pathname = "/api" + path.replace("/explorer/historyLocal/", "/explorer/history/");
     const newReq = new Request(url.toString(), c.req.raw);
     return app.fetch(newReq, c.env, c.executionCtx);
   }

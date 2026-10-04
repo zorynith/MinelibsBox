@@ -814,6 +814,35 @@ shareApi.all("/share/pathInfo", async (c) => {
 // fileOut / fileOutBy / fileDownload - 文件输出
 shareApi.all("/share/fileOut", (c) => shareFileOutHandler(c, "inline"));
 shareApi.all("/share/fileDownload", (c) => shareFileOutHandler(c, "attachment"));
+
+// 001 explorer/share::{link,linkFile,linkSafe,linkOut} 外链生成 (匿名, authOptional)
+shareApi.all("/share/link", async (c) => {
+  const params = await reqParams(c);
+  const path = typeof params.path === "string" ? params.path : "";
+  if (!path) return c.text("");
+  return c.text(await link(c.env, getAppHost(c), path, typeof params.downFilename === "string" ? params.downFilename : ""));
+});
+shareApi.all("/share/linkFile", async (c) => {
+  const params = await reqParams(c);
+  const file = typeof params.file === "string" ? params.file : "";
+  if (!file) return c.text("");
+  return c.text(await linkFile(c.env, getAppHost(c), file, typeof params.addParam === "string" ? params.addParam : ""));
+});
+shareApi.all("/share/linkSafe", async (c) => {
+  const params = await reqParams(c);
+  const path = typeof params.path === "string" ? params.path : "";
+  if (!path) return c.text("");
+  const user = c.get("currentUser") as AuthUser | undefined;
+  return c.text(await linkSafe(c, user, path, typeof params.downFilename === "string" ? params.downFilename : ""));
+});
+shareApi.all("/share/linkOut", async (c) => {
+  const params = await reqParams(c);
+  const path = typeof params.path === "string" ? params.path : "";
+  if (!path) return c.text("");
+  const token = params.token === "1" || params.token === "true" || params.token === true;
+  return c.text(await linkOut(c, path, token));
+});
+
 shareApi.all("/share/fileOutBy", async (c) => {
   // 文档内相对资源：path 指向分享文档，add 为相对父级路径
   const params = await reqParams(c);
