@@ -1683,8 +1683,10 @@ document.addEventListener('click', function(e){
 });
 $('langSel').value = LANG_KEY;
 $('langSel').addEventListener('change', function(){ LANG_KEY = this.value; L = LANG[LANG_KEY] || LANG.en; applyLang(); });
-var tgl = document.querySelector('.toggle-menu');
-if (tgl) tgl.addEventListener('click', function(){ document.body.classList.toggle('menu-hide'); });
+var tgl = document.createElement('div');
+tgl.className = 'toggle-menu';
+document.body.appendChild(tgl);
+tgl.addEventListener('click', function(){ document.body.classList.toggle('menu-hide'); });
 if (window.innerWidth < 769) { document.body.classList.add('app-page-small'); document.body.classList.add('menu-hide'); }
 loadTables();
 showSql();

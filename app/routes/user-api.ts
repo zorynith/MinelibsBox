@@ -380,7 +380,7 @@ userApi.get("/view/options", async (c) => {
           name: session.username,
           nickname: session.nickname || session.username,
           role: session.role,
-          sex: 0, email: session.email || "", phone: "", avatar: "",
+          sex: 0, email: session.email || "", phone: "", avatar: session.avatar || "",
           sizeMax: defaultSizeMax, sizeUse: userSpaceUsedBytes, status: 1,
         },
         role: roleAuth,
