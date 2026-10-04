@@ -392,6 +392,8 @@ accountApi.post("/setting/setHeadImage", authRequired, async (c) => {
   } else if (!link.startsWith("./")) {
     return c.json(fail("common.illegalRequest"));
   }
+  // 追加时间戳: 头像文件 URL 固定, 重新上传同名文件会命中 CDN/浏览器旧缓存
+  avatar += (avatar.indexOf("?") === -1 ? "?" : "&") + "t=" + Date.now();
   await userEdit(c.env.DB, user.id, { avatar });
   await addAuditLog(c.env.DB, "user.setHeadImage", user.id, null, null, null, avatar);
   const info = await buildUserInfo(c, user.id);
@@ -456,7 +458,7 @@ accountApi.post("/setting/uploadHeadImage", authRequired, async (c) => {
     const key = getUserFileKey(user.username, `.system/avatar/avata-${user.id}.${ext}`);
     await c.env.FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || getFileMimeType(name || file.name) } });
     const appHost = getAppHost(c);
-    const downloadPath = `${appHost}explorer/fileProxy?path=${encodeURIComponent(`.system/avatar/avata-${user.id}.${ext}`)}`;
+    const downloadPath = `${appHost}explorer/fileProxy?path=${encodeURIComponent(`.system/avatar/avata-${user.id}.${ext}`)}&t=${Date.now()}`;
     await addAuditLog(c.env.DB, "user.uploadHeadImage", user.id, null, null, null, key);
     // Frontend expects {code:true, info:{downloadPath}} (uploadViewEvent itemUploadSuccess passes serverData.info to the callback)
     return c.json({ code: true, info: { downloadPath } });
