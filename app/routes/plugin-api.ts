@@ -14,6 +14,7 @@ import { authRequired, getSessionId, verifyPassword } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
 import { getAppHost, getStaticHost } from "../lib/user-system";
 import { detectLang, loadLangPack } from "../lib/i18n-lang";
+import { t } from "../lib/i18n";
 import { loadPluginLang } from "../lib/plugins";
 import { getFileMimeType, getUserFileKey, keyFromBase } from "../lib/r2";
 import { getShareByHash } from "../lib/share";
@@ -1599,13 +1600,13 @@ async function clientCheckPassHandler(c: any): Promise<Response> {
   if (!row || !(await verifyPassword(password, (row as any).password_hash))) {
     return c.json({ code: false, data: "ERROR_USER_PASSWORD_ERROR" });
   }
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 }
 
 /** 001 clientPlugin::check: 检查扫码登录状态 (GET)。 */
 async function clientCheckHandler(c: any): Promise<Response> {
   const user = c.get("currentUser") as AuthUser | undefined;
-  if (user) return c.json({ code: true, data: "explorer.success" });
+  if (user) return c.json({ code: true, data: t("explorer.success") });
   return c.json({ code: false, data: null });
 }
 
@@ -1629,7 +1630,7 @@ async function clientLoginAppHandler(c: any): Promise<Response> {
   const user = c.get("currentUser") as AuthUser | undefined;
   if (!user) return c.json({ code: false, data: "user.loginFirst" });
   await pluginCacheSet(c.env.DB, `clientQrcode:${currentKey}`, { ...state, loginUser: { id: user.id, username: user.username } }, 600);
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 }
 
 // ---------- oauth 第三方登录回调页 (复刻 001 plugins/oauth callback) ----------

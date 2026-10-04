@@ -1970,7 +1970,7 @@ adminApi.all("/plugin/setConfig", async (c) => {
     config = normalizePluginConfig(config);
   }
   await setPluginConfig(c.env.DB, app, config);
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 adminApi.all("/plugin/install", async (c) => {

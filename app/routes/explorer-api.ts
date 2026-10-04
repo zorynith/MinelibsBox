@@ -1418,7 +1418,7 @@ explorerApi.all("/index/desktopApp", async (c) => {
     userHelp: {
       name: "使用帮助",
       type: "url",
-      value: "https://docs.MbesBox.com/",
+      value: "https://static.minelibs.eu.org/docs",
       icon: staticPath + "images/file_icon/icon_file/hlp.png",
       menuType: "menu-default",
     },
@@ -1600,7 +1600,7 @@ explorerApi.all("/listView/dataSave", async (c) => {
     listViewValue: params.listViewValue,
     listViewPath: params.listViewPath,
   });
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 // listRecent - 最近文档 (001 explorer/listRecent: listData / listRecentWith)
@@ -2482,7 +2482,7 @@ explorerApi.all("/index/pathAllowCheck", async (c) => {
   const name = path.replace(/\/+$/, "").split("/").pop() || "";
   const err = pathAllowCheckName(name);
   if (err) return c.json({ code: false, data: err });
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 // updateLastOpen - 更新文件最近打开时间 (复刻 001 explorer/index::updateLastOpen)
@@ -2490,7 +2490,7 @@ explorerApi.all("/index/updateLastOpen", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
   await updateLastOpen(c.env.DB, String(params.path ?? ""), user?.id);
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 // mkdir - create folder (path is full path including new folder name)
@@ -3659,7 +3659,7 @@ explorerApi.all("/index/setAuth", async (c) => {
 
   if (action === "clearChildren") {
     await db.prepare("DELETE FROM source_auth WHERE sourceID = ?").bind(String(sourceID)).run();
-    return c.json({ code: true, data: "explorer.success" });
+    return c.json({ code: true, data: t("explorer.success") });
   }
 
   // 默认: setAuth 设置权限
@@ -3674,7 +3674,7 @@ explorerApi.all("/index/setAuth", async (c) => {
     await db.prepare("INSERT INTO source_auth (sourceID, targetType, targetID, authID, authDefine, createTime, modifyTime) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .bind(String(sourceID), Number(item.targetType), Number(item.targetID), Number(item.authID || 0), Number(item.authDefine || 0), now, now).run();
   }
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 explorerApi.all("/index/fileSave", async (c) => {
@@ -3765,7 +3765,7 @@ explorerApi.all("/history/remove", async (c) => {
   if (!row) return c.json({ code: false, data: "explorer.dataError" });
   if (row.fileKey) await c.env.FILES.delete(keyFromBase(r.src.baseKey, row.fileKey)).catch(() => {});
   await c.env.DB.prepare("DELETE FROM source_history WHERE id = ?").bind(id).run();
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 explorerApi.all("/history/clear", async (c) => {
@@ -3780,7 +3780,7 @@ explorerApi.all("/history/clear", async (c) => {
     if (row.fileKey) await c.env.FILES.delete(keyFromBase(r.src.baseKey, row.fileKey)).catch(() => {});
   }
   await c.env.DB.prepare("DELETE FROM source_history WHERE path = ?").bind(path).run();
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 explorerApi.all("/history/rollback", async (c) => {
@@ -3800,7 +3800,7 @@ explorerApi.all("/history/rollback", async (c) => {
   const ok = await writeObject(c, r.src, r.relPath, histBytes, "application/octet-stream");
   if (!ok) return c.json({ code: false, data: "保存失败" });
   invalidateSpaceUsageByBase(r.src.baseKey);
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 explorerApi.all("/history/setDetail", async (c) => {
@@ -3813,7 +3813,7 @@ explorerApi.all("/history/setDetail", async (c) => {
   if (r instanceof Response) return r;
   const detail = String(params.detail || "").slice(0, 1024);
   await c.env.DB.prepare("UPDATE source_history SET detail = ? WHERE id = ? AND path = ?").bind(detail, id, path).run();
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 explorerApi.all("/history/fileOut", async (c) => {
@@ -4934,7 +4934,7 @@ explorerApi.all("/lightApp/add", async (c) => {
   if (!app) return c.json({ code: false, data: "explorer.error" });
   const id = await addLightApp(c.env.DB, app);
   if (!id) return c.json({ code: false, data: "explorer.repeatError" });
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 explorerApi.all("/lightApp/edit", async (c) => {
@@ -4948,7 +4948,7 @@ explorerApi.all("/lightApp/edit", async (c) => {
   if (dup) return c.json({ code: false, data: "explorer.repeatError" });
   const updated = await updateLightApp(c.env.DB, beforeName, app);
   if (!updated) return c.json({ code: false, data: "common.notExists" });
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 explorerApi.all("/lightApp/del", async (c) => {
@@ -4957,7 +4957,7 @@ explorerApi.all("/lightApp/del", async (c) => {
   if (!name) return c.json({ code: false, data: "explorer.error" });
   const removed = await removeLightApp(c.env.DB, name);
   if (!removed) return c.json({ code: false, data: "common.notExists" });
-  return c.json({ code: true, data: "explorer.success" });
+  return c.json({ code: true, data: t("explorer.success") });
 });
 
 /** Base64-encode an ArrayBuffer (Worker-safe). */

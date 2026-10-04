@@ -230,7 +230,6 @@ accountApi.post("/setting/setConfig", authRequired, async (c) => {
   const keyStr = body.key || "";
   const valueStr = body.value || "";
   const keys = keyStr.split(",").map((s) => s.trim()).filter(Boolean);
-  const values = valueStr.split(",");
   if (keys.length === 0) return c.json(fail("common.invalid"));
 
   // 列表视图偏好: 前端 setConfig 会附带 listViewKey/listViewValue/listViewPath 或 clearListView;
@@ -244,10 +243,16 @@ accountApi.post("/setting/setConfig", authRequired, async (c) => {
     });
   }
 
-  for (let i = 0; i < keys.length; i++) {
-    const k = keys[i];
-    const v = values[i] !== undefined ? values[i] : "";
-    await setUserOption(c.env.DB, user.id, k, v);
+  if (keys.length === 1) {
+    // 单键时值整体保存, 不能按逗号拆分 (如渐变背景 linear-gradient(160deg,#222,#666))
+    await setUserOption(c.env.DB, user.id, keys[0], valueStr);
+  } else {
+    const values = valueStr.split(",");
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const v = values[i] !== undefined ? values[i] : "";
+      await setUserOption(c.env.DB, user.id, k, v);
+    }
   }
   return c.json(ok("explorer.settingSuccess"));
 });
