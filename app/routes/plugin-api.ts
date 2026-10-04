@@ -745,8 +745,11 @@ async function renderCADViewer(c: any, params: { rawPath: string; fileName: stri
   const fileUrl = isShare
     ? fileOutUrl(appHost, rawPath)
     : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
+  // sharecad 的 load 页在顶层窗口会跳转 /Viewer(丢失 url), 仅在 iframe 中才渲染查看器;
+  // 故返回承载 iframe 的页面, 让 sharecad 始终运行于子框架内。
   const target = "https://iframe.sharecad.org/cadframe/load?url=" + encodeURIComponent(fileUrl);
-  return c.redirect(target, 302);
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>html,body{margin:0;padding:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style></head><body><iframe src="${target}" allowfullscreen></iframe></body></html>`;
+  return c.body(html, 200, HTML_HEADERS);
 }
 
 /** 001 drawio: 嵌入官方 draw.io 编辑器, autosave/save 消息写回文件。 */
