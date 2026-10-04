@@ -3,15 +3,21 @@
 	"name":"{{LNG['autoViewer.meta.name']}}",
 	"title":"{{LNG['autoViewer.meta.title']}}",
 	"version":"1.11",
-	"category":"tools,file",
 	"source":{
-		"icon":"{{pluginHost}}static/images/icon.svg"
+		"icon":"{{pluginHost}}static/images/icon.svg",
+		"screenshoot":[
+			"{{pluginHost}}static/images/desc/1.png",
+			"{{pluginHost}}static/images/desc/2.png",
+			"{{pluginHost}}static/images/desc/3.png",
+			"{{pluginHost}}static/images/desc/4.png",
+		]
 	},
+	"category":"tools,file",
 	"description":"{{LNG['autoViewer.meta.desc']}}",
 	"keywords":"3d,cad,dwg,dxf,autoViewer",
 	"auther":{
 		"copyright":"kodcloud.",
-		"homePage":"http://www.kodcloud.com"
+		"homePage":"http://www.kodcloud.com",
 	},
 	"configItem":{
 		"pluginAuth":{
@@ -35,7 +41,7 @@
 			"type":"tags",
 			"display":"{{LNG['admin.plugin.fileExt']}}",
 			"desc":"{{LNG['admin.plugin.fileExtDesc']}}",
-			"value":"dxf,dxfb,dwg"
+			"value":"3dm,3ds,3mf,amf,bvh,dae,drc,fbx,gcode,mpt,mpf,nc,glb,gltf,vrm,kmz,lwo,md2,mdd,mpd,nrrd,obj,pcd,pdb,ply,stl,stla,stlb,usdz,usda,usdc,usd,vox,vrml,wrl,vtk,vtp,xyz,assimp,awd,babylon,bim,brd,csg,scad,ctm,ifc,off,plt,pmd,pmx,prwm,tilt,vff,x3d,x_t,x_b,stp,step,stpz,stepz,brp,brep,igs,iges,fcstd,|,ac,acc,ase,b3d,blend,cob,csm,hmp,iqm,lws,md5mesh,mdc,mdl,ms3d,nff,ogex,q3o,q3s,sib,smd,xgl,zg,|,low,lxo,x,assim,glb,gltf,vr,irr,irrmesh,raw,ter,m3d,a3,|,dxf,dxfb,dwg"
 		},
 		"fileSort":{
 			"type":"number",

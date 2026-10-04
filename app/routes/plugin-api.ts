@@ -18,6 +18,7 @@ import { loadPluginLang } from "../lib/plugins";
 import { getFileMimeType, getUserFileKey, keyFromBase } from "../lib/r2";
 import { getShareByHash } from "../lib/share";
 import { getPluginMeta, getUserById, setPluginConfig, getUserByUsername } from "../lib/db";
+import { AUTO_VIEWER_CAD_FONTS } from "../lib/autoviewer-fonts";
 import { md5, hmacMd5, mcryptEncode, mcryptDecode } from "../lib/mcrypt";
 import { resolveFileSource } from "../lib/source";
 import type { SourceRef } from "../lib/source";
@@ -758,7 +759,7 @@ async function renderCADViewer(c: any, params: { rawPath: string; fileName: stri
  * 同源页面内(故可直接 fetch 同源签名文件流); 依赖 kodbox SDK(sdk.js/vendor.js) 提供的 $ / _。
  */
 async function renderAutoViewer(c: any, params: { rawPath: string; fileName: string; ext: string; appHost: string; staticPath: string; lang: string }) {
-  const { rawPath, fileName, ext, appHost, staticPath, lang } = params;
+  const { rawPath, fileName, appHost, staticPath, lang } = params;
   const lng = await loadPluginLang(c.env.ASSETS, "autoViewer", lang);
   const title = lng["autoViewer.meta.title"] || "3D/CAD Smart Viewer";
   const isShare = rawPath.indexOf("{shareItemLink:") === 0;
@@ -773,29 +774,28 @@ async function renderAutoViewer(c: any, params: { rawPath: string; fileName: str
     return c.body(errorPage(title, msg), 200, HTML_HEADERS);
   }
 
-  // 插件页由 app 域(Worker)直出, 与文件流同源, 用 fileView apiKey 签名 URL(无需跨域 cookie)。
-  const fileUrl = isShare
-    ? fileOutUrl(appHost, rawPath) + "&name=/" + encodeURIComponent(fileName)
-    : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
+  // 插件页与文件流同源, 用 explorer 根相对 fileOut URL(浏览器自动带 cookie), 与 demo 一致;
+  // 该前缀同时被 index.js 的 getRelativePath 识别, 否则多文件模型(如 obj/mtl)会拼接出错误 URL。
+  const fileUrl = fileOutRel(rawPath) + "&name=/" + encodeURIComponent(fileName);
 
   const rawHash = String((obj as any).httpEtag || (obj as any).etag || `${rawPath}:${(obj as any).size || 0}`);
   const appHostSlash = appHost.endsWith("/") ? appHost : appHost + "/";
-  const pluginStatic = `${staticPath}plugins/autoViewer/static/`;
-  // 随插件分发的默认字体(与 index.js fontDefaultSort 对齐), 用于 CAD 文字渲染。
-  const cadFontList = ["simplex.shx", "hztxt.shx", "fang-song.ttf", "Roboto-Light.ttf"];
+  const pluginHost = `${staticPath}plugins/autoViewer/`;
+  const pluginStatic = `${pluginHost}static/`;
 
   const info = {
     fileUrl,
     fileName,
     fileHash: rawHash.replace(/"/g, ""),
     apiCoverSave: "",
-    fileExt: ext,
   };
 
   const html = `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
 <title>${title}</title>
 <link rel="icon" href="${pluginStatic}images/icon.svg" sizes="any" type="image/svg+xml">
+<link rel="stylesheet" href="${staticPath}style/dist/sdk.css" type="text/css">
 <link rel="stylesheet" href="${pluginStatic}index.css" type="text/css">
 <link rel="stylesheet" href="${pluginStatic}iconfont/index.css" type="text/css">
 </head><body viewer-type="cad">
@@ -805,11 +805,13 @@ var kodSdkConfig={api:${JSON.stringify(appHostSlash)},pluginApi:${JSON.stringify
 var FILE_INFO=${JSON.stringify(info)};
 var appLang=${JSON.stringify(lang)};
 window.APP_LIB_PATH=${JSON.stringify(pluginStatic)};
-window.CAD_FONT_LIST=${JSON.stringify(JSON.stringify(cadFontList))};
+window.CAD_FONT_LIST=${JSON.stringify(JSON.stringify(AUTO_VIEWER_CAD_FONTS))};
+window._VIEWER_DEBUG=0;
+if(localStorage.getItem('auto-viewer-theme') === 'light'){document.body.classList.add('mode-light');}
 </script>
 <script src="${staticPath}app/dist/vendor.js" type="text/javascript" charset="utf-8"></script>
 <script src="${staticPath}app/dist/sdk.js" type="text/javascript" charset="utf-8"></script>
-<script type="importmap">{"imports":{"three":"${pluginStatic}dev/threejs/export.js","three/addons/":"${pluginStatic}dev/threejs/","three/examples/jsm/":"${pluginStatic}dev/threejs/","fflate":"${pluginStatic}dev/threejs/libs/fflate.module.js"}}</script>
+<script type="importmap">{"imports":{"three":"${pluginHost}dev/threejs/export.js","three/addons/":"${pluginHost}dev/threejs/","three/examples/jsm/":"${pluginHost}dev/threejs/","fflate":"${pluginHost}dev/threejs/libs/fflate.module.js"}}</script>
 <script type="module">import ${JSON.stringify(pluginStatic + "index.js?v=1.11")};</script>
 </body></html>`;
   return c.body(html, 200, HTML_HEADERS);

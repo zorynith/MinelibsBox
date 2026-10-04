@@ -3,8 +3,8 @@ kodReady.push(function(){
 	var extAllow = '{{config.fileExt}}';
 	Events.bind('explorer.kodApp.before',function(appList){
 		appList.push({
-			name:'autoViewer',
-			title:'{{LNG[\'autoViewer.meta.name\']}}',
+			name:'{{package.id}}',
+			title:'{{package.name}}',
 			ext:extAllow,
 			icon:iconFile,
 			sort:"{{config.fileSort}}",
@@ -36,5 +36,5 @@ kodReady.push(function(){
 	$.addStyle(
 		styleCad.join(',')+'{background-color:#000000e0 !important;box-shadow:1px 1px 5px #00000033 !important;filter:brightness(5.1) contrast(1.04) saturate(5.1);}'+
 		styleCadDark.join(',')+'{background-color:#000000d0 !important;box-shadow:1px 1px 5px #00000033 !important;}'
-	);
+	);	
 });
