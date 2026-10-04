@@ -51,7 +51,8 @@ kodReady.push(function() {
 
     // 文件列表图标: 001 drawio 插件通过 $.addStyle 注入 .x-item-icon.x-drawio,
     // 否则 drawio/xml 文件图标会回退为默认白纸 icon。
+    // 文件图标使用 drawio.png(文档图标), 而非 icon.png(插件应用图标)。
     $.addStyle("\
-    .x-item-icon.x-drawio{background-image:url('{{pluginHost}}static/images/icon.png');}\
+    .x-item-icon.x-drawio{background-image:url('{{pluginHost}}static/images/drawio.png');}\
     ");
 });
