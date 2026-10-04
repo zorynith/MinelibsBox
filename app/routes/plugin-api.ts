@@ -752,6 +752,69 @@ async function renderCADViewer(c: any, params: { rawPath: string; fileName: stri
   return c.body(html, 200, HTML_HEADERS);
 }
 
+/**
+ * autoViewer (kodbox 官方 3D/CAD Smart Viewer, v1.11): 纯前端 libredwg(WASM) 解析 DWG/DXF,
+ * 不依赖任何外部在线服务。index.js 由 CDN(static 域) 以 ES module 加载, 运行在本插件的
+ * 同源页面内(故可直接 fetch 同源签名文件流); 依赖 kodbox SDK(sdk.js/vendor.js) 提供的 $ / _。
+ */
+async function renderAutoViewer(c: any, params: { rawPath: string; fileName: string; ext: string; appHost: string; staticPath: string; lang: string }) {
+  const { rawPath, fileName, ext, appHost, staticPath, lang } = params;
+  const lng = await loadPluginLang(c.env.ASSETS, "autoViewer", lang);
+  const title = lng["autoViewer.meta.title"] || "3D/CAD Smart Viewer";
+  const isShare = rawPath.indexOf("{shareItemLink:") === 0;
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!isShare && !user) return c.body(errorPage(title, "未登录"), 200, HTML_HEADERS);
+
+  const key = await resolveFileKey(c, rawPath);
+  const obj = key ? await c.env.FILES.head(key).catch(() => null) : null;
+  if (!obj) {
+    const global = await loadLangPack(c.env.ASSETS, lang);
+    const msg = (global && global["common.pathNotExists"]) || "文件不存在";
+    return c.body(errorPage(title, msg), 200, HTML_HEADERS);
+  }
+
+  // 插件页由 app 域(Worker)直出, 与文件流同源, 用 fileView apiKey 签名 URL(无需跨域 cookie)。
+  const fileUrl = isShare
+    ? fileOutUrl(appHost, rawPath) + "&name=/" + encodeURIComponent(fileName)
+    : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
+
+  const rawHash = String((obj as any).httpEtag || (obj as any).etag || `${rawPath}:${(obj as any).size || 0}`);
+  const appHostSlash = appHost.endsWith("/") ? appHost : appHost + "/";
+  const pluginStatic = `${staticPath}plugins/autoViewer/static/`;
+  // 随插件分发的默认字体(与 index.js fontDefaultSort 对齐), 用于 CAD 文字渲染。
+  const cadFontList = ["simplex.shx", "hztxt.shx", "fang-song.ttf", "Roboto-Light.ttf"];
+
+  const info = {
+    fileUrl,
+    fileName,
+    fileHash: rawHash.replace(/"/g, ""),
+    apiCoverSave: "",
+    fileExt: ext,
+  };
+
+  const html = `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>${title}</title>
+<link rel="icon" href="${pluginStatic}images/icon.svg" sizes="any" type="image/svg+xml">
+<link rel="stylesheet" href="${pluginStatic}index.css" type="text/css">
+<link rel="stylesheet" href="${pluginStatic}iconfont/index.css" type="text/css">
+</head><body viewer-type="cad">
+<div id="app"><div class="loading-msg tips-icon" style="display:block">Loading...</div></div>
+<script>
+var kodSdkConfig={api:${JSON.stringify(appHostSlash)},pluginApi:${JSON.stringify(appHostSlash + "index.php?plugin/autoViewer/")}};
+var FILE_INFO=${JSON.stringify(info)};
+var appLang=${JSON.stringify(lang)};
+window.APP_LIB_PATH=${JSON.stringify(pluginStatic)};
+window.CAD_FONT_LIST=${JSON.stringify(JSON.stringify(cadFontList))};
+</script>
+<script src="${staticPath}app/dist/vendor.js" type="text/javascript" charset="utf-8"></script>
+<script src="${staticPath}app/dist/sdk.js" type="text/javascript" charset="utf-8"></script>
+<script type="importmap">{"imports":{"three":"${pluginStatic}dev/threejs/export.js","three/addons/":"${pluginStatic}dev/threejs/","three/examples/jsm/":"${pluginStatic}dev/threejs/","fflate":"${pluginStatic}dev/threejs/libs/fflate.module.js"}}</script>
+<script type="module">import ${JSON.stringify(pluginStatic + "index.js?v=1.11")};</script>
+</body></html>`;
+  return c.body(html, 200, HTML_HEADERS);
+}
+
 /** 001 drawio: 嵌入官方 draw.io 编辑器, autosave/save 消息写回文件。 */
 async function renderDrawio(c: any, params: { rawPath: string; fileName: string; appHost: string; staticPath: string; lang: string }) {
   const { rawPath, fileName, appHost, staticPath, lang } = params;
@@ -782,7 +845,10 @@ async function renderDrawio(c: any, params: { rawPath: string; fileName: string;
 
   const lngShort = lang.slice(0, 2);
   let serverAddr = String(config.serverAddr || "").trim();
-  if (!serverAddr) serverAddr = "https://www.draw.io";
+  // www.draw.io 现 301 到 app.diagrams.net, 后者的 frame-ancestors CSP 只放行微软系域名,
+  // 第三方 iframe 嵌入会被浏览器直接拦截成空白。改用官方嵌入域 embed.diagrams.net
+  // (无 CSP/X-Frame-Options, 支持相同的 embed=1&proto=json 协议)。
+  if (!serverAddr) serverAddr = "https://embed.diagrams.net";
   if (canWrite) {
     serverAddr += `?embed=1&ui=${encodeURIComponent(theme)}&lang=${lngShort}&spin=1&proto=json&editable=false`;
   } else {
@@ -881,10 +947,12 @@ async function renderPhotopea(c: any, params: { rawPath: string; fileName: strin
     script: "",
   });
 
+  // 原版 app.php 自带官方 photopea.com 备选(本地途图图构建带登录门控, 免登录不可用);
+  // 改用官方在线编辑器, 同一份 config JSON(files/server/environment) 协议完全兼容。
   // pp.js 用 JSON.parse(decodeURI(location.hash)) 解析启动配置; 必须用 encodeURI(保留 : / ? & = ,)。
-  // 直接 302 到带 fragment 的静态地址时, 部分 CDN/浏览器会在跨域重定向中丢失或破坏 #, 导致 photopea 空白。
+  // 直接 302 到带 fragment 的跨域地址时, 部分浏览器会在重定向中丢失或破坏 #, 导致 photopea 空白。
   // 改为返回极简跳转页, 由 JS location.replace 设置完整地址(含 fragment), 保证配置送达。
-  const target = `${staticPath}plugins/Photopea/static/photopea/#` + encodeURI(fullUri);
+  const target = "https://www.photopea.com/#" + encodeURI(fullUri);
   const jump = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body><script>location.replace(${JSON.stringify(target)});</script></body></html>`;
   return c.body(jump, 200, HTML_HEADERS);
 }
@@ -1656,6 +1724,10 @@ async function pluginHandler(c: any) {
 
   if (name === "CADViewer") {
     return renderCADViewer(c, { rawPath, fileName, appHost, lang });
+  }
+
+  if (name === "autoViewer") {
+    return renderAutoViewer(c, { rawPath, fileName, ext, appHost, staticPath, lang });
   }
 
   if (name === "drawio") {

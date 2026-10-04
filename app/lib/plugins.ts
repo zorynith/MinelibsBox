@@ -28,7 +28,7 @@ export interface PluginContext {
 }
 
 /** All plugins shipped with the worker (served from ASSETS static/plugins). */
-export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "CADViewer", "drawio", "Photopea", "bisheng", "PDFTron", "officeLive", "yzOffice", "adminer", "client", "fileThumb", "msgWarning", "oauth", "storeImport", "webdav"];
+export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "drawio", "Photopea", "bisheng", "PDFTron", "officeLive", "yzOffice", "adminer", "client", "fileThumb", "msgWarning", "oauth", "storeImport", "webdav", "autoViewer"];
 
 // {{{ helpers mirroring 001 array_get_value/_get }}}
 function arrayGet(obj: any, key: string): any {
