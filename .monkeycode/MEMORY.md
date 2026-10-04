@@ -160,6 +160,8 @@ Entries discovered by the Agent during task execution should follow this format:
   - getAppHost 共三处需同步修改：pages.ts 内联实现、user-system.ts 的 getAppHost、user-api.ts 的 view/options 与 view/manifest 内联逻辑（后两处曾硬编码 PUBLIC_HOST，漏改会导致 appApi 仍指向线上）。
   - 本地调试登录 curl 用 `Cookie: kod_session=<sessionId>`（登录时 accessToken 与 kod_session 值相同）；`kod_session` 为 HttpOnly、`accessToken` 供前端 JS 读取。
   - wrangler dev 偶发 miniflare loopback 崩溃（报 "Network connection lost"、预览 530），多为环境内存紧张（balloon）导致 workerd 被杀；重启 `npx wrangler dev --port 8787` 即可恢复，非代码问题。
+  - wrangler dev 的 esbuild watcher 在向 `static/` 批量新增大量文件（插件字体/wasm 等）时会 Go panic（栈含 `esbuild/internal/bundler`）并退出，期间请求返回 500；应在静态文件全部落盘、代码改完后再启动/重启 dev server，测试与改文件不要交叉进行。
+  - 应用商店插件（autoViewer/drawio/Photopea 等）不在 kodbox 核心仓库内，官方 demo `http://demo.kodcloud.com/plugins/<name>/` 是权威来源；同一版本下 `index.js` 与本地字节一致，可用于比对并补齐缺失资源（字体/`lib/` 依赖/截图等）。
 
 [Project Knowledge Summary]
 - Date: 2026-08-17
