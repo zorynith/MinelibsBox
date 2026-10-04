@@ -4,6 +4,7 @@
  * 再请求目标壁纸站点, 按配置解析(json/正则)出图片列表与分页信息。
  */
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { authRequired } from "../lib/auth";
 import { getSetting } from "../lib/db";
 
@@ -163,7 +164,7 @@ async function loadApi(c: any): Promise<any> {
 }
 
 /** 001 user/viewImage/request */
-viewImageApi.all("/viewImage/request", authRequired, async (c) => {
+const viewImageRequest = async (c: Context<{ Bindings: Env; Variables: Vars }>) => {
   const query = c.req.query();
   const params = { ...(await c.req.parseBody<Record<string, string>>()), ...query };
   const type = params.type === "search" ? "search" : "show";
@@ -202,6 +203,10 @@ viewImageApi.all("/viewImage/request", authRequired, async (c) => {
   result.pageInfo.page = page;
   cacheSet(cacheKey, result);
   return c.json({ code: true, data: result });
-});
+};
+
+viewImageApi.all("/viewImage/request", authRequired, viewImageRequest);
+// 001 user/view/imageRequest: Action('user.viewImage')->request('start') 的转发别名
+viewImageApi.all("/view/imageRequest", authRequired, viewImageRequest);
 
 export { viewImageApi };
