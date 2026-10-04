@@ -396,15 +396,39 @@ accountApi.post("/setting/setHeadImage", authRequired, async (c) => {
 // uploadHeadImage - upload avatar image to R2 (webuploader binary form)
 accountApi.post("/setting/uploadHeadImage", authRequired, async (c) => {
   const user = c.get("currentUser");
-  const formData = await c.req.formData().catch(() => null);
-  if (!formData) return c.json(fail("only support image"));
+  const contentType = c.req.header("Content-Type") || "";
+
+  // 001 uploadHeadImage 委托 explorer.upload::fileUpload, 需同时兼容 multipart /
+  // urlencoded(预检) / sendAsBinary(参数在 query, body 为文件二进制流) 三种请求,
+  // 与 explorer/index/fileUpload 保持一致。
+  let name = "";
+  let checkType = "";
+  let file: File | null = null;
+
+  const isMultipart = contentType.includes("multipart/form-data");
+  const isUrlencoded = contentType.includes("application/x-www-form-urlencoded");
+  if (!isMultipart && !isUrlencoded) {
+    const q = c.req.query();
+    name = q.name || "";
+    checkType = q.checkType || "";
+    if (name) {
+      const buf = await c.req.arrayBuffer();
+      file = new File([buf], name, { type: q.type || "application/octet-stream" });
+    }
+  } else {
+    const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, unknown>;
+    const str = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : "");
+    name = str("name");
+    checkType = str("checkType");
+    file = body["file"] instanceof File ? (body["file"] as File) : null;
+    if (file && !name) name = file.name || "";
+  }
 
   // 秒传/断点续传预检 (webuploader before-send checkHash): 与 explorer/upload/fileUpload 对齐,
   // 返回预检信息让前端走"上传到 Kod"继续上传; 否则上传流程会被 reject 而静默失败。
-  const checkType = String(formData.get("checkType") || "");
   if (checkType) {
     return c.json({
-      code: 1,
+      code: true,
       data: "success",
       info: {
         checkChunkArray: {},
@@ -417,16 +441,15 @@ accountApi.post("/setting/uploadHeadImage", authRequired, async (c) => {
     });
   }
 
-  const file = formData.get("file") as File | null;
   if (!file) return c.json(fail("only support image"));
 
-  const ext = (file.name || "").split(".").pop()?.toLowerCase() || "webp";
+  const ext = (name || file.name || "").split(".").pop()?.toLowerCase() || "";
   if (!["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico"].includes(ext)) {
     return c.json(fail("only support image"));
   }
   try {
     const key = getUserFileKey(user.username, `.system/avatar/avata-${user.id}.${ext}`);
-    await c.env.FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || getFileMimeType(file.name) } });
+    await c.env.FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || getFileMimeType(name || file.name) } });
     const appHost = getAppHost(c);
     const downloadPath = `${appHost}explorer/fileProxy?path=${encodeURIComponent(`.system/avatar/avata-${user.id}.${ext}`)}`;
     await addAuditLog(c.env.DB, "user.uploadHeadImage", user.id, null, null, null, key);

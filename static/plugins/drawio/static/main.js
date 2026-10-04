@@ -48,4 +48,10 @@ kodReady.push(function() {
     Events.bind('rightMenu.beforeShow@.menu-path-guest-body', menuLoad);
     // 工具栏“新建更多”菜单
     Events.bind('rightMenu.beforeShow@.menu-toolbar-new-file-others', menuLoad);
+
+    // 文件列表图标: 001 drawio 插件通过 $.addStyle 注入 .x-item-icon.x-drawio,
+    // 否则 drawio/xml 文件图标会回退为默认白纸 icon。
+    $.addStyle("\
+    .x-item-icon.x-drawio{background-image:url('{{pluginHost}}static/images/icon.png');}\
+    ");
 });

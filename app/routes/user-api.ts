@@ -3,7 +3,7 @@
  * These are the critical APIs the 003 SPA needs to bootstrap
  */
 import { Hono } from "hono";
-import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions } from "../lib/db";
+import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions, addAuditLog } from "../lib/db";
 import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, authRequired } from "../lib/auth";
 import { parseKodPassword } from "../lib/mcrypt";
 import { DEV_KOD, devLicenseHashes } from "../lib/license";
@@ -115,6 +115,11 @@ userApi.post("/index/loginSubmit", async (c) => {
   // Set accessToken cookie too (003 SPA checks this).
   // Must append, otherwise it overwrites the kod_session Set-Cookie above.
   c.header("Set-Cookie", `accessToken=${sessionId}; Path=/; Max-Age=${maxAge}; SameSite=Lax`, { append: true });
+
+  // 登录日志 (001 admin/log::loginLog → model->addLog('user.index.loginSubmit', ...))
+  const ip = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || "";
+  const ua = c.req.header("user-agent") || "";
+  await addAuditLog(c.env.DB, "user.index.loginSubmit", user.id as number, null, ip, ua, null).catch(() => {});
 
   // 001: show_json('ok', true, accessToken) —— data 固定 'ok', info 为 accessToken, 官方客户端据此认证。
   // worker accessToken 即会话 id (与 kod_session cookie 等价), 供客户端通过 query accessToken 携带。

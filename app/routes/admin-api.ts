@@ -1794,10 +1794,10 @@ adminApi.all("/log/get", async (c) => {
   const where: string[] = [];
   const args: any[] = [];
   if (q.type) {
-    const entry = Object.entries(LOG_ACTION_MAP).find(([, m]) => m.type === q.type);
-    if (entry) {
-      where.push("action = ?");
-      args.push(entry[0]);
+    const actions = Object.entries(LOG_ACTION_MAP).filter(([, m]) => m.type === q.type).map(([a]) => a);
+    if (actions.length) {
+      where.push(`action IN (${actions.map(() => "?").join(",")})`);
+      args.push(...actions);
     }
   }
   if (q.userID) {
@@ -1828,12 +1828,14 @@ adminApi.all("/log/get", async (c) => {
   const list = (rows.results as any[]).map((r) => {
     const m = LOG_ACTION_MAP[r.action] || { type: r.action, title: r.action };
     const userInfo = userMap[r.user_id];
+    const ua = r.user_agent || "";
     return {
       id: r.id,
       type: m.type,
       title: m.title,
-      desc: { path: r.path || "", type: "folder" },
+      desc: { path: r.path || "", type: "folder", ua },
       userID: r.user_id || 0,
+      ua,
       userInfo: userInfo
         ? { name: userInfo.name, nickName: userInfo.nickName }
         : { name: "系统" },
