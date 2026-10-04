@@ -480,6 +480,10 @@ function fileStreamResponse(c: any, obj: any, name: string) {
   headers.set("Content-Type", getFileMimeType(name));
   headers.set("Content-Disposition", `inline; filename="${encodeURIComponent(name)}"`);
   headers.set("Cache-Control", "public, max-age=3600");
+  // 插件前端(Photopea 等)部署在 static 域 iframe, 跨域读取文件流需要 CORS
+  headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "*");
   if (obj.writeHttpMetadata) obj.writeHttpMetadata(headers);
   return new Response(obj.body, { headers });
 }
@@ -741,7 +745,7 @@ async function renderCADViewer(c: any, params: { rawPath: string; fileName: stri
   const fileUrl = isShare
     ? fileOutUrl(appHost, rawPath)
     : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
-  const target = "https://sharecad.org/cadframe/load?url=" + encodeURIComponent(fileUrl);
+  const target = "https://iframe.sharecad.org/cadframe/load?url=" + encodeURIComponent(fileUrl);
   return c.redirect(target, 302);
 }
 
@@ -874,7 +878,9 @@ async function renderPhotopea(c: any, params: { rawPath: string; fileName: strin
     script: "",
   });
 
-  const target = `${staticPath}plugins/Photopea/static/photopea/#` + fullUri;
+  // pp.js 用 JSON.parse(decodeURI(location.hash)) 解析启动配置;
+  // 必须用 encodeURI(保留 : / ? & = ,) 而非 encodeURIComponent, 否则 decodeURI 不解码 %3A 等导致 JSON 解析失败。
+  const target = `${staticPath}plugins/Photopea/static/photopea/#` + encodeURI(fullUri);
   return c.redirect(target, 302);
 }
 
