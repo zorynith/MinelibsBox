@@ -878,10 +878,12 @@ async function renderPhotopea(c: any, params: { rawPath: string; fileName: strin
     script: "",
   });
 
-  // pp.js 用 JSON.parse(decodeURI(location.hash)) 解析启动配置;
-  // 必须用 encodeURI(保留 : / ? & = ,) 而非 encodeURIComponent, 否则 decodeURI 不解码 %3A 等导致 JSON 解析失败。
+  // pp.js 用 JSON.parse(decodeURI(location.hash)) 解析启动配置; 必须用 encodeURI(保留 : / ? & = ,)。
+  // 直接 302 到带 fragment 的静态地址时, 部分 CDN/浏览器会在跨域重定向中丢失或破坏 #, 导致 photopea 空白。
+  // 改为返回极简跳转页, 由 JS location.replace 设置完整地址(含 fragment), 保证配置送达。
   const target = `${staticPath}plugins/Photopea/static/photopea/#` + encodeURI(fullUri);
-  return c.redirect(target, 302);
+  const jump = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body><script>location.replace(${JSON.stringify(target)});</script></body></html>`;
+  return c.body(jump, 200, HTML_HEADERS);
 }
 
 /** Photopea 保存回调: POST 流前 2000 字节为 JSON 头, 剩余为图片二进制, 写回 R2/S3。
