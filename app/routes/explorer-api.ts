@@ -34,6 +34,7 @@ import { taskResultSet } from "../lib/task-result-cache";
 import { listViewSave, listViewApply } from "../lib/list-view";
 import { mcryptEncode, mcryptDecode } from "../lib/mcrypt";
 import { parseShareItemPath, listUserShareVirtual, listShareItemDir, listShareToMeVirtual, shareItemFileOut } from "./share-api";
+import { checkAllowPassword, folderPasswordNeed, folderPasswordChildNeed, parentVirtualDir } from "../lib/folder-password";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const explorerApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -75,6 +76,16 @@ function decodeBase64(s: string): string {
 /** Normalize a virtual/real path to a trailing-slash directory path. */
 function normDirPath(p: string): string {
   return toRealPath(p);
+}
+
+/** 对齐 PHP htmlentities (folderTips 描述转义)。 */
+function htmlEntities(s: string): string {
+  return (s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 /** 001 explorerUpload::pathAllowReplace: 将文件名非法字符替换为下划线。 */
@@ -1762,20 +1773,34 @@ explorerApi.all("/list/path", async (c) => {
     // 001 listView::listDataSet: 当前路径生效的显示模式/排序偏好
     const listView = await listViewApply(c.env.DB, user.id, parsed.thisPath);
 
-    return c.json({
-      code: true,
-      data: {
-        current,
-        folderList,
-        fileList,
-        groupList,
-        groupShow,
-        pageInfo: { totalNum: totalNum + groupList.length, pageNum, page, pageTotal },
-        thisPath: parsed.thisPath,
-        targetSpace,
-        ...listView,
-      },
-    });
+    const responseData: Record<string, unknown> = {
+      current,
+      folderList,
+      fileList,
+      groupList,
+      groupShow,
+      pageInfo: { totalNum: totalNum + groupList.length, pageNum, page, pageTotal },
+      thisPath: parsed.thisPath,
+      targetSpace,
+      ...listView,
+    };
+
+    // 001 listPassword::appendSafe: 当前(或上层)文件夹需要密码时清空列表并下发提示
+    const passInput = typeof params.folderPassword === "string" ? params.folderPassword : "";
+    const passInfo = await checkAllowPassword(c.env, user, source, virtualDir, passInput);
+    if (passInfo) {
+      const tips = "explorer.folderPass.tips;" + htmlEntities(passInfo.folderPasswordDesc || "");
+      responseData.folderList = [];
+      responseData.fileList = [];
+      responseData.groupList = [];
+      delete responseData.groupShow;
+      responseData.pageInfo = { totalNum: 0, pageNum, page, pageTotal: 1 };
+      responseData.folderTips = tips;
+      responseData.pathDesc = tips;
+      responseData.folderPasswordNeed = folderPasswordNeed(passInfo);
+    }
+
+    return c.json({ code: true, data: responseData });
   } catch (err: any) {
     return c.json({ code: false, data: err.message });
   }
@@ -2876,6 +2901,10 @@ async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment
   if (rootDisabledActions(src.source, src.relPath, disposition === "attachment" ? "fileDownload" : "fileOut")) {
     return c.json({ code: false, data: "explorer.pathNotSupport" });
   }
+  // 001 listPassword::authCheck: 上层加密文件夹未通过校验时禁止预览/下载
+  const passInput = typeof params.folderPassword === "string" ? params.folderPassword : "";
+  const passInfo = await checkAllowPassword(c.env, user, src.source, parentVirtualDir(path), passInput);
+  if (passInfo) return c.json({ code: false, data: "explorer.folderPass.tips" });
   // 001 auth: 下载/预览需 download 权限 (含文档单独权限覆盖)
   const dlAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD, "common.noPermission", fileSourceID(path));
   if (!dlAuth.ok) return c.json({ code: false, data: dlAuth.error });
@@ -3296,6 +3325,20 @@ explorerApi.all("/index/zipDownload", async (c) => {
   const items = parseDataArr(params.dataArr);
   if (items.length === 0) return emit(false, "参数错误");
 
+  // 001 listPassword::authCheck: 压缩下载前校验加密文件夹
+  {
+    const zipPw = typeof params.folderPassword === "string" ? params.folderPassword : "";
+    for (const it of items) {
+      const zsrc = await resolveFileSource(c.env, user, it.path);
+      if (!zsrc.ok) continue;
+      const zdir = it.path.endsWith("/") ? it.path : parentVirtualDir(it.path);
+      if (await checkAllowPassword(c.env, user, zsrc.source, zdir, zipPw)) return emit(false, "explorer.folderPass.tips");
+      if (it.path.endsWith("/") && await folderPasswordChildNeed(c.env, user, zsrc.source, zdir)) {
+        return emit(false, "explorer.folderPass.tipsHas");
+      }
+    }
+  }
+
   try {
     const zip = new JSZip();
     const ctx: ZipContext = { zip, total: 0 };
@@ -3651,6 +3694,9 @@ async function editorFileGetHandler(c: AppContext) {
 
   const src = await resolveFileSource(c.env, user, path);
   if (!src.ok) return c.json({ code: false, data: src.error });
+  // 001 listPassword::authCheck: 上层加密文件夹未通过校验时禁止读取
+  const getPass = await checkAllowPassword(c.env, user, src.source, parentVirtualDir(path), typeof params.folderPassword === "string" ? params.folderPassword : "");
+  if (getPass) return c.json({ code: false, data: "explorer.folderPass.tips" });
   // 001 auth: 读取文件需 view 权限 (含文档单独权限覆盖)
   const getAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, "common.noPermission", fileSourceID(path));
   if (!getAuth.ok) return c.json({ code: false, data: getAuth.error });
@@ -3695,6 +3741,9 @@ explorerApi.all("/editor/fileSave", async (c) => {
   if (rootDisabledActions(src.source, src.relPath, "fileSave")) {
     return c.json({ code: false, data: "explorer.pathNotSupport" });
   }
+  // 001 listPassword::authCheck: 上层加密文件夹未通过校验时禁止保存
+  const savePass = await checkAllowPassword(c.env, user, src.source, parentVirtualDir(path), typeof params.folderPassword === "string" ? params.folderPassword : "");
+  if (savePass) return c.json({ code: false, data: "explorer.folderPass.tips" });
   // 001 auth: 编辑器保存需 edit 权限 (含文档单独权限覆盖)
   const editAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, "common.noPermission", fileSourceID(path));
   if (!editAuth.ok) return c.json({ code: false, data: editAuth.error });

@@ -340,6 +340,15 @@ export async function initDatabase(db: D1Database): Promise<void> {
       UNIQUE (sourceID, key)
     )`,
 
+    // 加密文件夹会话 (mirrors 001 Session folderPassword_{sourceID}: 记录已通过校验的文件夹密码)
+    `CREATE TABLE IF NOT EXISTS folder_password (
+      userID INTEGER NOT NULL,
+      sourceID TEXT NOT NULL,
+      password TEXT NOT NULL,
+      time INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (userID, sourceID)
+    )`,
+
     // 最近访问 (mirrors 001 explorer listRecent: 记录用户最近打开的文件/文件夹)
     `CREATE TABLE IF NOT EXISTS recent (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -538,12 +547,11 @@ export async function initDatabase(db: D1Database): Promise<void> {
       `INSERT OR IGNORE INTO io_source (id, name, driver, size_max, is_default, system, config, status, add_time, edit_time)
        VALUES (1, '系统存储', 'minio', 10737418240, 1, 1, '{}', 1, 0, 0)`
     ),
+    // 修复历史脏数据: 仅当 authID 为空/0 或引用了不存在的 auths 记录时才回填为默认用户(3);
+    // 绝不覆盖合法的 authID(1/2/3 及自定义角色)，否则每次冷启动都会破坏成员权限(对齐 001 角色持久语义)。
     db.prepare(
-      `UPDATE user_groups SET authID = CASE
-         WHEN authID IN (1, 2) THEN 1
-         WHEN authID = 3 THEN 3
-         ELSE 3 END
-       WHERE authID IS NOT NULL`
+      `UPDATE user_groups SET authID = 3
+       WHERE authID IS NULL OR authID = 0 OR authID NOT IN (SELECT id FROM auths)`
     ),
   ]);
 
@@ -687,6 +695,22 @@ export async function setSourceMetaBulk(db: D1Database, sourceID: string | numbe
   for (const [k, v] of Object.entries(obj)) {
     await setSourceMeta(db, sourceID, k, v === null || v === undefined ? "" : String(v));
   }
+}
+
+// 加密文件夹会话 (mirrors 001 Session folderPassword_{sourceID})
+export async function getFolderPasswordSession(db: D1Database, userID: number, sourceID: string | number): Promise<string | null> {
+  const row = await db.prepare("SELECT password FROM folder_password WHERE userID = ? AND sourceID = ?")
+    .bind(userID, String(sourceID)).first<{ password: string }>()
+    .catch(() => null);
+  return row?.password ?? null;
+}
+
+export async function setFolderPasswordSession(db: D1Database, userID: number, sourceID: string | number, password: string) {
+  const now = Math.floor(Date.now() / 1000);
+  return db.prepare(
+    `INSERT INTO folder_password (userID, sourceID, password, time) VALUES (?, ?, ?, ?)
+     ON CONFLICT(userID, sourceID) DO UPDATE SET password = excluded.password, time = excluded.time`
+  ).bind(userID, String(sourceID), password, now).run();
 }
 
 // Verify codes (image captcha + message codes) - mirrors 001 Session/Cache

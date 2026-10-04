@@ -342,3 +342,23 @@ Entries discovered by the Agent during task execution should follow this format:
   - 判断插件缺失是否为"末尾截断"：若缺失项恰好是 `ALL_PLUGINS` 末尾连续若干个，优先怀疑子请求超限，而非插件本身数据/状态问题。
   - 所有 JSON API 响应统一加 `Cache-Control: no-store`（`app/routes/api.ts` 全局中间件，仅对未显式设置缓存头的 `application/json` 生效），避免 CDN(EdgeOne)/浏览器缓存旧接口结果造成"代码已修但页面不更新"的假象。
 
+[Project Knowledge Summary]
+- Date: 2026-10-04
+- Context: Discovered by Agent while performing 对照 001(4e484d3) 逐项调研未复刻接口
+- Category: Troubleshooting & Debugging / Workflow & Collaboration
+- Instructions:
+  - `/workspace/001` 只包含控制器/插件/静态资源源码，**不含核心框架**（`Controller`/`Application`/`Model`/`ModelBase`/`IO`/`KodIO`/`Session`/`Auth` 等类定义均缺失，`app/core` 与 `app/model` 目录不存在）。因此契约细节需结合 `/workspace/app/routes/*.ts` 现有实现与 001 控制器源码交叉推断，不能直接读框架基类。
+  - 001 action 命名规则：文件 `app/controller/{mod}/{sub}.class.php` 的类 `{mod}{Sub}`，public 方法即 action；URL 形如 `{mod}/{sub}/{method}`（如 `explorer/listDriver/get`）。父类 `Controller` 的构造会解析 `$this->in`（合并 query+POST）并做权限/登录校验，Worker 端在各自 `*Api.all(...)` 里等价处理。
+  - 用户给出的「未复刻清单」是按 001 私有方法名在 Worker 源码里 grep 命中数（多为 0）生成的，**并不代表功能完全缺失**：`listDriver/get`、`listDriver/rootList`、`listRecent/listData`、`listSafe/*`、`listGroup/self`、`listView/dataSave/fileList`、`attachment/upload|commentLink|noticeLink|clearCache`、`plugin` 系列 `client/oauth/msgWarning/fileThumb` 后端、`adminer` 等均已存在。核对缺口时应以 001 public action 列表 vs Worker 路由注册（`app/routes/*.ts` 的 `.all("/mod/sub/act")`）为准，而非按私有 helper 名判断。
+  - 001 部分控制器/插件依赖 `filter/*` hook 机制（如 `filter.userGroup`、`filter.attachment`）；Worker 无通用 hook 体系，相关逻辑需在对应 handler 内联实现或显式调用。
+  - 复刻后的前端资源仍以 `static/app/dist` 根目录为准，`dist/dev` 反混淆文件仅用于定位参考。
+
+
+[Project Knowledge Summary]
+- Date: 2026-10-04
+- Context: Discovered by Agent while implementing explorer/listPassword (加密文件夹密码)
+- Category: Build Methods / Testing Methods / Troubleshooting & Debugging
+- Instructions:
+  - 本仓库未提交 `wrangler.jsonc`（gitignore）。本地启动服务：`cp wrangler.jsonc.example wrangler.jsonc`（示例 database_id 为占位符，local 模式可用），再 `npx wrangler dev --port 8787 --local`；首次请求会跑 `initDatabase()` 并 seed admin（admin/admin123）。D1/R2 状态持久化在 `.wrangler/state`，重启 dev 不丢数据。
+  - 验证接口用 URL 形如 `/index.php?{mod}/{sub}/{act}`，admin 登录 `explorer` 需带 cookie（`curl -c jar -b jar`）。测试只读成员权限时注意：`initDatabase()` 的 seed 批量里含 `UPDATE user_groups SET authID = CASE WHEN authID IN (1,2) THEN 1 WHEN authID=3 THEN 3 ELSE 3 END`，**每次 worker 冷启动/重启都会执行**，会把成员 authID=2 强制改成 1（完全控制）→ 只读成员实际拥有 edit 权限。本地测试只读成员需临时 `UPDATE auths SET auth=391 WHERE id=3`（391=show/view/download/comment/event，不含 edit=16）后把成员设为 authID=3。
+  - 加密文件夹复刻：`app/lib/folder-password.ts`（`checkAllowPassword`/`folderPasswordNeed`/`folderPasswordChildNeed`/`folderPathChain`/`parentVirtualDir`；sourceID 用与 explorer-api `fileSourceID` 相同的 FNV-1a 路径 hash），会话表 `folder_password(userID,sourceID,password)`（`migrations/0008_folder_password.sql` + `initDatabase`）。挂载点：`/list/path` 的 `appendSafe`（清空列表+`folderTips`/`folderPasswordNeed`）、`fileOutHandler`、`editor/fileGet`、`editor/fileSave`、`zipDownload`。R2 目录占位 key 以 `/` 结尾，扫描子目录密码时判断 `inner.endsWith("/")` 才能保留目录段，否则 `pop()` 会把目录名丢掉。
