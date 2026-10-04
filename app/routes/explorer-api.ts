@@ -45,6 +45,17 @@ explorerApi.use("*", authRequired);
 
 type AppContext = any;
 
+/** 001 explorer/share::link - 生成加密外链 (mcrypt path -> /share/file?hash=)。 */
+async function fileHashLink(c: AppContext, path: string, downFilename = ""): Promise<string> {
+  const pass = (await getSetting(c.env.DB, "systemPassword")) || "";
+  const hash = mcryptEncode(path, pass);
+  const name = path.split("/").filter(Boolean).pop() || "";
+  const addParam = downFilename
+    ? "&downFilename=" + encodeURIComponent(downFilename)
+    : "&name=/" + encodeURIComponent(name);
+  return getAppHost(c) + "index.php?explorer/share/file&hash=" + encodeURIComponent(hash) + addParam;
+}
+
 /** Merge query + form-encoded body + json body into a single params object. */
 async function reqParams(c: AppContext): Promise<Record<string, any>> {
   const result: Record<string, any> = {};
@@ -2047,7 +2058,7 @@ explorerApi.all("/index/pathInfo", async (c) => {
           createTime: new Date().toISOString(),
           metaInfo: meta,
           desc: meta.desc || "",
-          downloadPath: `explorer/index/fileDownload?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`,
+          downloadPath: await fileHashLink(c, path),
         });
       }
     }
@@ -2863,10 +2874,14 @@ function fileStreamResponse(c: AppContext, obj: any, name: string, disposition: 
   return new Response(obj.body, { headers });
 }
 
-async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment") {
+export async function fileOutHandler(
+  c: AppContext,
+  disposition: "inline" | "attachment",
+  overrides?: { path?: string; name?: string }
+) {
   const user = c.get("currentUser");
   const params = await reqParams(c);
-  const path = typeof params.path === "string" ? params.path : "";
+  const path = overrides?.path ?? (typeof params.path === "string" ? params.path : "");
   if (!path) return c.json({ code: false, data: "参数错误" });
 
   // 分享给我的项: {shareItem:<id>}/... 下载/预览
@@ -2920,10 +2935,10 @@ async function fileOutHandler(c: AppContext, disposition: "inline" | "attachment
   if (!obj) return c.json({ code: false, data: "Not found" });
 
   // 001 fileOutUpdate -> updateLastOpen: 记录最近打开时间
-  await updateLastOpen(c.env.DB, path, user.id).catch(() => {});
+  if (user) await updateLastOpen(c.env.DB, path, user.id).catch(() => {});
 
-  const name = (typeof params.name === "string" && params.name) ? params.name : path.split("/").filter(Boolean).pop() || "file";
-  if (disposition === "attachment") {
+  const name = overrides?.name || ((typeof params.name === "string" && params.name) ? params.name : path.split("/").filter(Boolean).pop() || "file");
+  if (disposition === "attachment" && user) {
     await addAuditLog(c.env.DB, "download", user.id, path, null, null, null);
   }
   return fileStreamResponse(c, obj, name, disposition);
@@ -4083,7 +4098,7 @@ async function sha256Hex(s: string): Promise<string> {
 }
 
 /** 001 契约: fileInfo=1 时 info 返回文件信息对象, 否则返回最终文件虚拟路径字符串。 */
-function uploadInfoJson(virtualDir: string, fileName: string, size: number, fileInfo: string): string | Record<string, unknown> {
+async function uploadInfoJson(c: AppContext, virtualDir: string, fileName: string, size: number, fileInfo: string): Promise<string | Record<string, unknown>> {
   const fullPath = virtualDir + fileName;
   if (fileInfo === "1") {
     return {
@@ -4093,7 +4108,7 @@ function uploadInfoJson(virtualDir: string, fileName: string, size: number, file
       pathDisplay: displayPath(fullPath),
       ext: fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "",
       createTime: Math.floor(Date.now() / 1000),
-      downloadPath: "",
+      downloadPath: await fileHashLink(c, fullPath),
     };
   }
   return fullPath;
@@ -4257,7 +4272,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
     const exist = await headObject(c, src.source, destDir + destName);
     if (exist) {
       if (repeat === "skip") {
-        return c.json({ code: true, data: "skiped", info: uploadInfoJson(respVirtualDir, destName, size || file.size, fileInfo) });
+        return c.json({ code: true, data: "skiped", info: await uploadInfoJson(c, respVirtualDir, destName, size || file.size, fileInfo) });
       }
       if (repeat === "rename") {
         destName = await uniqueNameInDirSrc(c, src.source, destDir, destName);
@@ -4373,7 +4388,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
 
     await addAuditLog(c.env.DB, "upload", user.id, destDir + fileName, null, null, `Size: ${size || file.size}`);
     invalidateSpaceUsageByBase(src.source.baseKey);
-    return c.json({ code: true, data: "上传成功", info: uploadInfoJson(respVirtualDir, fileName, size || file.size, fileInfo) });
+    return c.json({ code: true, data: "上传成功", info: await uploadInfoJson(c, respVirtualDir, fileName, size || file.size, fileInfo) });
   } catch (err: any) {
     return c.json({ code: false, data: err.message });
   }
@@ -4524,7 +4539,7 @@ explorerApi.post("/attachment/upload", async (c) => {
     }
     await addAuditLog(c.env.DB, "upload", user.id, relPath, null, null, `Size: ${file.size}`);
     invalidateSpaceUsageByBase(home.baseKey);
-    return c.json({ code: true, data: "上传成功", info: uploadInfoJson("/attachmentTemp/", fileName, file.size, body["fileInfo"] === "1" ? "1" : "") });
+    return c.json({ code: true, data: "上传成功", info: await uploadInfoJson(c, "/attachmentTemp/", fileName, file.size, body["fileInfo"] === "1" ? "1" : "") });
   } catch (err: any) {
     return c.json({ code: false, data: err.message });
   }

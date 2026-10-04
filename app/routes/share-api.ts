@@ -10,19 +10,21 @@
  *  - 错误码：30100 不存在、30101 过期、30102 下载超限、30103 需登录、30104 需密码。
  */
 import { Hono } from "hono";
-import { authOptional, authRequired } from "../lib/auth";
+import { authOptional, authRequired, getSessionId } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
-import { getUserById, addAuditLog, getSetting } from "../lib/db";
+import { getUserById, addAuditLog, getSetting, getUserOption, setUserOption } from "../lib/db";
+import { getAppHost } from "../lib/user-system";
+import { t } from "../lib/i18n";
 import { getUserFileKey, listDirectory, getFileMimeType, keyFromBase } from "../lib/r2";
 import { resolveFileSource } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { ioClientOf } from "../lib/io";
 import { getGroupAuthValue } from "../lib/source-auth";
-import { md5, mcryptDecode } from "../lib/mcrypt";
+import { md5, mcryptDecode, mcryptEncode } from "../lib/mcrypt";
 import JSZip from "jszip";
 import { readZipCentralDirectory } from "../lib/zip-central";
 import type { ZipCentralRangeResult } from "../lib/zip-central";
-import { safeZipEntryName, zipDecodeFileName, parseZipInnerPath } from "./explorer-api";
+import { safeZipEntryName, zipDecodeFileName, parseZipInnerPath, fileOutHandler } from "./explorer-api";
 import type { ShareRow } from "../lib/share";
 import {
   shareOptions,
@@ -644,8 +646,25 @@ async function resolveShareSourceForUser(env: Env, user: AuthUser, path: string)
 const shareApi = new Hono<{ Bindings: Env; Variables: Vars }>();
 shareApi.use("/share/*", authOptional);
 shareApi.use("/userShare/*", authRequired);
+shareApi.use("/userShareGroup/*", authRequired);
+shareApi.use("/userShareUser/*", authRequired);
 
 // ---------- 外链落地页（公开） ----------
+
+// file - 通用加密外链落地 (001 explorer/share::file; path 由 hash 解密)
+shareApi.all("/share/file", async (c) => {
+  const params = await reqParams(c);
+  const hash = typeof params.hash === "string" ? params.hash : "";
+  if (!hash || hash.length > 5000) return c.json({ code: false, data: L.pathNotExists });
+  const pass = (await getSetting(c.env.DB, "systemPassword")) || "";
+  const path = hash ? mcryptDecode(hash, pass) : "";
+  if (!path) return c.json({ code: false, data: "common.pathNotExists" });
+  const isDownload = String(params.download ?? "") === "1";
+  const downFilename = typeof params.downFilename === "string" ? params.downFilename : "";
+  const rawName = typeof params.name === "string" ? params.name.replace(/^\/+/, "") : "";
+  const name = downFilename || rawName || undefined;
+  return fileOutHandler(c, isDownload ? "attachment" : "inline", { path, name });
+});
 
 // get - 分享信息（落地页初始化）
 shareApi.all("/share/get", async (c) => {
@@ -1562,12 +1581,79 @@ shareApi.all("/userShare/del", async (c) => {
   return c.json({ code: true, data: L.success });
 });
 
-// shareDisplay / shareExit - "分享给我的" 场景（003 无内部协作，直接返回成功）
+// shareDisplay - 隐藏/显示 "分享给我的" 列表项 (001 explorer/userShare::shareDisplay)
 shareApi.all("/userShare/shareDisplay", async (c) => {
+  const user = c.get("currentUser")!;
+  const params = await reqParams(c);
+  const shareArr = parseJsonArray(params.shareArr);
+  const isHide = String(params.isHide ?? "1") === "1";
+  const hide = await getUserShareHide(c.env.DB, user.id);
+  for (const raw of shareArr) {
+    const key = String(raw);
+    if (isHide) hide[key] = "1";
+    else delete hide[key];
+  }
+  await setUserOption(c.env.DB, user.id, "hideList", JSON.stringify(hide), "shareToMe");
   return c.json({ code: true, data: L.success });
 });
+
+// shareExit - 退出与我协作的分享 (001 explorer/userShare::shareExit)
 shareApi.all("/userShare/shareExit", async (c) => {
-  return c.json({ code: true, data: L.success });
+  const user = c.get("currentUser")!;
+  const params = await reqParams(c);
+  const shareArr = parseJsonArray(params.shareArr);
+  const errors: string[] = [];
+  for (const raw of shareArr) {
+    const shareID = parseInt(String(raw), 10);
+    const share = await getShareById(c.env.DB, shareID);
+    if (!share || share.isShareTo !== 1) {
+      errors.push(t("explorer.share.notExist"));
+      continue;
+    }
+    const targets = await getShareToList(c.env.DB, shareID);
+    const selfIndex = targets.findIndex((tt) => tt.targetType === 1 && tt.targetID === user.id);
+    if (selfIndex < 0) {
+      errors.push("share target not include you");
+      continue;
+    }
+    const rest = targets.filter((_, i) => i !== selfIndex);
+    if (rest.length === 0 && share.isLink === 0) {
+      await removeShares(c.env.DB, [shareID]);
+      await removeShareToByShareIds(c.env.DB, [shareID]);
+    } else {
+      await replaceShareTo(
+        c.env.DB,
+        shareID,
+        rest.map((tt) => ({ targetType: String(tt.targetType), targetID: String(tt.targetID), authID: String(tt.authID) }))
+      );
+    }
+  }
+  const ok = errors.length === 0;
+  return c.json({ code: ok, data: ok ? L.success : errors.join(",") });
+});
+
+// shareToMe - 与我协作内容（list / group / user 三种展示方式，001 explorer/userShare::shareToMe）
+shareApi.all("/userShare/shareToMe", async (c) => {
+  const user = c.get("currentUser")!;
+  const params = await reqParams(c);
+  const type = typeof params.type === "string" ? params.type : "";
+  return c.json({ code: true, data: await shareToMeDispatch(c.env, user, type) });
+});
+
+// ============ 与我协作：按组织架构/按分享者（001 explorer/userShareGroup、explorer/userShareUser）============
+
+shareApi.all("/userShareGroup/get", async (c) => {
+  const user = c.get("currentUser")!;
+  const params = await reqParams(c);
+  const id = typeof params.id === "string" ? params.id : "";
+  return c.json({ code: true, data: await userShareGroupGet(c.env, user, id) });
+});
+
+shareApi.all("/userShareUser/get", async (c) => {
+  const user = c.get("currentUser")!;
+  const params = await reqParams(c);
+  const id = typeof params.id === "string" ? params.id : "";
+  return c.json({ code: true, data: await userShareUserGet(c.env, user, id) });
 });
 
 // ============ 导出（供 explorer-api 虚拟路径使用） ============
@@ -1980,6 +2066,269 @@ export async function listShareToMeVirtual(
     return listShareToMeByUser(env, user, parseInt(uMatch[1], 10), thisPath);
   }
   return listShareToMeRoot(env, user, thisPath);
+}
+
+/** 解析 JSON 数组参数（前端 shareArr 等）。 */
+function parseJsonArray(raw: any): any[] {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== "string" || !raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 读取 "分享给我" 隐藏列表（user_option type=shareToMe, key=hideList）。 */
+async function getUserShareHide(db: D1Database, userId: number): Promise<Record<string, string>> {
+  const raw = await getUserOption(db, userId, "hideList", "shareToMe");
+  if (!raw) return {};
+  try {
+    const o = JSON.parse(raw);
+    return o && typeof o === "object" ? (o as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+type ShareListItem = Record<string, unknown>;
+
+/** 001 explorer/userShare::shareToMeListMake - 平铺列出与我协作的内容。 */
+export async function shareToMeListMake(
+  env: Env,
+  user: AuthUser,
+  type: string
+): Promise<Record<string, unknown>> {
+  const groupTree = await getUserGroupTree(env.DB, user.id);
+  const shares = await listShareToMeForUser(env.DB, user.id, groupTree);
+  const hide = await getUserShareHide(env.DB, user.id);
+  const folderList: ShareListItem[] = [];
+  const fileList: ShareListItem[] = [];
+
+  for (const share of shares) {
+    const opts = shareOptions(share);
+    const timeout = parseInt(String(opts.shareToTimeout ?? "0"), 10) || 0;
+    if (timeout > 0 && timeout < Math.floor(Date.now() / 1000)) continue;
+
+    // 系统分享 (userID=0): 001 getInfoSimpleOuter(0) 返回系统用户;
+    let ownerInfo: { id: number; username: string; nickname: string };
+    if (share.userID === 0) {
+      ownerInfo = { id: 0, username: "system", nickname: "system" };
+    } else {
+      const owner = (await getUserById(env.DB, share.userID)) as ShareItemUser | null;
+      if (!owner) continue;
+      ownerInfo = { id: owner.id, username: owner.username, nickname: owner.nickname || owner.username };
+    }
+    const item = await shareToMeItemMake(env, share, ownerInfo);
+    if (!item) continue;
+
+    const shareHide = hide[String(share.shareID)] ? 1 : 0;
+    item.shareHide = shareHide;
+    if (type === "" && shareHide) continue;
+    if (type === "hide" && !shareHide) continue;
+
+    if (share.userID === 0) item.isFromSystem = "1";
+    (item.isFolder ? folderList : fileList).push(item);
+  }
+
+  const result: Record<string, unknown> = {
+    folderList,
+    fileList,
+    currentFieldAdd: {
+      pathDesc: "[" + t("admin.setting.shareToMeList") + "]," + t("explorer.pathDesc.shareToMe"),
+    },
+  };
+  // 001 shareToMeListMake: 数量 > 3 时按 用户/系统/外部分享 分组展示。
+  const length = folderList.length + fileList.length;
+  if (length > 3) {
+    result.groupShow = [
+      {
+        type: "userData",
+        title: t("explorer.toolbar.shareToMe"),
+        filter: { shareID: "", isFromSystem: "_null_", isShareOut: "_null_" },
+      },
+      {
+        type: "systemData",
+        title: t("explorer.share.shareSystem"),
+        desc: t("explorer.share.shareSystemDesc"),
+        filter: { isFromSystem: "", isShareOut: "_null_" },
+      },
+      {
+        type: "outerData",
+        title: t("explorer.shareOut.titlePath"),
+        desc: t("explorer.shareOut.titlePathDesc"),
+        filter: { isShareOut: "" },
+      },
+    ];
+  }
+  return result;
+}
+
+/** 001 explorer/userShareUser::listRoot - 按分享者列出与我协作的用户。 */
+export async function listShareToMeUserRoot(
+  env: Env,
+  user: AuthUser,
+  thisPath: string
+): Promise<Record<string, unknown>> {
+  const groupTree = await getUserGroupTree(env.DB, user.id);
+  const shares = await listShareToMeForUser(env.DB, user.id, groupTree);
+  const userIds: number[] = [];
+  for (const s of shares) if (!userIds.includes(s.userID)) userIds.push(s.userID);
+
+  const folderList: ShareListItem[] = [];
+  for (const uid of userIds) {
+    const u = (await getUserById(env.DB, uid)) as ShareItemUser | null;
+    if (!u) continue;
+    folderList.push(shareToMeUserItem({ id: u.id, username: u.username, nickname: u.nickname || u.username } as AuthUser, "0"));
+  }
+
+  return {
+    current: {
+      name: t("explorer.toolbar.shareToMe"),
+      path: thisPath,
+      pathDisplay: t("explorer.toolbar.shareToMe"),
+      type: "folder",
+      isFolder: true,
+      isWriteable: false,
+      isReadable: true,
+    },
+    folderList,
+    fileList: [],
+    groupList: [],
+    pageInfo: { totalNum: folderList.length, pageNum: 500, page: 1, pageTotal: 1 },
+    thisPath,
+    targetSpace: { sizeMax: 0, sizeUse: 0 },
+    currentFieldAdd: {
+      pathDesc: "[" + t("admin.setting.shareToMeUser") + "]," + t("explorer.pathDesc.shareToMeUser"),
+    },
+  };
+}
+
+/** 001 explorer/userShareGroup::get。 */
+export async function userShareGroupGet(
+  env: Env,
+  user: AuthUser,
+  id: string
+): Promise<Record<string, unknown>> {
+  const groupPre = "group-g";
+  const userPre = "group-u";
+  if (!id || id === "group") {
+    const data = await listShareToMeRoot(env, user, "{shareToMe}");
+    data.currentFieldAdd = {
+      pathDesc: "[" + t("admin.setting.shareToMeGroup") + "]," + t("explorer.pathDesc.shareToMeGroup"),
+    };
+    return data;
+  }
+  if (id.startsWith(groupPre)) {
+    const gid = parseInt(id.slice(groupPre.length), 10);
+    return listShareToMeByGroup(env, user, gid, `{shareToMe:group-g${gid}}/`);
+  }
+  if (id.startsWith(userPre)) {
+    const rest = id.slice(userPre.length);
+    const uid = parseInt(rest.split("-")[0], 10);
+    return listShareToMeByUser(env, user, uid, `{shareToMe:group-u${rest}}/`);
+  }
+  return listShareToMeRoot(env, user, "{shareToMe}");
+}
+
+/** 001 explorer/userShareUser::get。 */
+export async function userShareUserGet(
+  env: Env,
+  user: AuthUser,
+  id: string
+): Promise<Record<string, unknown>> {
+  if (!id || id === "user") {
+    return listShareToMeUserRoot(env, user, "{shareToMe:user}");
+  }
+  const uid = parseInt(id.startsWith("user-") ? id.slice("user-".length) : id, 10);
+  return listShareToMeByUser(env, user, uid, `{shareToMe:user-${uid}}/`);
+}
+
+/** 001 explorer/userShare::shareToMe 分发（list / group / user 三种展示方式）。 */
+export async function shareToMeDispatch(
+  env: Env,
+  user: AuthUser,
+  type: string
+): Promise<Record<string, unknown> | false> {
+  type = type || "";
+  const allowTree = (await getSetting(env.DB, "shareToMeAllowTree")) ?? "1";
+  let showType = (await getUserOption(env.DB, user.id, "shareToMeShowType")) || "list";
+  if (allowTree === "0") showType = "list";
+  if (showType === "group" || type.startsWith("group")) return userShareGroupGet(env, user, type);
+  if (showType === "user" || type.startsWith("user")) return userShareUserGet(env, user, type);
+  return shareToMeListMake(env, user, type);
+}
+
+// ============ 外链生成 helper（复刻 001 explorer/share::link/linkSafe/linkOut）============
+
+/** 001 explorer/share::link - 通用加密外链（Mcrypt 编码 path）。 */
+export async function link(env: Env, appHost: string, path: string, downFilename = ""): Promise<string> {
+  const pass = (await getSetting(env.DB, "systemPassword")) || "";
+  const hash = mcryptEncode(path, pass);
+  const name = path.split("/").filter(Boolean).pop() || "";
+  const addParam = downFilename
+    ? "&downFilename=" + encodeURIComponent(downFilename)
+    : "&name=/" + encodeURIComponent(name);
+  return appHost + "index.php?explorer/share/file&hash=" + encodeURIComponent(hash) + addParam;
+}
+
+/** 001 explorer/share::linkFile - 固定哈希（浏览器可缓存）的文件外链。 */
+export async function linkFile(env: Env, appHost: string, file: string, addParam = ""): Promise<string> {
+  const pass = (await getSetting(env.DB, "systemPassword")) || "";
+  const hash = mcryptEncode(file, pass);
+  return appHost + "index.php?explorer/share/file&hash=" + encodeURIComponent(hash) + (addParam ? "&" + addParam : "");
+}
+
+/** 001 explorer/share::linkSafe - 登录用户生成带会话访问令牌的安全外链。 */
+export async function linkSafe(
+  c: AppContext,
+  user: AuthUser | undefined,
+  path: string,
+  downFilename = ""
+): Promise<string> {
+  if (!user) return link(c.env, getAppHost(c), path, downFilename);
+  const name = path.split("/").filter(Boolean).pop() || "";
+  const addParam = downFilename
+    ? "&downFilename=" + encodeURIComponent(downFilename)
+    : "&name=/" + encodeURIComponent(name);
+  const token = getSessionId(c) || "";
+  return (
+    getAppHost(c) +
+    "index.php?explorer/index/fileOut&path=" +
+    encodeURIComponent(path) +
+    (token ? "&accessToken=" + encodeURIComponent(token) : "") +
+    addParam
+  );
+}
+
+/** 001 explorer/share::linkOut - 生成 fileOut 外链（可选附带 accessToken）。 */
+export async function linkOut(
+  c: AppContext,
+  path: string,
+  token = false,
+  info?: { name?: string; modifyTime?: string; size?: number }
+): Promise<string> {
+  const isSharePath = path.startsWith("{shareItemLink:") || path.startsWith("{shareItem:");
+  const apiKey = isSharePath ? "explorer/share/fileOut" : "explorer/index/fileOut";
+  let etag = md5(path).slice(0, 5);
+  let name = c.req?.query?.("name") ? encodeURIComponent(String(c.req.query("name"))) : "";
+  if (info) {
+    name = encodeURIComponent(info.name || "");
+    etag = md5(String(info.modifyTime ?? "") + String(info.size ?? "")).slice(0, 5);
+  }
+  let url =
+    getAppHost(c) +
+    "index.php?" +
+    apiKey +
+    "&path=" +
+    encodeURIComponent(path) +
+    "&et=" +
+    etag +
+    "&name=/" +
+    name;
+  if (token) url += "&accessToken=" + encodeURIComponent(getSessionId(c) || "");
+  return url;
 }
 
 /**
