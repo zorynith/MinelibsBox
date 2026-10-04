@@ -482,6 +482,32 @@ commentApi.post("/index/starTargetUserList", authRequired, async (c) => {
   return c.json(ok({ count: userList.length, userList }));
 });
 
+// 001 starUserList: 添加一条评论并返回该评论视图数据
+commentApi.post("/index/starUserList", authRequired, async (c) => {
+  const user = c.get("currentUser");
+  const p = await parseBody(c);
+  const targetType = parseInt(p.targetType, 10) || 0;
+  const targetID = parseInt(p.targetID, 10) || 0;
+  const content = (p.content || "").trim();
+  const err = await checkEdit(c.env, user, targetType, targetID);
+  if (err) return c.json(fail(err));
+
+  const ts = nowSec();
+  const res: any = await c.env.DB.prepare(
+    `INSERT INTO comment (pid, userID, targetType, targetID, content, praiseCount, commentCount, status, modifyTime, createTime)
+     VALUES (0, ?, ?, ?, ?, 0, 0, 1, ?, ?)`
+  )
+    .bind(user.id, targetType, targetID, content, ts, ts)
+    .run();
+  const commentID = Number(res.meta?.last_row_id ?? 0);
+  const row: any = await c.env.DB.prepare("SELECT * FROM comment WHERE commentID = ?").bind(commentID).first().catch(() => null);
+  const item = row ? await decorateComment(c.env, row) : null;
+  return c.json(ok(item || {}));
+});
+
+// 001 test: 空操作
+commentApi.post("/index/test", authRequired, async (c) => c.json(ok("")));
+
 // 查询用户评论
 commentApi.post("/index/listByUser", authRequired, async (c) => {
   const user = c.get("currentUser");
