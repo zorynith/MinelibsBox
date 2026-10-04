@@ -694,4 +694,42 @@ accountApi.post("/regist/regist", async (c) => {
   return c.json({ code, data: msg, info: userID });
 });
 
+// deregist - 注销当前用户 (001 user/regist::deregist)
+// 流程: 1) 无 code 时发送邮箱验证码并返回「请输入验证码」; 2) 带 code 校验通过后删除用户。
+accountApi.post("/regist/deregist", authRequired, async (c) => {
+  const user = c.get("currentUser");
+  const body = await parseBody(c);
+  // 001 checkAllow(false): 仅在开放注册时允许注销
+  const regist = await getRegistConfig(c.env.DB);
+  if (regist.openRegist !== "1") return c.json(fail("user.deregistNotAllow"));
+  if (user.id === 1) return c.json(fail("系统管理员不支持此操作！"));
+  if (!user.email) return c.json(fail("请先绑定邮箱，用于验证码获取！"));
+
+  const code = (body.code || "").trim();
+  if (!code) {
+    // 后端调用 sendMsgCode(source=deregist): 无需图形验证码
+    const msgCode = randomNumCode(6);
+    await storeMsgCode(c, "email", msgCode, "deregist", user.email);
+    try {
+      const emailType = (await getSetting(c.env.DB, "emailType")) ?? "0";
+      await sendEmail(c, { type: "email", input: user.email, action: "deregist_bind", emailType, language: "zh-CN" });
+    } catch {
+      /* ignore */
+    }
+    return c.json(fail("user.inputVerifyCode"));
+  }
+
+  const check = await checkMsgCode(c, "email", code, "deregist", user.email);
+  if (!check.ok) return c.json(fail(check.msg || "user.inputVerifyCode"));
+
+  // 001 Action("admin.member")->remove(): 删除用户及其关联数据
+  await c.env.DB.prepare("DELETE FROM shares WHERE user_id = ?").bind(user.id).run();
+  await c.env.DB.prepare("DELETE FROM share WHERE userID = ?").bind(user.id).run();
+  await c.env.DB.prepare("DELETE FROM user_groups WHERE user_id = ?").bind(user.id).run();
+  await c.env.DB.prepare("DELETE FROM user_option WHERE userID = ?").bind(user.id).run();
+  await c.env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user.id).run();
+  await c.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user.id).run();
+  return c.json(ok("explorer.success"));
+});
+
 export { accountApi };
