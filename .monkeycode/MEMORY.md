@@ -370,3 +370,9 @@ Entries discovered by the Agent during task execution should follow this format:
   - 一切以「按 001 完整复刻」为准：只要 001 中存在该接口/行为，就要在 Worker 中复刻，不管前端当前是否调用、是否是死代码。
   - 禁止再因为「该接口前端没用到/可能是死代码/是否值得做」这类判断停下询问；按既定批次直接做完，全部做完后再停下汇报。
   - 用户不想重复陈述同一个要求，后续自主执行。
+
+[User Instruction Summary]
+- Date: 2026-10-04
+- Context: 用户明确要求回复语言
+- Instructions:
+  - 所有回复与思考过程一律使用中文。
