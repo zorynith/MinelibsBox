@@ -1663,43 +1663,9 @@ async function storeImportLogGetHandler(c: any): Promise<Response> {
   return c.json({ code: true, data: [] });
 }
 
-/**
- * 统一滚动条样式: 与主应用 static/style/dist/main.css 的 ::-webkit-scrollbar 保持一致,
- * 使插件预览页(PDF/Office/网页等)不再显示浏览器默认滚动条。
- */
-const CUSTOM_SCROLLBAR_CSS =
-  "<style id=\"kod-custom-scrollbar\">" +
-  "html{scrollbar-width:thin;scrollbar-color:rgba(180,180,180,0.35) transparent}" +
-  "::-webkit-scrollbar-track-piece{background-color:rgba(180,180,180,0.06);border-radius:3px}" +
-  "::-webkit-scrollbar{width:10px;height:10px}" +
-  "::-webkit-scrollbar-thumb{background-color:rgba(180,180,180,0.2);border-radius:12px;background-clip:padding-box;border:1px solid rgba(180,180,180,0.4);min-height:28px}" +
-  "::-webkit-scrollbar-thumb:hover{background-color:rgba(180,180,180,0.4);border:1px solid rgba(180,180,180,0.7)}" +
-  "::-webkit-scrollbar-corner{background:transparent}" +
-  "</style>";
-
-/** 为 HTML 响应注入统一滚动条样式, 非 HTML(JSON/文件流等)原样返回。 */
-async function injectScrollbarCss(resp: Response): Promise<Response> {
-  const ct = resp.headers.get("content-type") || "";
-  if (!ct.includes("text/html")) return resp;
-  let html = await resp.text();
-  if (html.indexOf("kod-custom-scrollbar") !== -1) {
-    return new Response(html, { status: resp.status, headers: resp.headers });
-  }
-  html = html.indexOf("</head>") !== -1
-    ? html.replace("</head>", CUSTOM_SCROLLBAR_CSS + "</head>")
-    : CUSTOM_SCROLLBAR_CSS + html;
-  const headers = new Headers(resp.headers);
-  headers.delete("content-length");
-  return new Response(html, { status: resp.status, headers });
-}
-
-pluginApi.all("/:name", async (c) => injectScrollbarCss(await pluginHandler(c)));
-pluginApi.all("/:name/", async (c) => injectScrollbarCss(await pluginHandler(c)));
-pluginApi.all("/:name/:act", async (c) => {
-  // fileOut 为原始文件流(可能是 HTML 文件内容), 不注入样式
-  if (c.req.param("act") === "fileOut") return pluginHandler(c);
-  return injectScrollbarCss(await pluginHandler(c));
-});
+pluginApi.all("/:name", (c) => pluginHandler(c));
+pluginApi.all("/:name/", (c) => pluginHandler(c));
+pluginApi.all("/:name/:act", (c) => pluginHandler(c));
 
 async function pluginHandler(c: any) {
   const name = c.req.param("name");

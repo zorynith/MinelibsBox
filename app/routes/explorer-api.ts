@@ -3042,12 +3042,13 @@ explorerApi.all("/index/pathCuteTo", async (c) => {
 
 // ============ file output / download ============
 
-function fileStreamResponse(c: AppContext, obj: any, name: string, disposition: "inline" | "attachment") {
+function fileStreamResponse(c: AppContext, obj: any, name: string, disposition: "inline" | "attachment", noStore = false) {
   const headers = new Headers();
   headers.set("Content-Type", getFileMimeType(name));
   headers.set("Content-Disposition", `${disposition}; filename="${encodeURIComponent(name)}"`);
-  if (disposition === "inline") headers.set("Cache-Control", "public, max-age=3600");
   obj.writeHttpMetadata(headers);
+  if (noStore) headers.set("Cache-Control", "no-store");
+  else if (disposition === "inline") headers.set("Cache-Control", "public, max-age=3600");
   return new Response(obj.body, { headers });
 }
 
@@ -3118,7 +3119,9 @@ export async function fileOutHandler(
   if (disposition === "attachment" && user) {
     await addAuditLog(c.env.DB, "download", user.id, path, null, null, null);
   }
-  return fileStreamResponse(c, obj, name, disposition);
+  // 头像等用户资料图不缓存, 保证重新上传后立即刷新(同一 URL 会命中旧缓存)
+  const noStore = /(^|\/)\.system\/avatar\//.test(src.relPath);
+  return fileStreamResponse(c, obj, name, disposition, noStore);
 }
 
 explorerApi.all("/index/fileDownload", (c) => fileOutHandler(c, "attachment"));
