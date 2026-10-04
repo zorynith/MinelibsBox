@@ -266,6 +266,9 @@ Entries discovered by the Agent during task execution should follow this format:
   - 分享单文件的外链落地 path 是 `{shareItemLink:hash}`（不含文件名后缀），shareFileKeyOf/parseShareLinkRel 按此解析；带后缀的 path 会被 joinShareRealPath 拼成错误的 `/test.docx/test.docx`。
   - drawio 复刻：001 template.php 的 `$content` 由 app.php 定义为文件原文（`file_get_contents(filePathLinkOut)`），worker 端 edit() 传 JSON.stringify(文件文本) 加载已有图表，newfile 由内容是否含 `<diagram>` 决定；模板中 001 的 `$.ajax`（依赖 app/dist/lib.js 的 jQuery）在独立 iframe 页面不可用，worker 版 template.html 用原生 fetch 替换。
   - HMAC-MD5（PHP hash_hmac('md5')，bisheng callURL 签名）worker 端实现：mcrypt.ts 的 md5 已重构出 md5Core(bytes) 支持字节输入，新增导出 hmacMd5(key,msg)；WebCrypto 不支持 MD5，必须用纯 JS。
+  - 线上 Worker 域名 minelibsbox.minelibs.workers.dev；本沙箱对 *.workers.dev 的 DNS 返回污染 IP（face:b00c），需先经 DoH（https://dns.google/resolve）取真实 Cloudflare IP，再用 `curl --resolve host:443:<ip>` 或 playwright `--host-resolver-rules=MAP host <ip>` 访问；playwright 需 `channel:'chromium'`（新版默认找缺失的 headless_shell）。
+  - Photopea 插件 static 是途图图（tuyitu）定制版：pp.js 的 NJ.zC 仅当 NJ.rk()（localStorage key `0_token` 未过期）为真才执行启动回调，否则 setTimeout 轮询；未登录 ps.tuyitu.com 时停在启动欢迎页、不自动打开 files（fileUrl 仍会 200）。属插件原版行为，改用官方 https://www.photopea.com/#<config> 才免登录。
+  - CADViewer 的 sharecad `/cadframe/load?url=` 页在顶层窗口会执行 `if(window.self===window.top)location.href="/Viewer"+hash`（hash 为空→丢文件），仅在 iframe 内才渲染查看器；故 renderCADViewer 必须返回承载 iframe 的 HTML，不能 302 跳到 sharecad。
 
 [User Instruction Summary]
 - Date: 2026-08-25
