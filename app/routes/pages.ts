@@ -382,6 +382,13 @@ async function serveIndex(c: Context<{ Bindings: Env }>) {
        使图片图标与字体图标保持一致（22x22，居中），字体图标类插件不受影响。 */
     .form-box.config-box .form-header .modal-title .path-ico:has(.picture.ico){height:22px}
     .form-box.config-box .form-header .modal-title .path-ico .picture.ico{position:relative;top:6px}
+    /* 统一滚动条: 与 main.css 的 ::-webkit-scrollbar 保持一致, 并补 Firefox 支持 */
+    html{scrollbar-width:thin;scrollbar-color:rgba(180,180,180,0.35) transparent}
+    ::-webkit-scrollbar-track-piece{background-color:rgba(180,180,180,0.06);border-radius:3px}
+    ::-webkit-scrollbar{width:10px;height:10px}
+    ::-webkit-scrollbar-thumb{background-color:rgba(180,180,180,0.2);border-radius:12px;background-clip:padding-box;border:1px solid rgba(180,180,180,0.4);min-height:28px}
+    ::-webkit-scrollbar-thumb:hover{background-color:rgba(180,180,180,0.4);border:1px solid rgba(180,180,180,0.7)}
+    ::-webkit-scrollbar-corner{background:transparent}
   </style>
 
   <script type="text/javascript">
