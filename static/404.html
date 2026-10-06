@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-
-<html class="app-device-pc dark-mode" data-theme="dark-mode" style="zoom: 1; background-attachment: fixed;"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<html class="app-device-pc dark-mode" data-theme="dark-mode" style="zoom: 1; background-attachment: fixed;">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   <base href="/">
-  
   <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
   <meta http-equiv="Cache-Control" content="no-transform">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no">
@@ -29,519 +29,171 @@
   <meta name="full-screen" content="yes">
   <meta name="x5-page-mode" content="app">
   <meta name="x5-fullscreen" content="true">
-<style type="text/css">
-#nprogress {
-  pointer-events: none;
-}
 
-#nprogress .bar {
-  background: #29d;
+  <style type="text/css">
+    #nprogress { pointer-events: none; }
+    #nprogress .bar { background: #29d; position: fixed; z-index: 1031; top: 0; left: 0; width: 100%; height: 2px; }
+    #nprogress .peg { display: block; position: absolute; right: 0px; width: 100px; height: 100%; box-shadow: 0 0 10px #29d, 0 0 5px #29d; opacity: 1.0; -webkit-transform: rotate(3deg) translate(0px, -4px); -ms-transform: rotate(3deg) translate(0px, -4px); transform: rotate(3deg) translate(0px, -4px); }
+    #nprogress .spinner { display: block; position: fixed; z-index: 1031; top: 15px; right: 15px; width: inherit; height: inherit; left: inherit; bottom: inherit; margin: inherit; }
+    #nprogress .spinner-icon { width: 18px; height: 18px; box-sizing: border-box; border: solid 2px transparent; border-top-color: #29d; border-left-color: #29d; border-radius: 50%; -webkit-animation: nprogress-spinner 400ms linear infinite; animation: nprogress-spinner 400ms linear infinite; }
+    .nprogress-custom-parent { overflow: hidden; position: relative; }
+    .nprogress-custom-parent #nprogress .spinner, .nprogress-custom-parent #nprogress .bar { position: absolute; }
+    @-webkit-keyframes nprogress-spinner { 0% { -webkit-transform: rotate(0deg); } 100% { -webkit-transform: rotate(360deg); } }
+    @keyframes nprogress-spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    #nprogress .bar { background: #1890ff; box-shadow: 0 1px 10px #1890ff; }
+  </style>
 
-  position: fixed;
-  z-index: 1031;
-  top: 0;
-  left: 0;
+  <style type="text/css">
+    .ptips-skin { line-height: 1.5em; max-width: 300px; opacity: 0.95; z-index: 999900; position: absolute; text-align: left; word-wrap: break-word; padding: 8px 12px; pointer-events: none; word-break: break-all; -webkit-box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); -moz-box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); left: -100%; top: -100%; background: #fffacb; color: #666; border: 1px solid #ccbd39; }
+    .ptips-skin .qtip-icon { border-color: #222; }
+    .ptips-skin .qtip-titlebar .ui-state-hover { border-color: #303030; }
+    .ptips-skin .tip-inner em.font-icon { position: relative; top: -1px; }
+    .ptips-skin.tips-arrow:after { content: ""; position: absolute; width: 9px; height: 9px; box-sizing: border-box; background: #fffacb; border: 1px solid #ccbd39; transform: rotateZ(45deg); }
+    .ptips-skin.arrow-left:after { left: 0; top: 50%; margin: -5px 0 0 -5px; border-top-color: transparent !important; border-right-color: transparent !important; }
+    .ptips-skin.arrow-right:after { right: 0; top: 50%; margin: -5px -5px 0 0; border-left-color: transparent !important; border-bottom-color: transparent !important; }
+    .ptips-skin.arrow-top:after { left: 30%; top: 0; margin: -5px 0 0 -5px; border-right-color: transparent !important; border-bottom-color: transparent !important; }
+    .ptips-skin.arrow-bottom:after { left: 50%; bottom: 0; margin: 0 0 -5px -5px; border-left-color: transparent !important; border-top-color: transparent !important; }
+    .ptips-skin.dark { background: rgba(0, 0, 0, 0.6); color: #fff; border: none; border-radius: 3px; }
+    .ptips-skin.dark.tips-arrow { border: none; }
+    .ptips-skin.dark.tips-arrow:after { display: none; }
+    .ptips-skin.white { background: #fefefe; color: #666; border: none; border-radius: 3px; }
+    .ptips-skin.white.tips-arrow { border: 1px solid #ddd; }
+    .ptips-skin.white.tips-arrow:after { border-color: #ddd; background: #fefefe; }
+    .ptips-skin.yellow { background: #fffacb; color: #666; border: none; border-radius: 3px; }
+    .ptips-skin.yellow.tips-arrow { border: 1px solid #e0dcbc; }
+    .ptips-skin.yellow.tips-arrow:after { border-color: #e0dcbc; background: #fffacb; }
+  </style>
 
-  width: 100%;
-  height: 2px;
-}
+  <style type="text/css">
+    .ps { overflow: hidden !important; overflow-anchor: none; -ms-overflow-style: none; touch-action: auto; -ms-touch-action: auto; }
+    .ps__rail-x { display: none; opacity: 0; transition: background-color .2s linear, opacity .2s linear; -webkit-transition: background-color .2s linear, opacity .2s linear; height: 15px; bottom: 0px; position: absolute; }
+    .ps__rail-y { display: none; opacity: 0; transition: background-color .2s linear, opacity .2s linear; -webkit-transition: background-color .2s linear, opacity .2s linear; width: 15px; right: 0; position: absolute; }
+    .ps--active-x > .ps__rail-x, .ps--active-y > .ps__rail-y { display: block; background-color: transparent; }
+    .ps:hover > .ps__rail-x, .ps:hover > .ps__rail-y, .ps--focus > .ps__rail-x, .ps--focus > .ps__rail-y, .ps--scrolling-x > .ps__rail-x, .ps--scrolling-y > .ps__rail-y { opacity: 0.6; }
+    .ps .ps__rail-x:hover, .ps .ps__rail-y:hover, .ps .ps__rail-x:focus, .ps .ps__rail-y:focus, .ps .ps__rail-x.ps--clicking, .ps .ps__rail-y.ps--clicking { background-color: #eee; opacity: 0.9; }
+    .ps__thumb-x { background-color: #aaa; border-radius: 6px; transition: background-color .2s linear, height .2s ease-in-out; -webkit-transition: background-color .2s linear, height .2s ease-in-out; height: 6px; bottom: 2px; position: absolute; }
+    .ps__thumb-y { background-color: #aaa; border-radius: 6px; transition: background-color .2s linear, width .2s ease-in-out; -webkit-transition: background-color .2s linear, width .2s ease-in-out; width: 6px; right: 2px; position: absolute; }
+    .ps__rail-x:hover > .ps__thumb-x, .ps__rail-x:focus > .ps__thumb-x, .ps__rail-x.ps--clicking .ps__thumb-x { background-color: #999; height: 11px; }
+    .ps__rail-y:hover > .ps__thumb-y, .ps__rail-y:focus > .ps__thumb-y, .ps__rail-y.ps--clicking .ps__thumb-y { background-color: #999; width: 11px; }
+    @supports (-ms-overflow-style: none) { .ps { overflow: auto !important; } }
+    @media screen and (-ms-high-contrast: active), (-ms-high-contrast: none) { .ps { overflow: auto !important; } }
+    .ps__thumb-x, .ps__thumb-y { background-color: rgba(100,100,100,0.6); }
+    .ps--scrolling-x .ps__thumb-x, .ps--scrolling-y .ps__thumb-y { background-color: rgba(100,100,100,0.6); }
+    .ps .ps__rail-x:hover, .ps .ps__rail-y:hover, .ps .ps__rail-x:focus, .ps .ps__rail-y:focus { background-color: rgba(100,100,100,0.1); opacity: 1; }
+    .ps .ps__rail-x.ps--clicking, .ps .ps__rail-y.ps--clicking { background-color: rgba(100,100,100,0.15); opacity: 1; }
+    .ps__rail-y:hover > .ps__thumb-y, .ps__rail-y:focus > .ps__thumb-y, .ps__rail-y.ps--clicking .ps__thumb-y { background-color: rgba(100,100,100,0.4); }
+    .ps__rail-x.ps--clicking .ps__thumb-x, .ps__rail-y.ps--clicking .ps__thumb-y { background-color: rgba(100,100,100,0.6); }
+  </style>
 
+  <style type="text/css">
+    .my-page-box { color: #888; user-select: none; -moz-user-select: none; -khtml-user-select: none; font-size: 12px; border: 1px solid #eee; border-radius: 3px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); overflow: hidden; position: relative; }
+    .my-page-box.data-only-one-page .page-content { display: none; }
+    .my-page-box.data-only-one-page input { display: none; }
+    .my-page-box.data-only-one-page .page-info { border-left: none; }
+    .my-page-box.data-only-one-page .page-info { border: none; }
+    .my-page-box .page-content .page-cover { overflow: hidden; float: left; }
+    .my-page-box .page-content .page-cover ul { position: relative; width: 150px; overflow: hidden; list-style: none; padding: 0; margin: 0; white-space: nowrap; }
+    .my-page-box .page-content .page-to, .my-page-box .page-content ul li, .my-page-box .page-content ul .page-active-bg { display: inline-block; width: 30px; height: 28px; line-height: 28px; border: 1px solid #eee; text-align: center; list-style: none; cursor: pointer; margin-left: -1px; border-top: none; border-bottom: none; transition: all .2s; }
+    .my-page-box .page-content ul li.active, .my-page-box .page-content ul li.active:hover { color: #fff; }
+    .my-page-box .page-content ul li span { z-index: 3; position: relative; }
+    .my-page-box .page-content .page-to { width: inherit; padding: 0 0.5em; min-width: 15px; }
+    .my-page-box .page-content .page-to .font-icon { font-size: 16px; display: inline-block; position: relative; top: -1px; }
+    .my-page-box .page-content .page-to.disable { opacity: 0.3; cursor: not-allowed; }
+    .my-page-box .page-content .page-to.disable:hover { background: none; color: inherit; }
+    .my-page-box .page-content .hidden { display: none; }
+    .my-page-box .page-content ul .page-active-bg { position: absolute; top: 0; left: 0; border: 1px solid #1890ff; background-color: #1890ff; margin-left: -1px; z-index: 2; transition: none; }
+    .my-page-box .page-content .page-to:hover, .my-page-box .page-content ul li:hover { color: #1890ff; background: #def; }
+    .my-page-box .page-content, .my-page-box .page-info, .my-page-box .page-select { float: left; }
+    .my-page-box .page-info { padding: 0 4px; border: 1px solid rgba(150,150,150,0.1); border-top: none; border-bottom: none; margin: 0 5px; height: 28px; line-height: 28px; position: relative; }
+    .my-page-box .page-info-text { padding-left: 32px; }
+    .my-page-box.data-only-one-page .page-info-text { padding-left: 0px; }
+    .my-page-box .page-info input { width: 25px; height: 18px; line-height: 18px; color: inherit; border: 1px solid #e5e5e5; text-align: center; padding: 0px 1px 0px 1px; border-radius: 3px; outline: none; position: absolute; top: 4px; }
+    .my-page-box .page-info input:hover { border-color: #40a9ff; }
+    .my-page-box .page-info input:active, .my-page-box .page-info input:focus { border-color: #40a9ff; box-shadow: 0 0 0 2px rgba(24,144,255,0.2); }
+    .my-page-box .page-info .page-to-btn { display: inline-block; background: #fff; padding: 3px 6px 2px 6px; border: 1px solid #eee; border-left: none; margin: 0 5px 0 -7px; border-radius: 0 3px 3px 0; cursor: pointer; line-height: 14px; background-image: linear-gradient(to bottom, #fff 0, #eee 100%); }
+    .my-page-box .page-info .page-to-btn:hover { background-image: linear-gradient(to bottom, #f6f6f6 0, #e6e6e6 100%); }
+    .my-page-box .page-select { margin-right: -15px; }
+    .my-page-box .page-select select { appearance: none; -moz-appearance: none; -webkit-appearance: none; background-image: none !important; filter: none !important; border: 1px solid #e5e5e5; color: inherit; outline: none; padding: 0px 0.5em; padding-right: 15px; height: 20px !important; margin-top: 3px; line-height: 20px; border-radius: 3px; }
+    .my-page-box .page-select select:hover { border-color: #40a9ff; box-shadow: 0 0 0 2px rgba(24,144,255,0.2); }
+    .my-page-box .page-select .select-icon { position: relative; left: -21px; top: -2px; display: inline-block; width: 16px; height: 20px; line-height: 20px; text-align: center; pointer-events: none; }
+    .clear { clear: both; }
+    .my-page-box .page-select select, .my-page-box .page-info input { border-color: rgba(150,150,150,0.1); background: rgba(200,200,200,0.08); transition: all .2s; }
+    .my-page-box .page-content ul li span.num-3 { zoom: 0.9; }
+    .my-page-box .page-content ul li span.num-4 { zoom: 0.75; }
+    .my-page-box .page-content ul li span.num-5 { zoom: 0.65; }
+    .my-page-box .page-content ul li span.num-6 { zoom: 0.6; }
+    .my-page-box .page-content .page-to, .my-page-box .page-content ul li, .my-page-box .page-content ul .page-active-bg { border: none; }
+  </style>
 
-#nprogress .peg {
-  display: block;
-  position: absolute;
-  right: 0px;
-  width: 100px;
-  height: 100%;
-  box-shadow: 0 0 10px #29d, 0 0 5px #29d;
-  opacity: 1.0;
+  <link charset="utf-8" rel="stylesheet" href="style/lib/alifont/iconfont.css">
+  <link charset="utf-8" rel="stylesheet" href="style/lib/font-icon/style.css">
 
-  -webkit-transform: rotate(3deg) translate(0px, -4px);
-      -ms-transform: rotate(3deg) translate(0px, -4px);
-          transform: rotate(3deg) translate(0px, -4px);
-}
+  <style id="add-style-css-text" type="text/css">
+    .share-page-topbar .version_vip_free, .menu-view-setting .context-menu-item.emmet, .menu-dropdown-user .app-download, .menu-view-setting .context-menu-item.editor-help-more { display: none !important; }
+    .dialog-copyright-content .content iframe { display: none !important; }
+    .admin-setting-page .info-box-version iframe { display: none !important; }
+    i.x-item-icon.x-magnet { background-image: url('https://static.minelibs.eu.org/images/file_icon/icon_file/utorrent.png'); }
+    .x-item-icon.x-drawio { background-image: url('https://static.minelibs.eu.org/plugins/drawio/static/images/drawio.png'); }
+    .file .path-ico.path-icon-mov .picture:before, .file .path-ico.path-icon-webm .picture:before, .file .path-ico.path-icon-mp4 .picture:before, .file .path-ico.path-icon-m4v .picture:before, .file .path-ico.path-icon-mkv .picture:before, .file .path-ico.path-icon-f4v .picture:before, .file .path-ico.path-icon-flv .picture:before, .file .path-ico.path-icon-ogv .picture:before { content: '\f00a'; font-family: 'remixicon'; position: absolute; margin: auto; z-index: 5; left: 0; top: 0; right: 0; bottom: 0; transition: 0.2s all; width: 28px; height: 28px; line-height: 28px; font-size: 20px; border-radius: 50%; color: rgba(255,255,255,0.9); }
+    .file .path-ico .picture:before { background: rgba(0,0,0,0.4); }
+    .file.hover .path-ico .picture:before { background: rgba(0,0,0,.6); color: #fff; }
+    .video-show-tips { position: absolute; bottom: 45px; right: 20px; z-index: 100; background: rgba(0,0,0,0.4); color: #fff; pointer-events: none; padding: 4px 10px; border-radius: 3px; opacity: 0.8; }
+    .file-list-list .file .path-ico.path-icon-mov .picture:before, .file-list-list .file .path-ico.path-icon-webm .picture:before, .file-list-list .file .path-ico.path-icon-mp4 .picture:before, .file-list-list .file .path-ico.path-icon-m4v .picture:before, .file-list-list .file .path-ico.path-icon-mkv .picture:before, .file-list-list .file .path-ico.path-icon-f4v .picture:before, .file-list-list .file .path-ico.path-icon-flv .picture:before, .file-list-list .file .path-ico.path-icon-ogv .picture:before, .file-list-split .file .path-ico.path-icon-mov .picture:before, .file-list-split .file .path-ico.path-icon-webm .picture:before, .file-list-split .file .path-ico.path-icon-mp4 .picture:before, .file-list-split .file .path-ico.path-icon-m4v .picture:before, .file-list-split .file .path-ico.path-icon-mkv .picture:before, .file-list-split .file .path-ico.path-icon-f4v .picture:before, .file-list-split .file .path-ico.path-icon-flv .picture:before, .file-list-split .file .path-ico.path-icon-ogv .picture:before { width: 15px; height: 15px; line-height: 15px; font-size: 14px; }
+    .app-config-fileThumb.dialog-form .form-box .form-row.item-imgnryMore { display: inline-block; position: absolute; margin-top: -35px; margin-left: 420px; }
+    .app-config-fileThumb.dialog-form .form-box .form-row.item-imgnryMore .setting-title { display: none; }
+    .x-item-icon.x-io-webdav { background-image: url("https://static.minelibs.eu.org/plugins/webdav/static/images/webdav.png"); margin-top: 1px; }
+    .header-middle .header-address .path-ico.name-io-webdav { padding-top: 4px; }
+    .x-item-icon.x-3dm, .x-item-icon.small.x-3dm, .x-item-icon.x-3ds, .x-item-icon.small.x-3ds, .x-item-icon.x-3mf, .x-item-icon.small.x-3mf, .x-item-icon.x-amf, .x-item-icon.small.x-amf, .x-item-icon.x-bvh, .x-item-icon.small.x-bvh, .x-item-icon.x-dae, .x-item-icon.small.x-dae, .x-item-icon.x-drc, .x-item-icon.small.x-drc, .x-item-icon.x-fbx, .x-item-icon.small.x-fbx, .x-item-icon.x-gcode, .x-item-icon.small.x-gcode, .x-item-icon.x-mpt, .x-item-icon.small.x-mpt, .x-item-icon.x-mpf, .x-item-icon.small.x-mpf, .x-item-icon.x-nc, .x-item-icon.small.x-nc, .x-item-icon.x-glb, .x-item-icon.small.x-glb, .x-item-icon.x-gltf, .x-item-icon.small.x-gltf, .x-item-icon.x-vrm, .x-item-icon.small.x-vrm, .x-item-icon.x-kmz, .x-item-icon.small.x-kmz, .x-item-icon.x-lwo, .x-item-icon.small.x-lwo, .x-item-icon.x-md2, .x-item-icon.small.x-md2, .x-item-icon.x-mdd, .x-item-icon.small.x-mdd, .x-item-icon.x-mpd, .x-item-icon.small.x-mpd, .x-item-icon.x-nrrd, .x-item-icon.small.x-nrrd, .x-item-icon.x-obj, .x-item-icon.small.x-obj, .x-item-icon.x-pcd, .x-item-icon.small.x-pcd, .x-item-icon.x-pdb, .x-item-icon.small.x-pdb, .x-item-icon.x-ply, .x-item-icon.small.x-ply, .x-item-icon.x-stl, .x-item-icon.small.x-stl, .x-item-icon.x-stla, .x-item-icon.small.x-stla, .x-item-icon.x-stlb, .x-item-icon.small.x-stlb, .x-item-icon.x-usdz, .x-item-icon.small.x-usdz, .x-item-icon.x-usda, .x-item-icon.small.x-usda, .x-item-icon.x-usdc, .x-item-icon.small.x-usdc, .x-item-icon.x-usd, .x-item-icon.small.x-usd, .x-item-icon.x-vox, .x-item-icon.small.x-vox, .x-item-icon.x-vrml, .x-item-icon.small.x-vrml, .x-item-icon.x-wrl, .x-item-icon.small.x-wrl, .x-item-icon.x-vtk, .x-item-icon.small.x-vtk, .x-item-icon.x-vtp, .x-item-icon.small.x-vtp, .x-item-icon.x-xyz, .x-item-icon.small.x-xyz, .x-item-icon.x-assimp, .x-item-icon.small.x-assimp, .x-item-icon.x-awd, .x-item-icon.small.x-awd, .x-item-icon.x-babylon, .x-item-icon.small.x-babylon, .x-item-icon.x-bim, .x-item-icon.small.x-bim, .x-item-icon.x-brd, .x-item-icon.small.x-brd, .x-item-icon.x-csg, .x-item-icon.small.x-csg, .x-item-icon.x-scad, .x-item-icon.small.x-scad, .x-item-icon.x-ctm, .x-item-icon.small.x-ctm, .x-item-icon.x-ifc, .x-item-icon.small.x-ifc, .x-item-icon.x-off, .x-item-icon.small.x-off, .x-item-icon.x-plt, .x-item-icon.small.x-plt, .x-item-icon.x-pmd, .x-item-icon.small.x-pmd, .x-item-icon.x-pmx, .x-item-icon.small.x-pmx, .x-item-icon.x-prwm, .x-item-icon.small.x-prwm, .x-item-icon.x-tilt, .x-item-icon.small.x-tilt, .x-item-icon.x-vff, .x-item-icon.small.x-vff, .x-item-icon.x-x3d, .x-item-icon.small.x-x3d, .x-item-icon.x-x_t, .x-item-icon.small.x-x_t, .x-item-icon.x-x_b, .x-item-icon.small.x-x_b, .x-item-icon.x-stp, .x-item-icon.small.x-stp, .x-item-icon.x-step, .x-item-icon.small.x-step, .x-item-icon.x-stpz, .x-item-icon.small.x-stpz, .x-item-icon.x-stepz, .x-item-icon.small.x-stepz, .x-item-icon.x-brp, .x-item-icon.small.x-brp, .x-item-icon.x-brep, .x-item-icon.small.x-brep, .x-item-icon.x-igs, .x-item-icon.small.x-igs, .x-item-icon.x-iges, .x-item-icon.small.x-iges, .x-item-icon.x-fcstd, .x-item-icon.small.x-fcstd, .x-item-icon.x-ac, .x-item-icon.small.x-ac, .x-item-icon.x-acc, .x-item-icon.small.x-acc, .x-item-icon.x-ase, .x-item-icon.small.x-ase, .x-item-icon.x-b3d, .x-item-icon.small.x-b3d, .x-item-icon.x-blend, .x-item-icon.small.x-blend, .x-item-icon.x-cob, .x-item-icon.small.x-cob, .x-item-icon.x-csm, .x-item-icon.small.x-csm, .x-item-icon.x-hmp, .x-item-icon.small.x-hmp, .x-item-icon.x-iqm, .x-item-icon.small.x-iqm, .x-item-icon.x-lws, .x-item-icon.small.x-lws, .x-item-icon.x-md5mesh, .x-item-icon.small.x-md5mesh, .x-item-icon.x-mdc, .x-item-icon.small.x-mdc, .x-item-icon.x-mdl, .x-item-icon.small.x-mdl, .x-item-icon.x-ms3d, .x-item-icon.small.x-ms3d, .x-item-icon.x-nff, .x-item-icon.small.x-nff, .x-item-icon.x-ogex, .x-item-icon.small.x-ogex, .x-item-icon.x-q3o, .x-item-icon.small.x-q3o, .x-item-icon.x-q3s, .x-item-icon.small.x-q3s, .x-item-icon.x-sib, .x-item-icon.small.x-sib, .x-item-icon.x-smd, .x-item-icon.small.x-smd, .x-item-icon.x-xgl, .x-item-icon.small.x-xgl, .x-item-icon.x-zg, .x-item-icon.small.x-zg, .x-item-icon.x-low, .x-item-icon.small.x-low, .x-item-icon.x-lxo, .x-item-icon.small.x-lxo, .x-item-icon.x-x, .x-item-icon.small.x-x, .x-item-icon.x-assim, .x-item-icon.small.x-assim, .x-item-icon.x-glb, .x-item-icon.small.x-glb, .x-item-icon.x-gltf, .x-item-icon.small.x-gltf, .x-item-icon.x-vr, .x-item-icon.small.x-vr, .x-item-icon.x-irr, .x-item-icon.small.x-irr, .x-item-icon.x-irrmesh, .x-item-icon.small.x-irrmesh, .x-item-icon.x-raw, .x-item-icon.small.x-raw, .x-item-icon.x-ter, .x-item-icon.small.x-ter, .x-item-icon.x-m3d, .x-item-icon.small.x-m3d, .x-item-icon.x-a3, .x-item-icon.small.x-a3, .x-item-icon.x-dxf, .x-item-icon.small.x-dxf, .x-item-icon.x-dxfb, .x-item-icon.small.x-dxfb, .x-item-icon.x-dwg, .x-item-icon.small.x-dwg { background-image: url(https://static.minelibs.eu.org/plugins/autoViewer/static/images/icon.svg); background-size: 85%; }
+    .path-ico.name-3dm .picture.ico img, .path-ico.name-3ds .picture.ico img, .path-ico.name-3mf .picture.ico img, .path-ico.name-amf .picture.ico img, .path-ico.name-bvh .picture.ico img, .path-ico.name-dae .picture.ico img, .path-ico.name-drc .picture.ico img, .path-ico.name-fbx .picture.ico img, .path-ico.name-gcode .picture.ico img, .path-ico.name-mpt .picture.ico img, .path-ico.name-mpf .picture.ico img, .path-ico.name-nc .picture.ico img, .path-ico.name-glb .picture.ico img, .path-ico.name-gltf .picture.ico img, .path-ico.name-vrm .picture.ico img, .path-ico.name-kmz .picture.ico img, .path-ico.name-lwo .picture.ico img, .path-ico.name-md2 .picture.ico img, .path-ico.name-mdd .picture.ico img, .path-ico.name-mpd .picture.ico img, .path-ico.name-nrrd .picture.ico img, .path-ico.name-obj .picture.ico img, .path-ico.name-pcd .picture.ico img, .path-ico.name-pdb .picture.ico img, .path-ico.name-ply .picture.ico img, .path-ico.name-stl .picture.ico img, .path-ico.name-stla .picture.ico img, .path-ico.name-stlb .picture.ico img, .path-ico.name-usdz .picture.ico img, .path-ico.name-usda .picture.ico img, .path-ico.name-usdc .picture.ico img, .path-ico.name-usd .picture.ico img, .path-ico.name-vox .picture.ico img, .path-ico.name-vrml .picture.ico img, .path-ico.name-wrl .picture.ico img, .path-ico.name-vtk .picture.ico img, .path-ico.name-vtp .picture.ico img, .path-ico.name-xyz .picture.ico img, .path-ico.name-assimp .picture.ico img, .path-ico.name-awd .picture.ico img, .path-ico.name-babylon .picture.ico img, .path-ico.name-bim .picture.ico img, .path-ico.name-brd .picture.ico img, .path-ico.name-csg .picture.ico img, .path-ico.name-scad .picture.ico img, .path-ico.name-ctm .picture.ico img, .path-ico.name-ifc .picture.ico img, .path-ico.name-off .picture.ico img, .path-ico.name-plt .picture.ico img, .path-ico.name-pmd .picture.ico img, .path-ico.name-pmx .picture.ico img, .path-ico.name-prwm .picture.ico img, .path-ico.name-tilt .picture.ico img, .path-ico.name-vff .picture.ico img, .path-ico.name-x3d .picture.ico img, .path-ico.name-x_t .picture.ico img, .path-ico.name-x_b .picture.ico img, .path-ico.name-stp .picture.ico img, .path-ico.name-step .picture.ico img, .path-ico.name-stpz .picture.ico img, .path-ico.name-stepz .picture.ico img, .path-ico.name-brp .picture.ico img, .path-ico.name-brep .picture.ico img, .path-ico.name-igs .picture.ico img, .path-ico.name-iges .picture.ico img, .path-ico.name-fcstd .picture.ico img, .path-ico.name-ac .picture.ico img, .path-ico.name-acc .picture.ico img, .path-ico.name-ase .picture.ico img, .path-ico.name-b3d .picture.ico img, .path-ico.name-blend .picture.ico img, .path-ico.name-cob .picture.ico img, .path-ico.name-csm .picture.ico img, .path-ico.name-hmp .picture.ico img, .path-ico.name-iqm .picture.ico img, .path-ico.name-lws .picture.ico img, .path-ico.name-md5mesh .picture.ico img, .path-ico.name-mdc .picture.ico img, .path-ico.name-mdl .picture.ico img, .path-ico.name-ms3d .picture.ico img, .path-ico.name-nff .picture.ico img, .path-ico.name-ogex .picture.ico img, .path-ico.name-q3o .picture.ico img, .path-ico.name-q3s .picture.ico img, .path-ico.name-sib .picture.ico img, .path-ico.name-smd .picture.ico img, .path-ico.name-xgl .picture.ico img, .path-ico.name-zg .picture.ico img, .path-ico.name-low .picture.ico img, .path-ico.name-lxo .picture.ico img, .path-ico.name-x .picture.ico img, .path-ico.name-assim .picture.ico img, .path-ico.name-glb .picture.ico img, .path-ico.name-gltf .picture.ico img, .path-ico.name-vr .picture.ico img, .path-ico.name-irr .picture.ico img, .path-ico.name-irrmesh .picture.ico img, .path-ico.name-raw .picture.ico img, .path-ico.name-ter .picture.ico img, .path-ico.name-m3d .picture.ico img, .path-ico.name-a3 .picture.ico img, .path-ico.name-dxf .picture.ico img, .path-ico.name-dxfb .picture.ico img, .path-ico.name-dwg .picture.ico img { background: none !important; box-shadow: none !important; }
+    .path-ico.name-dxf .picture.ico img, .path-ico.name-dwg .picture.ico img, .path-ico.name-dxfb .picture.ico img { background-color: #000000e0 !important; box-shadow: 1px 1px 5px #00000033 !important; filter: brightness(5.1) contrast(1.04) saturate(5.1); }
+    .dark-mode .path-ico.name-dxf .picture.ico img, .dark-mode .path-ico.name-dwg .picture.ico img, .dark-mode .path-ico.name-dxfb .picture.ico img { background-color: #000000d0 !important; box-shadow: 1px 1px 5px #00000033 !important; }
+    .x-item-icon.x-packed-refs, .x-item-icon.x-head, .x-item-icon.x-fetch_head, .x-item-icon.x-orig_head, .x-item-icon.x-authors, .x-item-icon.x-install, .x-item-icon.x-configure, .x-item-icon.x-packs, .x-item-icon.x-refs, .x-item-icon.x-description, .x-item-icon.x-master, .x-item-icon.x-exclude, .x-item-icon.x-key, .x-item-icon.x-repo, .x-item-icon.x-pid, .x-item-icon.x-cnf, .x-item-icon.x-mtl, .x-item-icon.x-mtlx, .x-item-icon.x-settings, .x-item-icon.x-resx, .x-item-icon.x-props, .x-item-icon.x-targets, .x-item-icon.x-credits, .x-item-icon.x-arclint, .x-item-icon.x-arcconfig, .x-item-icon.x-err, .x-item-icon.x-pub, .x-item-icon.x-keys, .x-item-icon.x-values, .x-item-icon.x-servers, .x-item-icon.x-acl, .x-item-icon.x-netrwhist, .x-item-icon.x-sample, .x-item-icon.x-empty, .x-item-icon.x-dist, .x-item-icon.x-installversion, .x-item-icon.x-version, .x-item-icon.x-rst, .x-item-icon.x-bak, .x-item-icon.x-dockerfile, .x-item-icon.x-m4, .x-item-icon.x-compile, .x-item-icon.x-guess, .x-item-icon.x-status, .x-item-icon.x-sub, .x-item-icon.x-ac, .x-item-icon.x-la, .x-item-icon.x-pc, .x-item-icon.x-in, .x-item-icon.x-am, .x-item-icon.x-copying, .x-item-icon.x-depcomp, .x-item-icon.x-install-sh, .x-item-icon.x-missing, .x-item-icon.x-news, .x-item-icon.x-todo, .x-item-icon.x-using_foreign_code, .x-item-icon.x-supp, .x-item-icon.x-json-check, .x-item-icon.x-hacking, .x-item-icon.x-contributing, .x-item-icon.x-dockerfile-master, .x-item-icon.x-dockerfile-dist, .x-item-icon.x-lsp, .x-item-icon.x-dxf-check, .x-item-icon.x-dxfb-check, .x-item-icon.x-spec, .x-item-icon.x-1, .x-item-icon.x-2, .x-item-icon.x-texi, .x-item-icon.x-gendocs_template, .x-item-icon.x-gnumakefile, .x-item-icon.x-git-version-gen, .x-item-icon.x-gitlog-to-changelog, .x-item-icon.x-t, .x-item-icon.x-i, .x-item-icon.x-kml, .x-item-icon.x-pri, .x-item-icon.x-astylerc, .x-item-icon.x-dox, .x-item-icon.x-inx, .x-item-icon.x-rng, .x-item-icon.x-schema, .x-item-icon.x-out, .x-item-icon.x-coveragerc, .x-item-icon.x-darglint, .x-item-icon.x-pylintrc, .x-item-icon.x-plugins, .x-item-icon.x-qrc, .x-item-icon.x-app, .x-item-icon.x-mime, .x-item-icon.x-sharedmimeinfo, .x-item-icon.x-desktop, .x-item-icon.x-sourcetreeconfig, .x-item-icon.x-commit_editmsg, .x-item-icon.x-fx, .x-item-icon.x-lgc, .x-item-icon.x-ui, .x-item-icon.x-crt, .x-item-icon.x-bash_history, .x-item-icon.x-bash_profile, .x-item-icon.x-git-credentials, .x-item-icon.x-gitconfig, .x-item-icon.x-gitflow_export, .x-item-icon.x-template, .x-item-icon.x-typed, .x-item-icon.x-gitignore_global, .x-item-icon.x-hgignore_global, .x-item-icon.x-lesshst, .x-item-icon.x-mailcap, .x-item-icon.x-mycli-history, .x-item-icon.x-gitkeep, .x-item-icon.x-brew_all_commands, .x-item-icon.x-myclirc, .x-item-icon.x-mysql_history, .x-item-icon.x-node_repl_history, .x-item-icon.x-npmrc, .x-item-icon.x-pearrc, .x-item-icon.x-plist, .x-item-icon.x-rediscli_history, .x-item-icon.x-sh_history, .x-item-icon.x-sqlite_history, .x-item-icon.x-stcommitmsg, .x-item-icon.x-types, .x-item-icon.x-viminfo, .x-item-icon.x-eslintignore, .x-item-icon.x-zsh-update, .x-item-icon.x-zsh_history, .x-item-icon.x-zshrc, .x-item-icon.x-zshrc_self, .x-item-icon.x-zsh, .x-item-icon.x-zsh-theme, .x-item-icon.x-zsh-template, .x-item-icon.x-_adb, .x-item-icon.x-fm, .x-item-icon.x-phpclass, .x-item-icon.x-cid, .x-item-icon.x-lic, .x-item-icon.x-odin, .x-item-icon.x-jexl, .x-item-icon.x-plsql, .x-item-icon.x-robot, .x-item-icon.x-vsixmanifest, .x-item-icon.x-vmx, .x-item-icon.x-vmxd, .x-item-icon.x-vmxf, .x-item-icon.x-lock, .x-item-icon.x-gypi, .x-item-icon.x-fingerprint, .x-item-icon.x-nmf, .x-item-icon.x-rels, .x-item-icon.x-geojson, .x-item-icon.x-x3d, .x-item-icon.x-xbel { background-image: url('https://static.minelibs.eu.org/images/file_icon/icon_file/txt.png'); }
+    .x-item-icon.small.x-packed-refs, .x-item-icon.small.x-head, .x-item-icon.small.x-fetch_head, .x-item-icon.small.x-orig_head, .x-item-icon.small.x-authors, .x-item-icon.small.x-install, .x-item-icon.small.x-configure, .x-item-icon.small.x-packs, .x-item-icon.small.x-refs, .x-item-icon.small.x-description, .x-item-icon.small.x-master, .x-item-icon.small.x-exclude, .x-item-icon.small.x-key, .x-item-icon.small.x-repo, .x-item-icon.small.x-pid, .x-item-icon.small.x-cnf, .x-item-icon.small.x-mtl, .x-item-icon.small.x-mtlx, .x-item-icon.small.x-settings, .x-item-icon.small.x-resx, .x-item-icon.small.x-props, .x-item-icon.small.x-targets, .x-item-icon.small.x-credits, .x-item-icon.small.x-arclint, .x-item-icon.small.x-arcconfig, .x-item-icon.small.x-err, .x-item-icon.small.x-pub, .x-item-icon.small.x-keys, .x-item-icon.small.x-values, .x-item-icon.small.x-servers, .x-item-icon.small.x-acl, .x-item-icon.small.x-netrwhist, .x-item-icon.small.x-sample, .x-item-icon.small.x-empty, .x-item-icon.small.x-dist, .x-item-icon.small.x-installversion, .x-item-icon.small.x-version, .x-item-icon.small.x-rst, .x-item-icon.small.x-bak, .x-item-icon.small.x-dockerfile, .x-item-icon.small.x-m4, .x-item-icon.small.x-compile, .x-item-icon.small.x-guess, .x-item-icon.small.x-status, .x-item-icon.small.x-sub, .x-item-icon.small.x-ac, .x-item-icon.small.x-la, .x-item-icon.small.x-pc, .x-item-icon.small.x-in, .x-item-icon.small.x-am, .x-item-icon.small.x-copying, .x-item-icon.small.x-depcomp, .x-item-icon.small.x-install-sh, .x-item-icon.small.x-missing, .x-item-icon.small.x-news, .x-item-icon.small.x-todo, .x-item-icon.small.x-using_foreign_code, .x-item-icon.small.x-supp, .x-item-icon.small.x-json-check, .x-item-icon.small.x-hacking, .x-item-icon.small.x-contributing, .x-item-icon.small.x-dockerfile-master, .x-item-icon.small.x-dockerfile-dist, .x-item-icon.small.x-lsp, .x-item-icon.small.x-dxf-check, .x-item-icon.small.x-dxfb-check, .x-item-icon.small.x-spec, .x-item-icon.small.x-1, .x-item-icon.small.x-2, .x-item-icon.small.x-texi, .x-item-icon.small.x-gendocs_template, .x-item-icon.small.x-gnumakefile, .x-item-icon.small.x-git-version-gen, .x-item-icon.small.x-gitlog-to-changelog, .x-item-icon.small.x-t, .x-item-icon.small.x-i, .x-item-icon.small.x-kml, .x-item-icon.small.x-pri, .x-item-icon.small.x-astylerc, .x-item-icon.small.x-dox, .x-item-icon.small.x-inx, .x-item-icon.small.x-rng, .x-item-icon.small.x-schema, .x-item-icon.small.x-out, .x-item-icon.small.x-coveragerc, .x-item-icon.small.x-darglint, .x-item-icon.small.x-pylintrc, .x-item-icon.small.x-plugins, .x-item-icon.small.x-qrc, .x-item-icon.small.x-app, .x-item-icon.small.x-mime, .x-item-icon.small.x-sharedmimeinfo, .x-item-icon.small.x-desktop, .x-item-icon.small.x-sourcetreeconfig, .x-item-icon.small.x-commit_editmsg, .x-item-icon.small.x-fx, .x-item-icon.small.x-lgc, .x-item-icon.small.x-ui, .x-item-icon.small.x-crt, .x-item-icon.small.x-bash_history, .x-item-icon.small.x-bash_profile, .x-item-icon.small.x-git-credentials, .x-item-icon.small.x-gitconfig, .x-item-icon.small.x-gitflow_export, .x-item-icon.small.x-template, .x-item-icon.small.x-typed, .x-item-icon.small.x-gitignore_global, .x-item-icon.small.x-hgignore_global, .x-item-icon.small.x-lesshst, .x-item-icon.small.x-mailcap, .x-item-icon.small.x-mycli-history, .x-item-icon.small.x-gitkeep, .x-item-icon.small.x-brew_all_commands, .x-item-icon.small.x-myclirc, .x-item-icon.small.x-mysql_history, .x-item-icon.small.x-node_repl_history, .x-item-icon.small.x-npmrc, .x-item-icon.small.x-pearrc, .x-item-icon.small.x-plist, .x-item-icon.small.x-rediscli_history, .x-item-icon.small.x-sh_history, .x-item-icon.small.x-sqlite_history, .x-item-icon.small.x-stcommitmsg, .x-item-icon.small.x-types, .x-item-icon.small.x-viminfo, .x-item-icon.small.x-eslintignore, .x-item-icon.small.x-zsh-update, .x-item-icon.small.x-zsh_history, .x-item-icon.small.x-zshrc, .x-item-icon.small.x-zshrc_self, .x-item-icon.small.x-zsh, .x-item-icon.small.x-zsh-theme, .x-item-icon.small.x-zsh-template, .x-item-icon.small.x-_adb, .x-item-icon.small.x-fm, .x-item-icon.small.x-phpclass, .x-item-icon.small.x-cid, .x-item-icon.small.x-lic, .x-item-icon.small.x-odin, .x-item-icon.small.x-jexl, .x-item-icon.small.x-plsql, .x-item-icon.small.x-robot, .x-item-icon.small.x-vsixmanifest, .x-item-icon.small.x-vmx, .x-item-icon.small.x-vmxd, .x-item-icon.small.x-vmxf, .x-item-icon.small.x-lock, .x-item-icon.small.x-gypi, .x-item-icon.small.x-fingerprint, .x-item-icon.small.x-nmf, .x-item-icon.small.x-rels, .x-item-icon.small.x-geojson, .x-item-icon.small.x-x3d, .x-item-icon.small.x-xbel { background-image: url('https://static.minelibs.eu.org/images/file_icon/icon_file/txt_small.png'); }
+    .x-item-icon.x-xcf { background-image: url('https://static.minelibs.eu.org/images/file_icon/icon_file/png.png'); }
+  </style>
 
+  <style class="poshytip-css-ptips-skin poshytip-css-ptips-skin" type="text/css">
+    div.poshytip-css-ptips-skin { visibility: hidden; position: absolute; top: 0; left: 0; }
+    div.poshytip-css-ptips-skin table.tip-table, div.poshytip-css-ptips-skin table.tip-table td { margin: 0; font-family: inherit; font-size: inherit; font-weight: inherit; font-style: inherit; font-variant: inherit; vertical-align: middle; }
+    div.poshytip-css-ptips-skin td.tip-bg-image span { display: block; font: 1px/1px sans-serif; height: 10px; width: 10px; overflow: hidden; }
+    div.poshytip-css-ptips-skin td.tip-right { background-position: 100% 0; }
+    div.poshytip-css-ptips-skin td.tip-bottom { background-position: 100% 100%; }
+    div.poshytip-css-ptips-skin td.tip-left { background-position: 0 100%; }
+    div.poshytip-css-ptips-skin div.tip-inner { background-position: -10px -10px; }
+    div.poshytip-css-ptips-skin div.tip-arrow { visibility: hidden; position: absolute; overflow: hidden; font: 1px/1px sans-serif; }
+  </style>
 
-#nprogress .spinner {
-  display: block;
-  position: fixed;
-  z-index: 1031;
-  top: 15px;
-  right: 15px;
-  width: inherit;
-  height: inherit;
-  left: inherit;
-  bottom: inherit;
-  margin: inherit;
-}
+  <link charset="utf-8" rel="stylesheet" href="plugins/officeViewer/static/app/main.css">
+  <link charset="utf-8" rel="stylesheet" href="plugins/client/static/style.css">
+  <link charset="utf-8" rel="stylesheet" href="plugins/oauth/static/main.css">
+  <link charset="utf-8" rel="stylesheet" href="plugins/storeImport/static/main.css">
 
-#nprogress .spinner-icon {
-  width: 18px;
-  height: 18px;
-  box-sizing: border-box;
+  <style id="dark-mode-background" type="text/css">
+    html.dark-mode:before { background-image: linear-gradient(160deg, #1890FF, #7FEC00) !important; }
+  </style>
 
-  border: solid 2px transparent;
-  border-top-color: #29d;
-  border-left-color: #29d;
-  border-radius: 50%;
+  <link href="style/lib/main.css" rel="stylesheet">
+  <link href="style/dist/main.css" rel="stylesheet">
 
-  -webkit-animation: nprogress-spinner 400ms linear infinite;
-          animation: nprogress-spinner 400ms linear infinite;
-}
-
-.nprogress-custom-parent {
-  overflow: hidden;
-  position: relative;
-}
-
-.nprogress-custom-parent #nprogress .spinner,
-.nprogress-custom-parent #nprogress .bar {
-  position: absolute;
-}
-
-@-webkit-keyframes nprogress-spinner {
-  0%   { -webkit-transform: rotate(0deg); }
-  100% { -webkit-transform: rotate(360deg); }
-}
-@keyframes nprogress-spinner {
-  0%   { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-#nprogress .bar{
-	background:#1890ff;
-	box-shadow: 0 1px 10px #1890ff;
-}</style><style type="text/css">.ptips-skin{
-	line-height: 1.5em;
-	max-width: 300px;
-	opacity:0.95;
-	z-index:999900;
-	position: absolute;
-	text-align:left;
-	word-wrap: break-word;
-	padding:8px 12px;
-	pointer-events: none;
-	word-break: break-all;
-	-webkit-box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
-	-moz-box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
-	box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
-
-	left:-100%;top:-100%;
-	background: #fffacb;color:#666;
-	border: 1px solid #ccbd39;
-}
-.ptips-skin .qtip-icon{border-color: #222;}
-.ptips-skin .qtip-titlebar .ui-state-hover{border-color: #303030;}
-.ptips-skin .tip-inner em.font-icon{position:relative;top:-1px;}
-
-
-.ptips-skin.tips-arrow:after{
-	content: "";position: absolute;
-	width:9px;height:9px;box-sizing: border-box;
-    background: #fffacb;
-	border: 1px solid #ccbd39;
-    transform: rotateZ(45deg);
-}
-.ptips-skin.arrow-left:after{
-	left: 0;top: 50%;margin:-5px 0 0 -5px;
-	border-top-color: transparent !important;
-	border-right-color: transparent !important;
-}
-.ptips-skin.arrow-right:after{
-	right: 0;top: 50%;margin:-5px -5px 0 0;
-	border-left-color: transparent !important;
-	border-bottom-color: transparent !important;
-}
-.ptips-skin.arrow-top:after{
-	left:30%;top:0;margin:-5px 0 0 -5px;
-	border-right-color: transparent !important;
-	border-bottom-color: transparent !important;
-}
-.ptips-skin.arrow-bottom:after{
-	left:50%;bottom:0;margin:0 0 -5px -5px;
-	border-left-color: transparent !important;
-	border-top-color: transparent !important;
-}
-
-.ptips-skin.dark{
-	background: rgba(0, 0, 0, 0.6);
-    color: #fff;border: none;
-    border-radius: 3px;
-}
-.ptips-skin.dark.tips-arrow{border:none;}
-.ptips-skin.dark.tips-arrow:after{display:none;}
-
-
-.ptips-skin.white{
-	background:#fefefe;
-    color: #666;border:none;
-    border-radius: 3px;
-}
-.ptips-skin.white.tips-arrow{border: 1px solid #ddd;}
-.ptips-skin.white.tips-arrow:after{border-color:#ddd;background:#fefefe;}
-
-
-.ptips-skin.yellow{
-	background: #fffacb;
-	color:#666;border:none;
-	border-radius: 3px;
-}
-.ptips-skin.yellow.tips-arrow{border: 1px solid #e0dcbc;}
-.ptips-skin.yellow.tips-arrow:after{border-color:#e0dcbc;background: #fffacb;}</style><style type="text/css">
-.ps {
-  overflow: hidden !important;
-  overflow-anchor: none;
-  -ms-overflow-style: none;
-  touch-action: auto;
-  -ms-touch-action: auto;
-}
-
-
-.ps__rail-x {
-  display: none;
-  opacity: 0;
-  transition: background-color .2s linear, opacity .2s linear;
-  -webkit-transition: background-color .2s linear, opacity .2s linear;
-  height: 15px;
-  
-  bottom: 0px;
-  
-  position: absolute;
-}
-
-.ps__rail-y {
-  display: none;
-  opacity: 0;
-  transition: background-color .2s linear, opacity .2s linear;
-  -webkit-transition: background-color .2s linear, opacity .2s linear;
-  width: 15px;
-  
-  right: 0;
-  
-  position: absolute;
-}
-
-.ps--active-x > .ps__rail-x,
-.ps--active-y > .ps__rail-y {
-  display: block;
-  background-color: transparent;
-}
-
-.ps:hover > .ps__rail-x,
-.ps:hover > .ps__rail-y,
-.ps--focus > .ps__rail-x,
-.ps--focus > .ps__rail-y,
-.ps--scrolling-x > .ps__rail-x,
-.ps--scrolling-y > .ps__rail-y {
-  opacity: 0.6;
-}
-
-.ps .ps__rail-x:hover,
-.ps .ps__rail-y:hover,
-.ps .ps__rail-x:focus,
-.ps .ps__rail-y:focus,
-.ps .ps__rail-x.ps--clicking,
-.ps .ps__rail-y.ps--clicking {
-  background-color: #eee;
-  opacity: 0.9;
-}
-
-
-.ps__thumb-x {
-  background-color: #aaa;
-  border-radius: 6px;
-  transition: background-color .2s linear, height .2s ease-in-out;
-  -webkit-transition: background-color .2s linear, height .2s ease-in-out;
-  height: 6px;
-  
-  bottom: 2px;
-  
-  position: absolute;
-}
-
-.ps__thumb-y {
-  background-color: #aaa;
-  border-radius: 6px;
-  transition: background-color .2s linear, width .2s ease-in-out;
-  -webkit-transition: background-color .2s linear, width .2s ease-in-out;
-  width: 6px;
-  
-  right: 2px;
-  
-  position: absolute;
-}
-
-.ps__rail-x:hover > .ps__thumb-x,
-.ps__rail-x:focus > .ps__thumb-x,
-.ps__rail-x.ps--clicking .ps__thumb-x {
-  background-color: #999;
-  height: 11px;
-}
-
-.ps__rail-y:hover > .ps__thumb-y,
-.ps__rail-y:focus > .ps__thumb-y,
-.ps__rail-y.ps--clicking .ps__thumb-y {
-  background-color: #999;
-  width: 11px;
-}
-
-
-@supports (-ms-overflow-style: none) {
-  .ps {
-    overflow: auto !important;
-  }
-}
-
-@media screen and (-ms-high-contrast: active), (-ms-high-contrast: none) {
-  .ps {
-    overflow: auto !important;
-  }
-}
-
-.ps__thumb-x,.ps__thumb-y {
-	background-color: rgba(100,100,100,0.6);
-}
-.ps--scrolling-x .ps__thumb-x,
-.ps--scrolling-y .ps__thumb-y {
-	background-color: rgba(100,100,100,0.6);
-}
-
-
-.ps .ps__rail-x:hover, .ps .ps__rail-y:hover, 
-.ps .ps__rail-x:focus, .ps .ps__rail-y:focus{
-	background-color: rgba(100,100,100,0.1);
-	opacity:1;
-}
-.ps .ps__rail-x.ps--clicking, .ps .ps__rail-y.ps--clicking {
-	background-color: rgba(100,100,100,0.15);
-	opacity:1;
-}
-
-.ps__rail-y:hover > .ps__thumb-y, 
-.ps__rail-y:focus > .ps__thumb-y, 
-.ps__rail-y.ps--clicking .ps__thumb-y {
-	background-color: rgba(100,100,100,0.4);
-}
-.ps__rail-x.ps--clicking .ps__thumb-x,
-.ps__rail-y.ps--clicking .ps__thumb-y {
-	background-color: rgba(100,100,100,0.6);
-}</style><style type="text/css">.my-page-box{
-	color:#888;
-	user-select: none;
-	-moz-user-select: none;
-	-khtml-user-select: none;
-	
-    font-size: 12px;
-    border: 1px solid #eee;
-    border-radius: 3px;
-	box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-	overflow: hidden;
-	position: relative;
-}
-.my-page-box.data-only-one-page .page-content{display:none;}
-.my-page-box.data-only-one-page input{display:none;}
-.my-page-box.data-only-one-page .page-info{border-left:none;}
-.my-page-box.data-only-one-page .page-info{border:none;}
-.my-page-box .page-content .page-cover{
-	overflow: hidden;
-	float: left;
-}
-.my-page-box .page-content .page-cover ul{
-	position: relative;
-	width: 150px;overflow:hidden;list-style: none;
-	padding: 0;margin: 0;white-space: nowrap;
-}
-
-.my-page-box .page-content .page-to,
-.my-page-box .page-content ul li,
-.my-page-box .page-content ul .page-active-bg{
-	display: inline-block;
-	width: 30px;height: 28px;line-height: 28px;
-	border:1px solid #eee;
-	text-align: center;
-	list-style: none;
-	cursor: pointer;
-	margin-left: -1px;
-	border-top: none;border-bottom: none;
-	transition: all .2s;
-}
-
-.my-page-box .page-content ul li.active,.my-page-box .page-content ul li.active:hover{color:#fff;}
-.my-page-box .page-content ul li span{z-index:3;position:relative;}
-.my-page-box .page-content .page-to {width: inherit;padding:0 0.5em;min-width:15px;}
-.my-page-box .page-content .page-to .font-icon{
-	font-size:16px;
-	display:inline-block;
-	position: relative;top: -1px;
-}
-.my-page-box .page-content .page-to.disable{opacity: 0.3;cursor: not-allowed;}
-.my-page-box .page-content .page-to.disable:hover{background:none;color: inherit;}
-.my-page-box .page-content .hidden{display: none;}
-
-.my-page-box .page-content ul .page-active-bg{
-    position: absolute;
-    top: 0;left: 0;
-    border: 1px solid #1890ff;
-	background-color: #1890ff;
-	margin-left: -1px;
-	z-index: 2;
-	transition:none;
-}
-
-
-.my-page-box .page-content .page-to:hover,
-.my-page-box .page-content ul li:hover{
-	color:#1890ff;
-	background:#def;
-}
-
-
-
-
-.my-page-box .page-content,
-.my-page-box .page-info,
-.my-page-box .page-select{float:left;}
-
-.my-page-box .page-info{
-    padding: 0 4px;
-    border: 1px solid rgba(150,150,150,0.1);
-    border-top: none;border-bottom: none;
-    margin:0 5px;
-	height: 28px;line-height:28px;
-	position:relative;
-}
-
-.my-page-box .page-info-text{padding-left:32px;}
-.my-page-box.data-only-one-page .page-info-text{padding-left:0px;}
-.my-page-box .page-info input{
-	width: 25px;
-	height: 18px;line-height: 18px;
-	color: inherit;
-    border: 1px solid #e5e5e5;
-    text-align: center;
-    padding: 0px 1px 0px 1px;
-    border-radius: 3px;
-    outline: none;
-	position: absolute;top:4px;
-}
-.my-page-box .page-info input:hover{
-	border-color:#40a9ff;
-}
-.my-page-box .page-info input:active,
-.my-page-box .page-info input:focus{
-	border-color:#40a9ff;
-	box-shadow: 0 0 0 2px rgba(24,144,255,0.2);
-}
-.my-page-box .page-info .page-to-btn{
-	display: inline-block;
-    background: #fff;
-    padding:3px 6px 2px 6px;
-    border: 1px solid #eee;
-    border-left: none;
-	margin: 0 5px 0 -7px;
-    border-radius: 0 3px 3px 0;
-    cursor: pointer;
-    line-height: 14px;
-    background-image: linear-gradient(to bottom,#fff 0,#eee 100%);
-}
-.my-page-box .page-info .page-to-btn:hover{
-	background-image: linear-gradient(to bottom,#f6f6f6 0,#e6e6e6 100%);
-}
-
-.my-page-box .page-select{
-	margin-right: -15px;
-}
-.my-page-box .page-select select {
-	appearance:none;
-	-moz-appearance:none;
-	-webkit-appearance:none;
-	
-	background-image: none !important;
-    filter: none !important;
-	border: 1px solid #e5e5e5;
-	color: inherit;
-    outline: none;
-	padding: 0px 0.5em;
-	padding-right: 15px;
-    height: 20px !important;
-    margin-top:3px;
-    line-height: 20px;
-    border-radius: 3px;
-}
-.my-page-box .page-select select:hover{
-	border-color:#40a9ff;
-	box-shadow: 0 0 0 2px rgba(24,144,255,0.2);
-}
-.my-page-box .page-select .select-icon{
-    position: relative;left: -21px;top: -2px;
-    display: inline-block;
-    width: 16px;height: 20px;line-height: 20px;
-	text-align: center;
-	pointer-events: none;
-}
-.clear{clear: both;}
-
-.my-page-box .page-select select,.my-page-box .page-info input{
-    border-color: rgba(150,150,150,0.1);
-    background: rgba(200,200,200,0.08);
-	transition: all .2s;
-}
-
-.my-page-box .page-content ul li span.num-3{zoom: 0.9;}
-.my-page-box .page-content ul li span.num-4{zoom: 0.75;}
-.my-page-box .page-content ul li span.num-5{zoom: 0.65;}
-.my-page-box .page-content ul li span.num-6{zoom: 0.6;}
-
-.my-page-box .page-content .page-to, 
-.my-page-box .page-content ul li, 
-.my-page-box .page-content ul .page-active-bg{border:none;}</style><link charset="utf-8" rel="stylesheet" href="style/lib/alifont/iconfont.css"><link charset="utf-8" rel="stylesheet" href="style/lib/font-icon/style.css"><style id="add-style-css-text" type="text/css">
-		.share-page-topbar .version_vip_free,
-		.menu-view-setting .context-menu-item.emmet,
-		.menu-dropdown-user .app-download,
-		.menu-view-setting .context-menu-item.editor-help-more
-		{display:none !important;}.dialog-copyright-content .content iframe{display:none !important;}.admin-setting-page .info-box-version iframe{display:none !important;}i.x-item-icon.x-magnet{background-image:url('https://static.minelibs.eu.org/images/file_icon/icon_file/utorrent.png');}    .x-item-icon.x-drawio{background-image:url('https://static.minelibs.eu.org/plugins/drawio/static/images/drawio.png');}    .file .path-ico.path-icon-mov .picture:before,.file .path-ico.path-icon-webm .picture:before,.file .path-ico.path-icon-mp4 .picture:before,.file .path-ico.path-icon-m4v .picture:before,.file .path-ico.path-icon-mkv .picture:before,.file .path-ico.path-icon-f4v .picture:before,.file .path-ico.path-icon-flv .picture:before,.file .path-ico.path-icon-ogv .picture:before{			content:'\f00a';font-family: 'remixicon';			position: absolute;margin: auto;z-index: 5;			left: 0;top: 0;right: 0;bottom: 0;			transition: 0.2s all;			width: 28px;height: 28px;line-height: 28px; font-size: 20px;			border-radius:50%;color: rgba(255,255,255,0.9);		}		.file .path-ico .picture:before{background: rgba(0,0,0,0.4);}		.file.hover .path-ico .picture:before{background: rgba(0,0,0,.6);color:#fff;}		.video-show-tips{			position:absolute;bottom:45px;right:20px;z-index:100;			background:rgba(0,0,0,0.4);color:#fff;pointer-events: none;			padding:4px 10px;border-radius:3px;opacity: 0.8;		}.file-list-list .file .path-ico.path-icon-mov .picture:before,.file-list-list .file .path-ico.path-icon-webm .picture:before,.file-list-list .file .path-ico.path-icon-mp4 .picture:before,.file-list-list .file .path-ico.path-icon-m4v .picture:before,.file-list-list .file .path-ico.path-icon-mkv .picture:before,.file-list-list .file .path-ico.path-icon-f4v .picture:before,.file-list-list .file .path-ico.path-icon-flv .picture:before,.file-list-list .file .path-ico.path-icon-ogv .picture:before,.file-list-split .file .path-ico.path-icon-mov .picture:before,.file-list-split .file .path-ico.path-icon-webm .picture:before,.file-list-split .file .path-ico.path-icon-mp4 .picture:before,.file-list-split .file .path-ico.path-icon-m4v .picture:before,.file-list-split .file .path-ico.path-icon-mkv .picture:before,.file-list-split .file .path-ico.path-icon-f4v .picture:before,.file-list-split .file .path-ico.path-icon-flv .picture:before,.file-list-split .file .path-ico.path-icon-ogv .picture:before{width:15px;height:15px;line-height:15px;font-size:14px;}.app-config-fileThumb.dialog-form .form-box .form-row.item-imgnryMore{					display: inline-block;position: absolute;margin-top:-35px;margin-left: 420px;				}				.app-config-fileThumb.dialog-form .form-box .form-row.item-imgnryMore .setting-title {display: none;}.x-item-icon.x-io-webdav{background-image:url("https://static.minelibs.eu.org/plugins/webdav/static/images/webdav.png");margin-top:1px;}.header-middle .header-address .path-ico.name-io-webdav{padding-top:4px;}.x-item-icon.x-3dm,.x-item-icon.small.x-3dm,.x-item-icon.x-3ds,.x-item-icon.small.x-3ds,.x-item-icon.x-3mf,.x-item-icon.small.x-3mf,.x-item-icon.x-amf,.x-item-icon.small.x-amf,.x-item-icon.x-bvh,.x-item-icon.small.x-bvh,.x-item-icon.x-dae,.x-item-icon.small.x-dae,.x-item-icon.x-drc,.x-item-icon.small.x-drc,.x-item-icon.x-fbx,.x-item-icon.small.x-fbx,.x-item-icon.x-gcode,.x-item-icon.small.x-gcode,.x-item-icon.x-mpt,.x-item-icon.small.x-mpt,.x-item-icon.x-mpf,.x-item-icon.small.x-mpf,.x-item-icon.x-nc,.x-item-icon.small.x-nc,.x-item-icon.x-glb,.x-item-icon.small.x-glb,.x-item-icon.x-gltf,.x-item-icon.small.x-gltf,.x-item-icon.x-vrm,.x-item-icon.small.x-vrm,.x-item-icon.x-kmz,.x-item-icon.small.x-kmz,.x-item-icon.x-lwo,.x-item-icon.small.x-lwo,.x-item-icon.x-md2,.x-item-icon.small.x-md2,.x-item-icon.x-mdd,.x-item-icon.small.x-mdd,.x-item-icon.x-mpd,.x-item-icon.small.x-mpd,.x-item-icon.x-nrrd,.x-item-icon.small.x-nrrd,.x-item-icon.x-obj,.x-item-icon.small.x-obj,.x-item-icon.x-pcd,.x-item-icon.small.x-pcd,.x-item-icon.x-pdb,.x-item-icon.small.x-pdb,.x-item-icon.x-ply,.x-item-icon.small.x-ply,.x-item-icon.x-stl,.x-item-icon.small.x-stl,.x-item-icon.x-stla,.x-item-icon.small.x-stla,.x-item-icon.x-stlb,.x-item-icon.small.x-stlb,.x-item-icon.x-usdz,.x-item-icon.small.x-usdz,.x-item-icon.x-usda,.x-item-icon.small.x-usda,.x-item-icon.x-usdc,.x-item-icon.small.x-usdc,.x-item-icon.x-usd,.x-item-icon.small.x-usd,.x-item-icon.x-vox,.x-item-icon.small.x-vox,.x-item-icon.x-vrml,.x-item-icon.small.x-vrml,.x-item-icon.x-wrl,.x-item-icon.small.x-wrl,.x-item-icon.x-vtk,.x-item-icon.small.x-vtk,.x-item-icon.x-vtp,.x-item-icon.small.x-vtp,.x-item-icon.x-xyz,.x-item-icon.small.x-xyz,.x-item-icon.x-assimp,.x-item-icon.small.x-assimp,.x-item-icon.x-awd,.x-item-icon.small.x-awd,.x-item-icon.x-babylon,.x-item-icon.small.x-babylon,.x-item-icon.x-bim,.x-item-icon.small.x-bim,.x-item-icon.x-brd,.x-item-icon.small.x-brd,.x-item-icon.x-csg,.x-item-icon.small.x-csg,.x-item-icon.x-scad,.x-item-icon.small.x-scad,.x-item-icon.x-ctm,.x-item-icon.small.x-ctm,.x-item-icon.x-ifc,.x-item-icon.small.x-ifc,.x-item-icon.x-off,.x-item-icon.small.x-off,.x-item-icon.x-plt,.x-item-icon.small.x-plt,.x-item-icon.x-pmd,.x-item-icon.small.x-pmd,.x-item-icon.x-pmx,.x-item-icon.small.x-pmx,.x-item-icon.x-prwm,.x-item-icon.small.x-prwm,.x-item-icon.x-tilt,.x-item-icon.small.x-tilt,.x-item-icon.x-vff,.x-item-icon.small.x-vff,.x-item-icon.x-x3d,.x-item-icon.small.x-x3d,.x-item-icon.x-x_t,.x-item-icon.small.x-x_t,.x-item-icon.x-x_b,.x-item-icon.small.x-x_b,.x-item-icon.x-stp,.x-item-icon.small.x-stp,.x-item-icon.x-step,.x-item-icon.small.x-step,.x-item-icon.x-stpz,.x-item-icon.small.x-stpz,.x-item-icon.x-stepz,.x-item-icon.small.x-stepz,.x-item-icon.x-brp,.x-item-icon.small.x-brp,.x-item-icon.x-brep,.x-item-icon.small.x-brep,.x-item-icon.x-igs,.x-item-icon.small.x-igs,.x-item-icon.x-iges,.x-item-icon.small.x-iges,.x-item-icon.x-fcstd,.x-item-icon.small.x-fcstd,.x-item-icon.x-ac,.x-item-icon.small.x-ac,.x-item-icon.x-acc,.x-item-icon.small.x-acc,.x-item-icon.x-ase,.x-item-icon.small.x-ase,.x-item-icon.x-b3d,.x-item-icon.small.x-b3d,.x-item-icon.x-blend,.x-item-icon.small.x-blend,.x-item-icon.x-cob,.x-item-icon.small.x-cob,.x-item-icon.x-csm,.x-item-icon.small.x-csm,.x-item-icon.x-hmp,.x-item-icon.small.x-hmp,.x-item-icon.x-iqm,.x-item-icon.small.x-iqm,.x-item-icon.x-lws,.x-item-icon.small.x-lws,.x-item-icon.x-md5mesh,.x-item-icon.small.x-md5mesh,.x-item-icon.x-mdc,.x-item-icon.small.x-mdc,.x-item-icon.x-mdl,.x-item-icon.small.x-mdl,.x-item-icon.x-ms3d,.x-item-icon.small.x-ms3d,.x-item-icon.x-nff,.x-item-icon.small.x-nff,.x-item-icon.x-ogex,.x-item-icon.small.x-ogex,.x-item-icon.x-q3o,.x-item-icon.small.x-q3o,.x-item-icon.x-q3s,.x-item-icon.small.x-q3s,.x-item-icon.x-sib,.x-item-icon.small.x-sib,.x-item-icon.x-smd,.x-item-icon.small.x-smd,.x-item-icon.x-xgl,.x-item-icon.small.x-xgl,.x-item-icon.x-zg,.x-item-icon.small.x-zg,.x-item-icon.x-low,.x-item-icon.small.x-low,.x-item-icon.x-lxo,.x-item-icon.small.x-lxo,.x-item-icon.x-x,.x-item-icon.small.x-x,.x-item-icon.x-assim,.x-item-icon.small.x-assim,.x-item-icon.x-glb,.x-item-icon.small.x-glb,.x-item-icon.x-gltf,.x-item-icon.small.x-gltf,.x-item-icon.x-vr,.x-item-icon.small.x-vr,.x-item-icon.x-irr,.x-item-icon.small.x-irr,.x-item-icon.x-irrmesh,.x-item-icon.small.x-irrmesh,.x-item-icon.x-raw,.x-item-icon.small.x-raw,.x-item-icon.x-ter,.x-item-icon.small.x-ter,.x-item-icon.x-m3d,.x-item-icon.small.x-m3d,.x-item-icon.x-a3,.x-item-icon.small.x-a3,.x-item-icon.x-dxf,.x-item-icon.small.x-dxf,.x-item-icon.x-dxfb,.x-item-icon.small.x-dxfb,.x-item-icon.x-dwg,.x-item-icon.small.x-dwg{background-image:url(https://static.minelibs.eu.org/plugins/autoViewer/static/images/icon.svg);background-size:85%;}.path-ico.name-3dm .picture.ico img,.path-ico.name-3ds .picture.ico img,.path-ico.name-3mf .picture.ico img,.path-ico.name-amf .picture.ico img,.path-ico.name-bvh .picture.ico img,.path-ico.name-dae .picture.ico img,.path-ico.name-drc .picture.ico img,.path-ico.name-fbx .picture.ico img,.path-ico.name-gcode .picture.ico img,.path-ico.name-mpt .picture.ico img,.path-ico.name-mpf .picture.ico img,.path-ico.name-nc .picture.ico img,.path-ico.name-glb .picture.ico img,.path-ico.name-gltf .picture.ico img,.path-ico.name-vrm .picture.ico img,.path-ico.name-kmz .picture.ico img,.path-ico.name-lwo .picture.ico img,.path-ico.name-md2 .picture.ico img,.path-ico.name-mdd .picture.ico img,.path-ico.name-mpd .picture.ico img,.path-ico.name-nrrd .picture.ico img,.path-ico.name-obj .picture.ico img,.path-ico.name-pcd .picture.ico img,.path-ico.name-pdb .picture.ico img,.path-ico.name-ply .picture.ico img,.path-ico.name-stl .picture.ico img,.path-ico.name-stla .picture.ico img,.path-ico.name-stlb .picture.ico img,.path-ico.name-usdz .picture.ico img,.path-ico.name-usda .picture.ico img,.path-ico.name-usdc .picture.ico img,.path-ico.name-usd .picture.ico img,.path-ico.name-vox .picture.ico img,.path-ico.name-vrml .picture.ico img,.path-ico.name-wrl .picture.ico img,.path-ico.name-vtk .picture.ico img,.path-ico.name-vtp .picture.ico img,.path-ico.name-xyz .picture.ico img,.path-ico.name-assimp .picture.ico img,.path-ico.name-awd .picture.ico img,.path-ico.name-babylon .picture.ico img,.path-ico.name-bim .picture.ico img,.path-ico.name-brd .picture.ico img,.path-ico.name-csg .picture.ico img,.path-ico.name-scad .picture.ico img,.path-ico.name-ctm .picture.ico img,.path-ico.name-ifc .picture.ico img,.path-ico.name-off .picture.ico img,.path-ico.name-plt .picture.ico img,.path-ico.name-pmd .picture.ico img,.path-ico.name-pmx .picture.ico img,.path-ico.name-prwm .picture.ico img,.path-ico.name-tilt .picture.ico img,.path-ico.name-vff .picture.ico img,.path-ico.name-x3d .picture.ico img,.path-ico.name-x_t .picture.ico img,.path-ico.name-x_b .picture.ico img,.path-ico.name-stp .picture.ico img,.path-ico.name-step .picture.ico img,.path-ico.name-stpz .picture.ico img,.path-ico.name-stepz .picture.ico img,.path-ico.name-brp .picture.ico img,.path-ico.name-brep .picture.ico img,.path-ico.name-igs .picture.ico img,.path-ico.name-iges .picture.ico img,.path-ico.name-fcstd .picture.ico img,.path-ico.name-ac .picture.ico img,.path-ico.name-acc .picture.ico img,.path-ico.name-ase .picture.ico img,.path-ico.name-b3d .picture.ico img,.path-ico.name-blend .picture.ico img,.path-ico.name-cob .picture.ico img,.path-ico.name-csm .picture.ico img,.path-ico.name-hmp .picture.ico img,.path-ico.name-iqm .picture.ico img,.path-ico.name-lws .picture.ico img,.path-ico.name-md5mesh .picture.ico img,.path-ico.name-mdc .picture.ico img,.path-ico.name-mdl .picture.ico img,.path-ico.name-ms3d .picture.ico img,.path-ico.name-nff .picture.ico img,.path-ico.name-ogex .picture.ico img,.path-ico.name-q3o .picture.ico img,.path-ico.name-q3s .picture.ico img,.path-ico.name-sib .picture.ico img,.path-ico.name-smd .picture.ico img,.path-ico.name-xgl .picture.ico img,.path-ico.name-zg .picture.ico img,.path-ico.name-low .picture.ico img,.path-ico.name-lxo .picture.ico img,.path-ico.name-x .picture.ico img,.path-ico.name-assim .picture.ico img,.path-ico.name-glb .picture.ico img,.path-ico.name-gltf .picture.ico img,.path-ico.name-vr .picture.ico img,.path-ico.name-irr .picture.ico img,.path-ico.name-irrmesh .picture.ico img,.path-ico.name-raw .picture.ico img,.path-ico.name-ter .picture.ico img,.path-ico.name-m3d .picture.ico img,.path-ico.name-a3 .picture.ico img,.path-ico.name-dxf .picture.ico img,.path-ico.name-dxfb .picture.ico img,.path-ico.name-dwg .picture.ico img{background:none !important;box-shadow:none !important;}.path-ico.name-dxf .picture.ico img,.path-ico.name-dwg .picture.ico img,.path-ico.name-dxfb .picture.ico img{background-color:#000000e0 !important;box-shadow:1px 1px 5px #00000033 !important;filter:brightness(5.1) contrast(1.04) saturate(5.1);}.dark-mode .path-ico.name-dxf .picture.ico img,.dark-mode .path-ico.name-dwg .picture.ico img,.dark-mode .path-ico.name-dxfb .picture.ico img{background-color:#000000d0 !important;box-shadow:1px 1px 5px #00000033 !important;}.x-item-icon.x-packed-refs,.x-item-icon.x-head,.x-item-icon.x-fetch_head,.x-item-icon.x-orig_head,.x-item-icon.x-authors,.x-item-icon.x-install,.x-item-icon.x-configure,.x-item-icon.x-packs,.x-item-icon.x-refs,.x-item-icon.x-description,.x-item-icon.x-master,.x-item-icon.x-exclude,.x-item-icon.x-key,.x-item-icon.x-repo,.x-item-icon.x-pid,.x-item-icon.x-cnf,.x-item-icon.x-mtl,.x-item-icon.x-mtlx,.x-item-icon.x-settings,.x-item-icon.x-resx,.x-item-icon.x-props,.x-item-icon.x-targets,.x-item-icon.x-credits,.x-item-icon.x-arclint,.x-item-icon.x-arcconfig,.x-item-icon.x-err,.x-item-icon.x-pub,.x-item-icon.x-keys,.x-item-icon.x-values,.x-item-icon.x-servers,.x-item-icon.x-acl,.x-item-icon.x-netrwhist,.x-item-icon.x-sample,.x-item-icon.x-empty,.x-item-icon.x-dist,.x-item-icon.x-installversion,.x-item-icon.x-version,.x-item-icon.x-rst,.x-item-icon.x-bak,.x-item-icon.x-dockerfile,.x-item-icon.x-m4,.x-item-icon.x-compile,.x-item-icon.x-guess,.x-item-icon.x-status,.x-item-icon.x-sub,.x-item-icon.x-ac,.x-item-icon.x-la,.x-item-icon.x-pc,.x-item-icon.x-in,.x-item-icon.x-am,.x-item-icon.x-copying,.x-item-icon.x-depcomp,.x-item-icon.x-install-sh,.x-item-icon.x-missing,.x-item-icon.x-news,.x-item-icon.x-todo,.x-item-icon.x-using_foreign_code,.x-item-icon.x-supp,.x-item-icon.x-json-check,.x-item-icon.x-hacking,.x-item-icon.x-contributing,.x-item-icon.x-dockerfile-master,.x-item-icon.x-dockerfile-dist,.x-item-icon.x-lsp,.x-item-icon.x-dxf-check,.x-item-icon.x-dxfb-check,.x-item-icon.x-spec,.x-item-icon.x-1,.x-item-icon.x-2,.x-item-icon.x-texi,.x-item-icon.x-gendocs_template,.x-item-icon.x-gnumakefile,.x-item-icon.x-git-version-gen,.x-item-icon.x-gitlog-to-changelog,.x-item-icon.x-t,.x-item-icon.x-i,.x-item-icon.x-kml,.x-item-icon.x-pri,.x-item-icon.x-astylerc,.x-item-icon.x-dox,.x-item-icon.x-inx,.x-item-icon.x-rng,.x-item-icon.x-schema,.x-item-icon.x-out,.x-item-icon.x-coveragerc,.x-item-icon.x-darglint,.x-item-icon.x-pylintrc,.x-item-icon.x-plugins,.x-item-icon.x-qrc,.x-item-icon.x-app,.x-item-icon.x-mime,.x-item-icon.x-sharedmimeinfo,.x-item-icon.x-desktop,.x-item-icon.x-sourcetreeconfig,.x-item-icon.x-commit_editmsg,.x-item-icon.x-fx,.x-item-icon.x-lgc,.x-item-icon.x-ui,.x-item-icon.x-crt,.x-item-icon.x-bash_history,.x-item-icon.x-bash_profile,.x-item-icon.x-git-credentials,.x-item-icon.x-gitconfig,.x-item-icon.x-gitflow_export,.x-item-icon.x-template,.x-item-icon.x-typed,.x-item-icon.x-gitignore_global,.x-item-icon.x-hgignore_global,.x-item-icon.x-lesshst,.x-item-icon.x-mailcap,.x-item-icon.x-mycli-history,.x-item-icon.x-gitkeep,.x-item-icon.x-brew_all_commands,.x-item-icon.x-myclirc,.x-item-icon.x-mysql_history,.x-item-icon.x-node_repl_history,.x-item-icon.x-npmrc,.x-item-icon.x-pearrc,.x-item-icon.x-plist,.x-item-icon.x-rediscli_history,.x-item-icon.x-sh_history,.x-item-icon.x-sqlite_history,.x-item-icon.x-stcommitmsg,.x-item-icon.x-types,.x-item-icon.x-viminfo,.x-item-icon.x-eslintignore,.x-item-icon.x-zsh-update,.x-item-icon.x-zsh_history,.x-item-icon.x-zshrc,.x-item-icon.x-zshrc_self,.x-item-icon.x-zsh,.x-item-icon.x-zsh-theme,.x-item-icon.x-zsh-template,.x-item-icon.x-_adb,.x-item-icon.x-fm,.x-item-icon.x-phpclass,.x-item-icon.x-cid,.x-item-icon.x-lic,.x-item-icon.x-odin,.x-item-icon.x-jexl,.x-item-icon.x-plsql,.x-item-icon.x-robot,.x-item-icon.x-vsixmanifest,.x-item-icon.x-vmx,.x-item-icon.x-vmxd,.x-item-icon.x-vmxf,.x-item-icon.x-lock,.x-item-icon.x-gypi,.x-item-icon.x-fingerprint,.x-item-icon.x-nmf,.x-item-icon.x-rels,.x-item-icon.x-geojson,.x-item-icon.x-x3d,.x-item-icon.x-xbel{background-image:url('https://static.minelibs.eu.org/images/file_icon/icon_file/txt.png');}
-.x-item-icon.small.x-packed-refs,.x-item-icon.small.x-head,.x-item-icon.small.x-fetch_head,.x-item-icon.small.x-orig_head,.x-item-icon.small.x-authors,.x-item-icon.small.x-install,.x-item-icon.small.x-configure,.x-item-icon.small.x-packs,.x-item-icon.small.x-refs,.x-item-icon.small.x-description,.x-item-icon.small.x-master,.x-item-icon.small.x-exclude,.x-item-icon.small.x-key,.x-item-icon.small.x-repo,.x-item-icon.small.x-pid,.x-item-icon.small.x-cnf,.x-item-icon.small.x-mtl,.x-item-icon.small.x-mtlx,.x-item-icon.small.x-settings,.x-item-icon.small.x-resx,.x-item-icon.small.x-props,.x-item-icon.small.x-targets,.x-item-icon.small.x-credits,.x-item-icon.small.x-arclint,.x-item-icon.small.x-arcconfig,.x-item-icon.small.x-err,.x-item-icon.small.x-pub,.x-item-icon.small.x-keys,.x-item-icon.small.x-values,.x-item-icon.small.x-servers,.x-item-icon.small.x-acl,.x-item-icon.small.x-netrwhist,.x-item-icon.small.x-sample,.x-item-icon.small.x-empty,.x-item-icon.small.x-dist,.x-item-icon.small.x-installversion,.x-item-icon.small.x-version,.x-item-icon.small.x-rst,.x-item-icon.small.x-bak,.x-item-icon.small.x-dockerfile,.x-item-icon.small.x-m4,.x-item-icon.small.x-compile,.x-item-icon.small.x-guess,.x-item-icon.small.x-status,.x-item-icon.small.x-sub,.x-item-icon.small.x-ac,.x-item-icon.small.x-la,.x-item-icon.small.x-pc,.x-item-icon.small.x-in,.x-item-icon.small.x-am,.x-item-icon.small.x-copying,.x-item-icon.small.x-depcomp,.x-item-icon.small.x-install-sh,.x-item-icon.small.x-missing,.x-item-icon.small.x-news,.x-item-icon.small.x-todo,.x-item-icon.small.x-using_foreign_code,.x-item-icon.small.x-supp,.x-item-icon.small.x-json-check,.x-item-icon.small.x-hacking,.x-item-icon.small.x-contributing,.x-item-icon.small.x-dockerfile-master,.x-item-icon.small.x-dockerfile-dist,.x-item-icon.small.x-lsp,.x-item-icon.small.x-dxf-check,.x-item-icon.small.x-dxfb-check,.x-item-icon.small.x-spec,.x-item-icon.small.x-1,.x-item-icon.small.x-2,.x-item-icon.small.x-texi,.x-item-icon.small.x-gendocs_template,.x-item-icon.small.x-gnumakefile,.x-item-icon.small.x-git-version-gen,.x-item-icon.small.x-gitlog-to-changelog,.x-item-icon.small.x-t,.x-item-icon.small.x-i,.x-item-icon.small.x-kml,.x-item-icon.small.x-pri,.x-item-icon.small.x-astylerc,.x-item-icon.small.x-dox,.x-item-icon.small.x-inx,.x-item-icon.small.x-rng,.x-item-icon.small.x-schema,.x-item-icon.small.x-out,.x-item-icon.small.x-coveragerc,.x-item-icon.small.x-darglint,.x-item-icon.small.x-pylintrc,.x-item-icon.small.x-plugins,.x-item-icon.small.x-qrc,.x-item-icon.small.x-app,.x-item-icon.small.x-mime,.x-item-icon.small.x-sharedmimeinfo,.x-item-icon.small.x-desktop,.x-item-icon.small.x-sourcetreeconfig,.x-item-icon.small.x-commit_editmsg,.x-item-icon.small.x-fx,.x-item-icon.small.x-lgc,.x-item-icon.small.x-ui,.x-item-icon.small.x-crt,.x-item-icon.small.x-bash_history,.x-item-icon.small.x-bash_profile,.x-item-icon.small.x-git-credentials,.x-item-icon.small.x-gitconfig,.x-item-icon.small.x-gitflow_export,.x-item-icon.small.x-template,.x-item-icon.small.x-typed,.x-item-icon.small.x-gitignore_global,.x-item-icon.small.x-hgignore_global,.x-item-icon.small.x-lesshst,.x-item-icon.small.x-mailcap,.x-item-icon.small.x-mycli-history,.x-item-icon.small.x-gitkeep,.x-item-icon.small.x-brew_all_commands,.x-item-icon.small.x-myclirc,.x-item-icon.small.x-mysql_history,.x-item-icon.small.x-node_repl_history,.x-item-icon.small.x-npmrc,.x-item-icon.small.x-pearrc,.x-item-icon.small.x-plist,.x-item-icon.small.x-rediscli_history,.x-item-icon.small.x-sh_history,.x-item-icon.small.x-sqlite_history,.x-item-icon.small.x-stcommitmsg,.x-item-icon.small.x-types,.x-item-icon.small.x-viminfo,.x-item-icon.small.x-eslintignore,.x-item-icon.small.x-zsh-update,.x-item-icon.small.x-zsh_history,.x-item-icon.small.x-zshrc,.x-item-icon.small.x-zshrc_self,.x-item-icon.small.x-zsh,.x-item-icon.small.x-zsh-theme,.x-item-icon.small.x-zsh-template,.x-item-icon.small.x-_adb,.x-item-icon.small.x-fm,.x-item-icon.small.x-phpclass,.x-item-icon.small.x-cid,.x-item-icon.small.x-lic,.x-item-icon.small.x-odin,.x-item-icon.small.x-jexl,.x-item-icon.small.x-plsql,.x-item-icon.small.x-robot,.x-item-icon.small.x-vsixmanifest,.x-item-icon.small.x-vmx,.x-item-icon.small.x-vmxd,.x-item-icon.small.x-vmxf,.x-item-icon.small.x-lock,.x-item-icon.small.x-gypi,.x-item-icon.small.x-fingerprint,.x-item-icon.small.x-nmf,.x-item-icon.small.x-rels,.x-item-icon.small.x-geojson,.x-item-icon.small.x-x3d,.x-item-icon.small.x-xbel{background-image:url('https://static.minelibs.eu.org/images/file_icon/icon_file/txt_small.png');}
-.x-item-icon.x-xcf{background-image:url('https://static.minelibs.eu.org/images/file_icon/icon_file/png.png');}
-</style><style class="poshytip-css-ptips-skin poshytip-css-ptips-skin" type="text/css">div.poshytip-css-ptips-skin{visibility:hidden;position:absolute;top:0;left:0;}div.poshytip-css-ptips-skin table.tip-table, div.poshytip-css-ptips-skin table.tip-table td{margin:0;font-family:inherit;font-size:inherit;font-weight:inherit;font-style:inherit;font-variant:inherit;vertical-align:middle;}div.poshytip-css-ptips-skin td.tip-bg-image span{display:block;font:1px/1px sans-serif;height:10px;width:10px;overflow:hidden;}div.poshytip-css-ptips-skin td.tip-right{background-position:100% 0;}div.poshytip-css-ptips-skin td.tip-bottom{background-position:100% 100%;}div.poshytip-css-ptips-skin td.tip-left{background-position:0 100%;}div.poshytip-css-ptips-skin div.tip-inner{background-position:-10px -10px;}div.poshytip-css-ptips-skin div.tip-arrow{visibility:hidden;position:absolute;overflow:hidden;font:1px/1px sans-serif;}</style><link charset="utf-8" rel="stylesheet" href="plugins/officeViewer/static/app/main.css"><link charset="utf-8" rel="stylesheet" href="plugins/client/static/style.css"><link charset="utf-8" rel="stylesheet" href="plugins/oauth/static/main.css"><link charset="utf-8" rel="stylesheet" href="plugins/storeImport/static/main.css"><style id="dark-mode-background" type="text/css">html.dark-mode:before{background-image:linear-gradient(160deg,#1890FF,#7FEC00) !important;}</style></head>
-
-<body tabindex="1" class="app-device-ratio-1 theme-windows share-view-body" theme-style="theme-windows" kod-lang="zh-CN">
-  <div id="app" data-view-node="1"><div class="share-page-main explorer-UUID_3103390_4315d48" id="explorer-UUID_3103390_4315d48" data-view-node="1"> <div class="content-main-message"><div class="content-main"><div class="check-result">  <i class="font-icon error"></i><div class="message-content"><div class="title">404 Not Found</div><div class="desc">文件不存在,请检查后再试</div></div>  </div><div class="link">
-  <a class="home-btn" draggable="false">返回首页</a>
-</div>
-<script>
-(function () {
-  var btn = document.querySelector('.link .home-btn');
-  if (!btn) return;
-  btn.addEventListener('click', function () {
-    location.href = 'https://cloud.minelibs.eu.org/';
-  });
-})();
-</script>
-<style>
-  .link .home-btn {
-    cursor: pointer;
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    user-select: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-</style></div></div> </div></div>
   <style>
-    .bg-black{background:#333;}
-    .loading-body div{
-      position:fixed;margin:auto;left:0;top:0;right:0;bottom:0;max-width:64px;
-      max-height:64px;width:64px;border-radius:4px;opacity:0.8;background-size: contain;
-      background-image:url("https://static.minelibs.eu.org/images/common/loading-page.gif?v=mb");
-    }
-    .bg-black .loading-body div,.dark-mode .loading-body div{
-      width:36px;height:36px;
-      background-image:url("https://static.minelibs.eu.org/images/common/loading-pin3-dark.gif?v=mb");
+    @media (max-width: 999.98px) {
+      .share-page-main .content-main-message { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+      .share-page-main .content-main-message .content-main { width: 90%; margin: auto; }
+      .share-page-main .content-main-message .content-main .message-content { padding: 40px 10px 100px 10px; }
+      .share-page-main .content-main-message .content-main .title { margin: 15px 0px; font-size: 18px; }
     }
   </style>
 
   <style>
-    
+    .form-box.config-box .form-header .modal-title .path-ico:has(.picture.ico) { height: 22px; }
+    .form-box.config-box .form-header .modal-title .path-ico .picture.ico { position: relative; top: 6px; }
+  </style>
+
+  <style>
+    .link .home-btn { cursor: pointer; -webkit-touch-callout: none; -webkit-user-select: none; -moz-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  </style>
+
+  <style>
     .admin-menu-left li[link-href="admin/setting/license"],
     [data-action="resetLicense"],
     [data-action="setLicense"],
@@ -555,64 +207,41 @@
     }
   </style>
 
-  
-  
-
-  <link href="style/lib/main.css" rel="stylesheet">
-  <link href="style/dist/main.css" rel="stylesheet">
-
   <style>
-    
-    @media (max-width: 999.98px) {
-      .share-page-main .content-main-message {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-      }
-      .share-page-main .content-main-message .content-main {
-        width: 90%;
-        margin: auto;
-      }
-      .share-page-main .content-main-message .content-main .message-content {
-        padding: 40px 10px 100px 10px;
-      }
-      .share-page-main .content-main-message .content-main .title {
-        margin: 15px 0px;
-        font-size: 18px;
-      }
-    }
+    .bg-black { background: #333; }
+    .loading-body div { position: fixed; margin: auto; left: 0; top: 0; right: 0; bottom: 0; max-width: 64px; max-height: 64px; width: 64px; border-radius: 4px; opacity: 0.8; background-size: contain; background-image: url("https://static.minelibs.eu.org/images/common/loading-page.gif?v=mb"); }
+    .bg-black .loading-body div, .dark-mode .loading-body div { width: 36px; height: 36px; background-image: url("https://static.minelibs.eu.org/images/common/loading-pin3-dark.gif?v=mb"); }
   </style>
-  
-  
-  
-  
-  <style>
-    
-    .form-box.config-box .form-header .modal-title .path-ico:has(.picture.ico){height:22px}
-    .form-box.config-box .form-header .modal-title .path-ico .picture.ico{position:relative;top:6px}
-  </style>
+</head>
 
-  
+<body tabindex="1" class="app-device-ratio-1 theme-windows share-view-body" theme-style="theme-windows" kod-lang="zh-CN">
+  <div id="app" data-view-node="1">
+    <div class="share-page-main explorer-UUID_3103390_4315d48" id="explorer-UUID_3103390_4315d48" data-view-node="1">
+      <div class="content-main-message">
+        <div class="content-main">
+          <div class="check-result">
+            <i class="font-icon error"></i>
+            <div class="message-content">
+              <div class="title">404 Not Found</div>
+              <div class="desc">文件不存在,请检查后再试</div>
+            </div>
+          </div>
+          <div class="link">
+            <a class="home-btn" draggable="false">返回首页</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-</body></html>e-main .content-main-message .content-main .title {
-        margin: 15px 0px;
-        font-size: 18px;
-      }
-    }
-  </style>
-  
-  
-  
-  
-  <style>
-    /* 插件配置弹窗标题图标：.path-ico 基础高度为 18px，会把 22px 的图片图标压成 22x18（变扁）。
-       这里仅为含图片图标的 .path-ico 补足高度，并把 .picture.ico 垂直居中到标题行中央，
-       使图片图标与字体图标保持一致（22x22，居中），字体图标类插件不受影响。 */
-    .form-box.config-box .form-header .modal-title .path-ico:has(.picture.ico){height:22px}
-    .form-box.config-box .form-header .modal-title .path-ico .picture.ico{position:relative;top:6px}
-  </style>
-
-  
-
-</body></html>
+  <script>
+    (function () {
+      var btn = document.querySelector('.link .home-btn');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        location.href = 'https://cloud.minelibs.eu.org/';
+      });
+    })();
+  </script>
+</body>
+</html>
