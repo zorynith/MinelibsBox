@@ -237,9 +237,13 @@
   <script>
     (function () {
       var btn = document.querySelector('.link .home-btn');
-      if (!btn) return;
-      btn.addEventListener('click', function () {
-        location.href = 'https://cloud.minelibs.eu.org/';
+      if (btn) {
+        btn.addEventListener('click', function () {
+          location.href = 'https://cloud.minelibs.eu.org/';
+        });
+      }
+      document.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
       });
     })();
   </script>
