@@ -47,6 +47,7 @@ import {
   parsePublishPath,
 } from "../lib/share";
 import { parseAuthTo, getShareToList, replaceShareTo, removeShareToByShareIds } from "../lib/share-to";
+import { sendCheckAuth, sendShareSiteAppend } from "./shareout-api";
 type Vars = { currentUser?: AuthUser };
 type AppContext = any;
 
@@ -343,7 +344,7 @@ async function buildManageShareInfo(env: Env, share: ShareRow, source: { type: "
     authID: String(t.authID),
     authDefine: t.authDefine,
   }));
-  return {
+  const info: Record<string, unknown> = {
     shareID: share.shareID,
     title: share.title,
     shareHash: share.shareHash,
@@ -387,6 +388,7 @@ async function buildManageShareInfo(env: Env, share: ShareRow, source: { type: "
           isWriteable: true,
         },
   };
+  return sendShareSiteAppend(env, info);
 }
 
 /** 错误响应（对齐 001 show_json：{code, data, info}）。 */
@@ -419,6 +421,12 @@ async function initShare(c: AppContext, params: Record<string, any>): Promise<In
   if (share.timeTo && share.timeTo > 0 && share.timeTo < now) {
     const info = await buildSharePageData(c.env, share, owner, source, { source: storage.source, relPath: storage.relPath });
     return shareError(c, 30101, L.expiredTips, info);
+  }
+  // 外站联合分享鉴权 (001 shareOuterAuth): 校验通过则跳过下载次数/登录/密码限制。
+  const outerAuth = await sendCheckAuth(c.env, share, typeof params.sk === "string" ? params.sk : "");
+  if (outerAuth) {
+    (share as unknown as { __outerAuth?: string }).__outerAuth = outerAuth;
+    return { ok: true, share, owner, source, storage: { source: storage.source, relPath: storage.relPath } };
   }
   if (opts.downloadNumber && Number(opts.downloadNumber) <= share.numDownload) {
     const info = await buildSharePageData(c.env, share, owner, source, { source: storage.source, relPath: storage.relPath });
@@ -455,10 +463,20 @@ async function initShare(c: AppContext, params: Record<string, any>): Promise<In
 /** 权限检测（001 authCheck）：notView/notDownload/上传/编辑。返回错误消息或 null。 */
 function authCheck(c: AppContext, share: ShareRow, act: string, params: Record<string, any>): string | null {
   const opts = shareOptions(share);
-  const canUpload = opts.canUpload === "1";
-  const canEdit = opts.canEditSave === "1";
-  const canView = opts.notView !== "1";
-  const canDownload = opts.notDownload !== "1";
+  let canUpload = opts.canUpload === "1";
+  let canEdit = opts.canEditSave === "1";
+  let canView = opts.notView !== "1";
+  let canDownload = opts.notDownload !== "1";
+  // 外站联合分享通过鉴权后按外站权限放开 (001 shareOuterAuth)
+  const outerAuth = (share as unknown as { __outerAuth?: string }).__outerAuth;
+  if (outerAuth === "read" || outerAuth === "write") {
+    canView = true;
+    canDownload = true;
+  }
+  if (outerAuth === "write") {
+    canEdit = true;
+    canUpload = true;
+  }
 
   const actionUpload = ["fileupload", "mkdir", "mkfile"];
   const actionEdit = ["fileupload", "mkdir", "mkfile", "pathrename", "pathdelete", "pathcopy", "pathcute", "pathcuteto", "pathcopyto", "pathpast", "filesave"];
@@ -792,7 +810,8 @@ shareApi.all("/share/pathInfo", async (c) => {
         modifyTime: head.lastModified || new Date().toISOString(),
         canEdit,
       });
-      const canDownload = shareOptions(share).notDownload !== "1";
+      const outerAuth = (share as unknown as { __outerAuth?: string }).__outerAuth;
+      const canDownload = shareOptions(share).notDownload !== "1" || !!outerAuth;
       if (canDownload) {
         const fileOutPath = shareLinkRoot(share.shareHash) + rel;
         info["downloadPath"] =

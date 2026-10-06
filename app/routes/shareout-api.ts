@@ -189,6 +189,71 @@ function failMsg(err: string): { code: boolean; data: string } {
   return { code: false, data: err };
 }
 
+function safeJsonObject(raw: unknown): Record<string, any> {
+  if (raw && typeof raw === "object") return raw as Record<string, any>;
+  if (typeof raw !== "string" || !raw) return {};
+  try {
+    const o = JSON.parse(raw);
+    return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 001 explorerShareOut::sendCheckAuth — 外站联合分享的访问鉴权。
+ * 接收端携带 sk（Mcrypt 编码的 "secret$@$to"）访问发起端；校验通过返回 read/write，否则 false。
+ * 由 explorer.share.initShare 内部调用（不通过路由），此处同时作为可复用导出函数。
+ */
+export async function sendCheckAuth(
+  env: Env,
+  shareInfo: { options?: unknown } | null | undefined,
+  sk: string
+): Promise<false | string> {
+  if (!sk) return false;
+  const allowSend = (await getSetting(env.DB, "shareOutAllowSend")) || "";
+  if (allowSend !== "1") return false;
+  const decode = await mcryptDecode(sk, MCRYPT_SECRET);
+  if (!decode) return false;
+  const dataArr = decode.split("$@$");
+  const opts = safeJsonObject(shareInfo?.options);
+  const shareOut = Array.isArray(opts.shareOut) ? opts.shareOut : [];
+  const authTo = shareOut.find((item: any) => item && item.to === dataArr[1]);
+  if (!authTo || authTo.secret !== dataArr[0]) return false;
+  return authTo.auth || false;
+}
+
+/**
+ * 001 explorerShareOut::sendShareSiteAppend — 分享信息中注入授信站点列表（shareOutSite）。
+ * 供前端在创建/编辑分享时展示可选外站；sk 用目标站点 apiKey 编码，有效期 10 分钟。
+ */
+export async function sendShareSiteAppend<T extends Record<string, any>>(env: Env, shareInfo: T): Promise<T> {
+  if (!shareInfo || typeof shareInfo !== "object") return shareInfo;
+  const shareLinkAllow = (await getSetting(env.DB, "shareLinkAllow")) || "";
+  const shareOutAllowSend = (await getSetting(env.DB, "shareOutAllowSend")) || "";
+  if (shareLinkAllow !== "1" || shareOutAllowSend !== "1") return shareInfo;
+
+  const raw = (await getSetting(env.DB, "shareOutSiteSafe")) || "";
+  let siteList: any[] = [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) siteList = parsed;
+  } catch {
+    /* ignore */
+  }
+
+  const result: Array<{ url: string; name: string; sk: string }> = [];
+  const seen = new Set<string>();
+  for (const site of siteList) {
+    if (!site || site.isOpen !== "1" || !site.apiKey) continue;
+    if (seen.has(site.url)) continue;
+    seen.add(site.url);
+    result.push({ url: site.url, name: site.name, sk: await mcryptEncode("kodShareOutGroup", site.apiKey, 600) });
+  }
+  (shareInfo as any).shareOutSite = result;
+  return shareInfo;
+}
+
 // ==================== 接收端接口 ====================
 
 // 检测是否允许接收外站联合分享
@@ -345,6 +410,22 @@ shareOutRouter.post("/shareUserExit", async (c) => {
 });
 
 // ==================== 发送方接口 ====================
+
+// 外站访问权限校验 (接收端内部IO向发起端请求)
+shareOutRouter.all("/sendCheckAuth", async (c) => {
+  const inData = await bodyParams(c);
+  const sk = inData.sk || "";
+  const shareID = parseInt(inData.shareID || "0", 10);
+  const shareHash = inData.shareHash || "";
+  let share: any = null;
+  if (shareHash) {
+    share = await c.env.DB.prepare("SELECT * FROM share WHERE shareHash = ?").bind(shareHash).first().catch(() => null);
+  } else if (shareID) {
+    share = await c.env.DB.prepare("SELECT * FROM share WHERE shareID = ?").bind(shareID).first().catch(() => null);
+  }
+  const auth = await sendCheckAuth(c.env, share, sk);
+  return c.json({ code: !!auth, data: auth || false });
+});
 
 // 接收时向发起站点的能力探测
 shareOutRouter.all("/sendCheckAllow", async (c) => {
