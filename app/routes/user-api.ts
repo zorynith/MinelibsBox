@@ -315,7 +315,7 @@ userApi.get("/view/options", async (c) => {
     myhome: "{source:home}",
     desktop: "{source:home}/桌面/",
     isRoot: 0,
-    info: { userID: "", name: "", nickname: "", role: "", sex: 0, email: "", phone: "", avatar: "", sizeMax: 0, sizeUse: 0 },
+    info: { userID: "", name: "", nickName: "", nickname: "", role: "", sex: 0, email: "", phone: "", avatar: "", sizeMax: 0, sizeUse: 0 },
     role: userRoleAuth,
     config: {
       listType: "icon", listSortField: "name", listSortOrder: "up",
@@ -378,6 +378,7 @@ userApi.get("/view/options", async (c) => {
         info: {
           userID: session.user_id,
           name: session.username,
+          nickName: session.nickname || session.username,
           nickname: session.nickname || session.username,
           role: session.role,
           sex: 0, email: session.email || "", phone: "", avatar: session.avatar || "",
