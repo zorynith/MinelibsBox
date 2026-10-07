@@ -30,6 +30,7 @@ import type { ZipCentralRangeResult } from "../lib/zip-central";
 import { BUILTIN_LIGHT_APPS } from "../lib/light-apps-data";
 import { ALL_PLUGINS, loadPluginPackage, defaultPluginConfig, normalizePluginConfig } from "../lib/plugins";
 import { getStaticHost, getAppHost } from "../lib/user-system";
+import { applyPathInfoCover, applyPathInfoCoverBatch } from "../lib/user-view";
 import { taskResultSet } from "../lib/task-result-cache";
 import { listViewSave, listViewApply } from "../lib/list-view";
 import { mcryptEncode, mcryptDecode } from "../lib/mcrypt";
@@ -1785,6 +1786,8 @@ explorerApi.all("/list/path", async (c) => {
       if (!io) await pathParseOexe(c.env.FILES, source.baseKey, item);
       fileList.push(item);
     }
+    // 001 pathInfoCover: 自定义封面 (user_sourceCover) 注入 fileThumb/fileThumbCover
+    await applyPathInfoCoverBatch(c.env.DB, [...folderList, ...fileList], getAppHost(c));
 
     const currentName = dirPath === "/" ? (source.type === "group" || source.type === "io" || source.type === "safe" ? source.displayName : rootName(user)) : dirPath.split("/").filter(Boolean).pop() || rootName(user);
     const current: Record<string, unknown> = {
@@ -2242,6 +2245,7 @@ explorerApi.all("/index/pathInfo", async (c) => {
   }
 
   if (result.length === 0) return c.json({ code: false, data: "路径不存在" });
+  await applyPathInfoCoverBatch(c.env.DB, result, getAppHost(c));
   if (result.length === 1) return c.json({ code: true, data: result[0] });
   return c.json({ code: true, data: result });
 });
@@ -2349,6 +2353,7 @@ async function listRecentData(c: AppContext, user: Vars["currentUser"], parsed: 
     }
   }
   const totalNum = folderList.length + fileList.length;
+  await applyPathInfoCoverBatch(c.env.DB, [...folderList, ...fileList], getAppHost(c));
   return {
     current: { name: "最近文档", path: parsed.thisPath, pathDisplay: displayPath(parsed.thisPath), type: "folder", isFolder: true, isWriteable: false, isReadable: true, isTruePath: true },
     folderList,
