@@ -664,6 +664,31 @@ async function sourceUsedSize(env: Env, source: SourceRef): Promise<number> {
   return size;
 }
 
+/**
+ * 单个挂载存储 (io_source) 的已用空间。
+ * 001 listDriver::rootList 通过 STORE_WITH_SIZEUSE 为每个存储附带 size=sizeUse,
+ * 前端 applyDriverSpace/bindEventSpace 依赖该字段绘制容量进度条。
+ * 系统 R2 存储走前缀扫描, 外部驱动走 list-all, 均带 TTL 缓存。
+ */
+async function ioSourceUsedSize(env: Env, s: Record<string, any>): Promise<number> {
+  let config: Record<string, unknown> = {};
+  try { config = JSON.parse(String(s.config || "{}")); } catch { config = {}; }
+  const base = String((config as any).basePath || "").replace(/^\/+|\/+$/g, "");
+  const baseKey = base ? base + "/" : "";
+  const system = parseInt(String(s.system ?? "0"), 10) === 1;
+  const source: SourceRef = {
+    sourceId: String(s.id),
+    type: "io",
+    baseKey,
+    targetID: Number(s.id),
+    displayName: String(s.name ?? ""),
+    driver: String(s.driver ?? ""),
+    ioConfig: config,
+    system: system ? 1 : 0,
+  };
+  return system ? sourceUsedSize(env, source) : ioSpaceUsed(ioClientOf(source), baseKey);
+}
+
 const s3SizeCache = new Map<string, { size: number; ts: number }>();
 
 /** 失效某存储根的空间用量缓存 (R2 sizeCache + S3 s3SizeCache) */
@@ -1022,6 +1047,7 @@ async function blockDriver(c: AppContext, user: Vars["currentUser"]): Promise<an
       isParent: true,
       ioType: s.id,
       ioDriver: s.driver,
+      size: await ioSourceUsedSize(c.env, s),
       driverSpace: Math.round(parseInt(String(s.size_max ?? "0"), 10) * 1024 * 1024 * 1024),
       pathDesc: system ? `系统存储: ${s.name}` : `挂载存储: ${s.name}`,
     });
@@ -1628,12 +1654,13 @@ async function listDriverRoot(c: AppContext): Promise<Response> {
   const user = c.get("currentUser");
   if (user.role !== "admin" && user.role !== "root") return c.json({ code: false, data: "explorer.noPermissionAction" });
   const list = await getIoSourceList(c.env.DB);
-  const folderList = list
-    .filter((s: any) => parseInt(String(s.status ?? "0"), 10) === 1)
-    .map((s: any) => ({
+  const active = list.filter((s: any) => parseInt(String(s.status ?? "0"), 10) === 1);
+  const folderList: any[] = [];
+  for (const s of active) {
+    folderList.push({
       name: s.name,
       path: `{io:${s.id}}/`,
-      size: 0,
+      size: await ioSourceUsedSize(c.env, s),
       driverSpace: Math.round(parseInt(String(s.size_max ?? "0"), 10) * 1024 * 1024 * 1024),
       driverDefault: parseInt(String(s.default ?? "0"), 10) === 1 ? "1" : "0",
       driverType: s.driver,
@@ -1641,7 +1668,8 @@ async function listDriverRoot(c: AppContext): Promise<Response> {
       ioType: s.driver,
       icon: "io-" + String(s.driver || "").toLowerCase(),
       isParent: true,
-    }));
+    });
+  }
   return c.json({ code: true, data: { folderList, fileList: [], groupShow: driverGroupShow(folderList) } });
 }
 explorerApi.all("/listDriver/get", listDriverRoot);
