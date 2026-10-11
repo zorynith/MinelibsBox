@@ -702,9 +702,10 @@ adminApi.all("/member/getByID", async (c) => {
   const result = await c.env.DB.prepare(
     `SELECT * FROM users WHERE id IN (${placeholders})`
   ).bind(...ids).all();
+  const stats = await scanBucketStats(c.env.FILES);
   const list: any[] = [];
   for (const u of result.results as any[]) {
-    list.push(await buildMemberItem(c, u));
+    list.push(await buildMemberItem(c, u, stats.perUser[u.username]?.size || 0));
   }
   return c.json(ok(list));
 });
@@ -739,9 +740,10 @@ adminApi.all("/member/search", async (c) => {
        ORDER BY id ASC LIMIT 200`
     ).bind(like, like, like, like, ...(statusFilter !== null ? [statusFilter] : [])).all();
   }
+  const stats = await scanBucketStats(c.env.FILES);
   const list: any[] = [];
   for (const u of result.results as any[]) {
-    list.push(await buildMemberItem(c, u));
+    list.push(await buildMemberItem(c, u, stats.perUser[u.username]?.size || 0));
   }
   return c.json(ok({ list, pageInfo: { page: 1, pageNum: 200, total: list.length } }));
 });
@@ -1011,14 +1013,15 @@ async function memberListByGroup(c: any, groupID: number, statusFilter: string |
        GROUP BY u.id ORDER BY u.id ASC LIMIT 500`
     ).bind(groupID, ...(statusFilter !== null ? [statusFilter] : [])).all();
   }
+  const stats = await scanBucketStats(c.env.FILES);
   const list: any[] = [];
   for (const u of result.results as any[]) {
-    list.push(await buildMemberItem(c, u));
+    list.push(await buildMemberItem(c, u, stats.perUser[u.username]?.size || 0));
   }
   return { list, pageInfo: {} };
 }
 
-async function buildMemberItem(c: any, u: any) {
+async function buildMemberItem(c: any, u: any, usedSize = 0) {
   const groups = await c.env.DB.prepare(
     `SELECT g.id AS groupID, g.name AS groupName, ug.authID
      FROM user_groups ug JOIN groups g ON ug.group_id = g.id
@@ -1049,7 +1052,7 @@ async function buildMemberItem(c: any, u: any) {
     roleName: u.role,
     status: u.status ?? 1,
     sizeMax: u.size_max || 0,
-    sizeUse: 0,
+    sizeUse: usedSize,
     groupInfo,
     sourceInfo: [],
     lastLogin: u.last_login || 0,
@@ -1383,7 +1386,13 @@ const ANALYSIS_TYPE_TITLES: Record<string, string> = {
 };
 
 /** R2 全量扫描统计: 总大小/总数/今日新增/按用户(username)汇总 */
+const bucketStatsCache = new Map<string, { data: { totalSize: number; totalCnt: number; todaySize: number; perUser: Record<string, { size: number; cnt: number }> }; ts: number }>();
+const BUCKET_STATS_TTL_MS = 10_000;
+
 async function scanBucketStats(bucket: R2Bucket) {
+  const cacheKey = "bucket";
+  const hit = bucketStatsCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < BUCKET_STATS_TTL_MS) return hit.data;
   let totalSize = 0;
   let totalCnt = 0;
   let todaySize = 0;
@@ -1411,7 +1420,9 @@ async function scanBucketStats(bucket: R2Bucket) {
   } catch {
     // R2 不可用时返回全 0, 不阻塞看板
   }
-  return { totalSize, totalCnt, todaySize, perUser };
+  const data = { totalSize, totalCnt, todaySize, perUser };
+  bucketStatsCache.set(cacheKey, { data, ts: Date.now() });
+  return data;
 }
 
 /** 扫描指定前缀下对象, 按文件类型分类统计 */
