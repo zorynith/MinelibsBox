@@ -543,9 +543,14 @@ export async function initDatabase(db: D1Database): Promise<void> {
          (3, '可读写', 'label-blue-deep', 1, 1, 511)`
     ),
     // Seed 默认 R2 存储 (001 io_source): 容量 10G (R2 账号级配额上限), driver 归类为对象存储(minio 兼容 S3)
+    // 001 io_source.size_max 以 GB 存储 (groups/users/io 统一 GB 语义), 前端按 ×1024³ 还原字节
     db.prepare(
       `INSERT OR IGNORE INTO io_source (id, name, driver, size_max, is_default, system, config, status, add_time, edit_time)
-       VALUES (1, '系统存储', 'minio', 10737418240, 1, 1, '{}', 1, 0, 0)`
+       VALUES (1, '系统存储', 'minio', 10, 1, 1, '{}', 1, 0, 0)`
+    ),
+    // 修复历史脏数据: 早期种子误将系统存储 size_max 按字节写入(10737418240), 按 GB 语义修正为 10
+    db.prepare(
+      `UPDATE io_source SET size_max = 10 WHERE id = 1 AND size_max = 10737418240`
     ),
     // 修复历史脏数据: 仅当 authID 为空/0 或引用了不存在的 auths 记录时才回填为默认用户(3);
     // 绝不覆盖合法的 authID(1/2/3 及自定义角色)，否则每次冷启动都会破坏成员权限(对齐 001 角色持久语义)。
