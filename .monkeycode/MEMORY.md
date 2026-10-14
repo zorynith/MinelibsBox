@@ -370,10 +370,11 @@ Entries discovered by the Agent during task execution should follow this format:
   - 加密文件夹复刻：`app/lib/folder-password.ts`（`checkAllowPassword`/`folderPasswordNeed`/`folderPasswordChildNeed`/`folderPathChain`/`parentVirtualDir`；sourceID 用与 explorer-api `fileSourceID` 相同的 FNV-1a 路径 hash），会话表 `folder_password(userID,sourceID,password)`（`migrations/0008_folder_password.sql` + `initDatabase`）。挂载点：`/list/path` 的 `appendSafe`（清空列表+`folderTips`/`folderPasswordNeed`）、`fileOutHandler`、`editor/fileGet`、`editor/fileSave`、`zipDownload`。R2 目录占位 key 以 `/` 结尾，扫描子目录密码时判断 `inner.endsWith("/")` 才能保留目录段，否则 `pop()` 会把目录名丢掉。
 
 [User Instruction Summary]
-- Date: 2026-10-04
-- Context: Agent 因发现 `userShareGroup`/`userShareUser`/`linkSafe`/`linkOut` 等接口前端未调用而停下询问是否实施，用户明确重申要求
+- Date: 2026-10-11
+- Context: 用户多次重申复刻总原则（最初因 Agent 发现 `userShareGroup`/`userShareUser`/`linkSafe`/`linkOut` 接口前端未调用而停下询问）
 - Instructions:
   - 一切以「按 001 完整复刻」为准：只要 001 中存在该接口/行为，就要在 Worker 中复刻，不管前端当前是否调用、是否是死代码。
+  - 复刻必须完全遵循 001 的逻辑与 UI，禁止私自添加任何文字、表情、界面。
   - 禁止再因为「该接口前端没用到/可能是死代码/是否值得做」这类判断停下询问；按既定批次直接做完，全部做完后再停下汇报。
   - 用户不想重复陈述同一个要求，后续自主执行。
 

@@ -24,6 +24,7 @@ import { adminTaskApi } from "./admin-task-api";
 import { adminServerApi } from "./admin-server-api";
 import { shareOutRouter } from "./shareout-api";
 import { authRequired, isAdmin } from "../lib/auth";
+import { csrfCheck, readCsrfCookie, setCsrfCookie, clearCsrfCookie, randomCsrfToken } from "../lib/csrf";
 import { t } from "../lib/i18n";
 
 const apiRoutes = new Hono<{ Bindings: Env }>();
@@ -36,6 +37,21 @@ apiRoutes.use("*", async (c, next) => {
   const ct = c.res.headers.get("Content-Type") || "";
   if (!c.res.headers.has("Cache-Control") && ct.includes("application/json")) {
     c.res.headers.set("Cache-Control", "no-store");
+  }
+});
+
+// CSRF 防护 - 复刻 001 filter/post.class.php::check, 在鉴权之前执行。
+// 校验失败时删除 CSRF_TOKEN cookie 并返回 show_json('CSRF_TOKEN error!', false)。
+apiRoutes.use("*", async (c, next) => {
+  const result = await csrfCheck(c);
+  if (result === "error") {
+    clearCsrfCookie(c);
+    return c.json({ code: false, data: "CSRF_TOKEN error!" });
+  }
+  await next();
+  // 复刻 001 user/index initSession: 缺失时下发 CSRF_TOKEN cookie (rand_string(16))
+  if (!readCsrfCookie(c)) {
+    setCsrfCookie(c, randomCsrfToken(16));
   }
 });
 
