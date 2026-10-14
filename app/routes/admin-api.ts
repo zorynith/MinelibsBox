@@ -82,6 +82,7 @@ adminApi.all("/group/get", async (c) => {
     if (row) groups = [row];
   }
 
+  const groupSizes = await scanGroupSizes(c.env.FILES);
   const list: any[] = [];
   for (const g of groups) {
     const childCount = await c.env.DB.prepare(
@@ -96,7 +97,7 @@ adminApi.all("/group/get", async (c) => {
       parentLevel: g.parent_level || ",",
       name: g.name,
       sizeMax: g.size_max || 0,
-      sizeUse: g.size_use || 0,
+      sizeUse: groupSizes[String(g.id)] ?? (g.size_use || 0),
       sort: g.sort || 0,
       status: g.status ?? 1,
       hasChildren: (childCount?.cnt || 0) > 0,
@@ -125,13 +126,14 @@ adminApi.all("/group/getByID", async (c) => {
   const result = await c.env.DB.prepare(
     `SELECT * FROM groups WHERE id IN (${placeholders}) ORDER BY sort ASC, id ASC`
   ).bind(...ids).all();
+  const groupSizes = await scanGroupSizes(c.env.FILES);
   const list = (result.results as any[]).map((g) => ({
     groupID: g.id,
     parentID: g.parent_id,
     parentLevel: g.parent_level || ",",
     name: g.name,
     sizeMax: g.size_max || 0,
-    sizeUse: g.size_use || 0,
+    sizeUse: groupSizes[String(g.id)] ?? (g.size_use || 0),
     sort: g.sort || 0,
     status: g.status ?? 1,
     metaInfo: {
@@ -156,13 +158,14 @@ adminApi.all("/group/search", async (c) => {
   const result = await c.env.DB.prepare(
     "SELECT * FROM groups WHERE name LIKE ? ORDER BY sort ASC, id ASC LIMIT 100"
   ).bind(like).all();
+  const groupSizes = await scanGroupSizes(c.env.FILES);
   const list = (result.results as any[]).map((g) => ({
     groupID: g.id,
     parentID: g.parent_id,
     parentLevel: g.parent_level || ",",
     name: g.name,
     sizeMax: g.size_max || 0,
-    sizeUse: g.size_use || 0,
+    sizeUse: groupSizes[String(g.id)] ?? (g.size_use || 0),
     sort: g.sort || 0,
     status: g.status ?? 1,
   }));
@@ -1425,6 +1428,36 @@ async function scanBucketStats(bucket: R2Bucket) {
   return data;
 }
 
+/**
+ * 统计各部门已用空间: 扫描 __group__/<groupID>/ 前缀按部门聚合。
+ * 001 groups.size_use 由文件表统计得出; 此处以 R2 前缀扫描复刻, 供部门树/列表展示。
+ */
+const groupSizeCache = new Map<string, { data: Record<string, number>; ts: number }>();
+async function scanGroupSizes(bucket: R2Bucket): Promise<Record<string, number>> {
+  const cacheKey = "group";
+  const hit = groupSizeCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < BUCKET_STATS_TTL_MS) return hit.data;
+  const sizes: Record<string, number> = {};
+  let cursor: string | undefined;
+  try {
+    do {
+      const listed = await bucket.list({ prefix: "__group__/", cursor, limit: 1000 });
+      for (const o of listed.objects) {
+        const name = (o.key.split("/").pop() || "").toLowerCase();
+        if (!name || name.startsWith(".")) continue;
+        const gid = o.key.split("/")[1];
+        if (!gid) continue;
+        sizes[gid] = (sizes[gid] || 0) + o.size;
+      }
+      cursor = listed.truncated ? listed.cursor : undefined;
+    } while (cursor);
+  } catch {
+    // R2 不可用时返回空, 前端回退 DB size_use
+  }
+  groupSizeCache.set(cacheKey, { data: sizes, ts: Date.now() });
+  return sizes;
+}
+
 /** 扫描指定前缀下对象, 按文件类型分类统计 */
 async function scanUserFileTypes(bucket: R2Bucket, prefix: string) {
   const byType: Record<string, { size: number; cnt: number }> = {};
@@ -1614,20 +1647,7 @@ adminApi.all("/analysis/table", async (c) => {
   if (type === "group") {
     const result = await c.env.DB.prepare("SELECT * FROM groups ORDER BY sort ASC, id ASC").all();
     // 按 R2 `__group__/{id}/` 前缀聚合各部门空间实际占用
-    const groupSizes: Record<number, number> = {};
-    let cursor: string | undefined;
-    try {
-      do {
-        const listed = await c.env.FILES.list({ prefix: "__group__/", cursor, limit: 1000 });
-        for (const o of listed.objects) {
-          const gid = parseInt(o.key.split("/")[1] || "0", 10);
-          if (gid) groupSizes[gid] = (groupSizes[gid] || 0) + o.size;
-        }
-        cursor = listed.truncated ? listed.cursor : undefined;
-      } while (cursor);
-    } catch {
-      // R2 不可用时 fallback 到 DB 的 size_use
-    }
+    const groupSizes = await scanGroupSizes(c.env.FILES);
     const list = (result.results as any[]).map((g) => ({
       groupID: g.id,
       name: g.name,
