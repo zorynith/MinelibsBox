@@ -17,6 +17,7 @@
 import { Hono } from "hono";
 import { authRequired, isAdmin } from "../lib/auth";
 import { getShareById } from "../lib/share";
+import { htmlOnlyImage } from "../lib/html-filter";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const commentApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -271,7 +272,8 @@ commentApi.post("/index/add", authRequired, async (c) => {
   const p = await parseBody(c);
   const targetType = parseInt(p.targetType, 10) || 0;
   const targetID = parseInt(p.targetID, 10) || 0;
-  const content = (p.content || "").trim();
+  // 001 filter/html: comment.index.add 的 content 走 Html::onlyImage
+  const content = await htmlOnlyImage((p.content || "").trim());
   const pid = parseInt(p.pid, 10) || 0;
 
   const err = await checkEdit(c.env, user, targetType, targetID);

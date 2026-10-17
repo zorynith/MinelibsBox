@@ -14,6 +14,7 @@ import { loadPluginPackage, loadPluginLang, buildPluginAppList, defaultPluginCon
 import { detectLang, loadLangPack } from "../lib/i18n-lang";
 import { getStaticHost } from "../lib/user-system";
 import { handleUserNotice } from "../lib/user-notice";
+import { htmlClean } from "../lib/html-filter";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const adminApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -2078,6 +2079,8 @@ adminApi.all("/notice/add", async (c) => {
   if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
   const p = await allParams(c);
   if (!p.name || !p.content) return c.json(fail("explorer.dataNotFull"));
+  // 001 filter/html: admin.notice.add 的 content 走 Html::clean
+  const content = await htmlClean(p.content);
   const ts = Math.floor(Date.now() / 1000);
   const res: any = await c.env.DB.prepare(
     `INSERT INTO notice (name, content, auth, mode, time, type, level, enable, sort, createTime, modifyTime)
@@ -2085,7 +2088,7 @@ adminApi.all("/notice/add", async (c) => {
   )
     .bind(
       p.name,
-      p.content,
+      content,
       p.auth || "",
       p.mode || "0",
       parseInt(p.time, 10) || ts,
@@ -2109,12 +2112,14 @@ adminApi.all("/notice/edit", async (c) => {
   const id = parseInt(p.id, 10) || 0;
   if (!id) return c.json(fail("explorer.dataNotFull"));
   if (!p.name || !p.content) return c.json(fail("explorer.dataNotFull"));
+  // 001 filter/html: admin.notice.edit 的 content 走 Html::clean
+  const content = await htmlClean(p.content);
   await c.env.DB.prepare(
     `UPDATE notice SET name = ?, content = ?, auth = ?, mode = ?, time = ?, type = ?, level = ?, enable = ?, modifyTime = ? WHERE id = ?`
   )
     .bind(
       p.name,
-      p.content,
+      content,
       p.auth || "",
       p.mode || "0",
       parseInt(p.time, 10) || 0,
