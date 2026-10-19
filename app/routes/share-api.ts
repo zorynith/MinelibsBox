@@ -20,6 +20,7 @@ import { resolveFileSource } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { ioClientOf } from "../lib/io";
 import { getGroupAuthValue } from "../lib/source-auth";
+import { sizeFormat, gbLimit } from "../lib/limit";
 import { md5, mcryptDecode, mcryptEncode } from "../lib/mcrypt";
 import JSZip from "jszip";
 import { readZipCentralDirectory } from "../lib/zip-central";
@@ -144,6 +145,51 @@ async function shareListDir(env: Env, owner: AuthUser, source: SourceRef | null,
   const folders = (listed.delimitedPrefixes || []).map((p) => ({ name: p.split("/").filter(Boolean).pop() || p }));
   const files = listed.objects.filter((o) => o.key !== prefix).map((o) => ({ name: o.key.split("/").pop() || o.key, size: o.size, uploaded: o.uploaded ? o.uploaded.toISOString() : undefined }));
   return { folders, files };
+}
+
+/** 递归统计分享目录下文件数与总字节数（filter/limit 用）。 */
+async function shareFolderStats(env: Env, owner: AuthUser, source: SourceRef | null, relPath: string, depth = 0): Promise<{ files: number; bytes: number }> {
+  if (depth > 100) return { files: 0, bytes: 0 };
+  const dir = relPath.endsWith("/") ? relPath : relPath + "/";
+  const list = await shareListDir(env, owner, source, dir);
+  if (!list) return { files: 0, bytes: 0 };
+  let files = 0;
+  let bytes = 0;
+  for (const f of list.files) {
+    files += 1;
+    bytes += f.size || 0;
+  }
+  for (const sub of list.folders) {
+    const st = await shareFolderStats(env, owner, source, dir + sub.name + "/", depth + 1);
+    files += st.files;
+    bytes += st.bytes;
+  }
+  return { files, bytes };
+}
+
+/**
+ * 复刻 001 filter/limit::checkShareCopy 依赖的 sharePathInfo：
+ * 解析外链路径 {shareItemLink:<shareHash>}/rel，返回类型与（文件夹的）文件总数；
+ * 分享不存在/过期/源缺失时返回 { error }（错误文案）。
+ */
+export async function shareLinkPathInfo(c: AppContext, path: string): Promise<{ error: string } | { type: "folder" | "file"; fileNum: number }> {
+  const m = (path || "").match(/^\{shareItemLink:([^}]+)\}/);
+  if (!m) return { error: L.notExist };
+  const share = await getShareByHash(c.env.DB, m[1]);
+  if (!share || share.isLink !== 1) return { error: L.notExist };
+  const owner = (await getUserById(c.env.DB, share.userID)) as AuthUser | null;
+  if (!owner || (owner.status ?? 1) !== 1) return { error: L.notExist };
+  const now = Math.floor(Date.now() / 1000);
+  if (share.timeTo && share.timeTo > 0 && share.timeTo < now) return { error: L.expiredTips };
+  const storage = await resolveShareStorage(c.env, owner, share);
+  if (!storage) return { error: L.notExist };
+  const rel = parseShareLinkRel(share, path);
+  if (rel === null) return { error: L.notExist };
+  const isFolder = rel === "" ? storage.type === "folder" : rel.endsWith("/");
+  if (!isFolder) return { type: "file", fileNum: 1 };
+  const fullRel = shareJoinRel(storage.relPath, rel, true);
+  const stat = await shareFolderStats(c.env, owner, storage.source, fullRel);
+  return { type: "folder", fileNum: stat.files };
 }
 
 /** 分享项真实路径 → R2 key：发布临时目录展开为 __publish__ 前缀，其余为用户空间。 */
@@ -1221,6 +1267,14 @@ shareApi.all("/share/pathCuteTo", async (c) => {
 // fileUpload - 分享上传（目标为分享者空间，canEdit/canUpload 控制）
 shareApi.post("/share/fileUpload", async (c) => {
   const params = await reqParams(c);
+  // filter/limit::checkUpload - 上传大小限制 (001 过滤器先于分享初始化/权限校验执行)
+  {
+    const uploadMax = await gbLimit(c.env.DB, "ignoreFileSize");
+    const inputSize = parseFloat(String(params.size ?? "0")) || 0;
+    if (inputSize && uploadMax && inputSize > uploadMax) {
+      return c.json({ code: false, data: t("explorer.filter.uploadSizeLimit") + sizeFormat(uploadMax) });
+    }
+  }
   const init = await initShare(c, params);
   if (!init.ok) return init.response;
   const { share, owner } = init;
@@ -1560,6 +1614,30 @@ shareApi.all("/userShare/edit", async (c) => {
 
   const share = await getShareById(c.env.DB, shareID);
   if (!share || share.userID !== user.id) return c.json({ code: false, data: L.noPermission });
+
+  // filter/limit::checkShareLink - 外链分享文件/夹大小限制
+  {
+    const raw = params.isLink;
+    const isLink = raw === 1 || raw === "1" || raw === true || raw === "true";
+    if (isLink) {
+      const shareMax = await gbLimit(c.env.DB, "shareLinkSizeMax");
+      if (shareMax) {
+        const storage = await resolveShareStorage(c.env, user, share);
+        let size = 0;
+        if (storage) {
+          if (storage.type === "file") {
+            const head = await shareHeadOf(c.env, user, storage.source, storage.relPath);
+            size = head?.size ?? 0;
+          } else {
+            size = (await shareFolderStats(c.env, user, storage.source, storage.relPath)).bytes;
+          }
+        }
+        if (size > shareMax) {
+          return c.json({ code: false, data: t("explorer.filter.shareSizeLimit") + sizeFormat(shareMax) });
+        }
+      }
+    }
+  }
 
   const data: Record<string, any> = {};
   if (params.title !== undefined && params.title !== null && String(params.title) !== "") data.title = String(params.title);

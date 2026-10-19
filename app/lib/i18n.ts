@@ -73,6 +73,11 @@ const ZH: Record<string, string> = {
   "explorer.photo.pathRoot": "相册扫描目录",
   "explorer.photo.fileType": "指定文件类型",
   "explorer.toolbar.folder": "目录相册",
+  "explorer.filter.shareCopyLimit": "转存文件个数超出限制; 您最大可转存文件个数为:",
+  "explorer.filter.shareSizeLimit": "分享文件大小超出限制; 您最大可分享文档:",
+  "explorer.filter.unzipSizeLimit": "解压文件大小超出限制; 您最大可解压文档:",
+  "explorer.filter.zipSizeLimit": "压缩文件大小超出限制; 您最大可压缩文档:",
+  "explorer.filter.uploadSizeLimit": "上传大小超出限制; 您最大可上传文档:",
 };
 
 const EN: Record<string, string> = {
@@ -137,6 +142,11 @@ const EN: Record<string, string> = {
   "explorer.photo.pathRoot": "Album Scan Directory",
   "explorer.photo.fileType": "Specify file type",
   "explorer.toolbar.folder": "Catalog album",
+  "explorer.filter.shareCopyLimit": "The number of files to be dumped exceeds the limit; the maximum number of files you can dump is:",
+  "explorer.filter.shareSizeLimit": "The shared file size exceeds the limit; the maximum you can share is:",
+  "explorer.filter.unzipSizeLimit": "The unzip file size exceeds the limit; the maximum you can unzip is:",
+  "explorer.filter.zipSizeLimit": "Compressed file size exceeds limit; your maximum compressible documents:",
+  "explorer.filter.uploadSizeLimit": "The upload size exceeds the limit; the maximum you can upload is:",
 };
 
 /** Translate an i18n key to display text. Falls back to the key itself when unknown. */

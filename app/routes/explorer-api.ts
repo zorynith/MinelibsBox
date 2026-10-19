@@ -20,6 +20,7 @@ import { keyFromBase, listDirectory, listAllFiles, deleteDirectory, getFileMimeT
 import { resolveFileSource, userSource, toRealPath, groupChainMeta } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { getGroupAuthValue, getPersonalAuthValue, hasAuth, AUTH_SHOW, AUTH_VIEW, AUTH_DOWNLOAD, AUTH_UPLOAD, AUTH_EDIT, AUTH_REMOVE, AUTH_SHARE, AUTH_ROOT } from "../lib/source-auth";
+import { sizeFormat, gbLimit } from "../lib/limit";
 import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, deleteUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources, getSetting, getLightApps, addLightApp, updateLightApp, removeLightApp, getDefaultIoSource, getIoSourceById, getIoSourceList, getPluginMeta, setVerifyCode, getVerifyCode, deleteVerifyCode, getSourceMeta, setSourceMeta, setSourceMetaBulk } from "../lib/db";
 import type { LightAppItem } from "../lib/db";
 import { getGroupTag, sourceTagMap, getTags, isGroupAdmin } from "../lib/group-tag";
@@ -34,7 +35,7 @@ import { applyPathInfoCover, applyPathInfoCoverBatch } from "../lib/user-view";
 import { taskResultSet } from "../lib/task-result-cache";
 import { listViewSave, listViewApply } from "../lib/list-view";
 import { mcryptEncode, mcryptDecode } from "../lib/mcrypt";
-import { parseShareItemPath, listUserShareVirtual, listShareItemDir, listShareToMeVirtual, shareItemFileOut } from "./share-api";
+import { parseShareItemPath, listUserShareVirtual, listShareItemDir, listShareToMeVirtual, shareItemFileOut, shareLinkPathInfo } from "./share-api";
 import { checkAllowPassword, folderPasswordNeed, folderPasswordChildNeed, parentVirtualDir } from "../lib/folder-password";
 import { t } from "../lib/i18n";
 import { nowSec, toUnix } from "../lib/time";
@@ -189,6 +190,33 @@ async function headObject(c: AppContext, src: SourceRef, relPath: string): Promi
   const o = await c.env.FILES.head(key).catch(() => null);
   if (!o) return null;
   return { size: o.size, contentType: o.httpMetadata?.contentType || "", lastModified: o.uploaded ? o.uploaded.toISOString() : null };
+}
+
+/** 统计虚拟路径大小 (文件=对象大小; 目录=递归文件字节和), 供 filter/limit 使用。 */
+async function vpathTotalSize(c: AppContext, user: Vars["currentUser"], path: string): Promise<number> {
+  const src = await resolveFileSource(c.env, user, path);
+  if (!src.ok) return 0;
+  const isFolder = path.endsWith("/") || src.relPath.endsWith("/");
+  if (!isFolder) {
+    const head = await headObject(c, src.source, src.relPath);
+    return head?.size ?? 0;
+  }
+  const key = keyFromBase(src.source.baseKey, src.relPath);
+  const prefix = key.endsWith("/") ? key : key + "/";
+  let total = 0;
+  const io = ioClientOf(src.source);
+  if (io) {
+    const all = await io.listAll(prefix).catch(() => [] as { key: string; size: number }[]);
+    for (const o of all) total += o.size ?? 0;
+    return total;
+  }
+  let cursor: string | undefined;
+  do {
+    const listed = await c.env.FILES.list({ prefix, cursor });
+    for (const o of listed.objects) total += o.size ?? 0;
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
+  return total;
 }
 
 /** 计算目标目录内不冲突名 (R2 或 io), name, name_1, name_2, ... */
@@ -3021,6 +3049,20 @@ explorerApi.all("/index/pathCopyTo", async (c) => {
     return c.json({ code, data, ...(info ? { info } : {}) });
   };
   const items = parseDataArr(params.dataArr);
+  // filter/limit::checkShareCopy - 分享转存文件个数限制
+  {
+    const storeMax = parseInt((await getSetting(c.env.DB, "storeFileNumberMax")) ?? "0", 10);
+    if (storeMax) {
+      for (const it of items) {
+        if (typeof it.path !== "string" || !it.path.startsWith("{shareItemLink:")) continue;
+        const info = await shareLinkPathInfo(c, it.path);
+        if ("error" in info) return emit(false, info.error);
+        if (info.type === "folder" && info.fileNum > storeMax) {
+          return emit(false, t("explorer.filter.shareCopyLimit") + storeMax);
+        }
+      }
+    }
+  }
   const targetSrc = await resolveFileSource(c.env, user, typeof params.path === "string" ? params.path : "/");
   if (!targetSrc.ok) return emit(false, targetSrc.error);
   const target = normDirPath(targetSrc.relPath);
@@ -3375,6 +3417,16 @@ explorerApi.all("/index/zip", async (c) => {
   const type = params.type === "tar" || params.type === "tgz" ? params.type : "zip";
   if (type !== "zip") return emit(false, "仅支持 zip 格式");
 
+  // filter/limit::checkZip - 压缩文件大小限制
+  {
+    const zipMax = await gbLimit(c.env.DB, "zipFileSizeMax");
+    if (zipMax) {
+      let total = 0;
+      for (const it of items) total += await vpathTotalSize(c, user, it.path);
+      if (total > zipMax) return emit(false, t("explorer.filter.zipSizeLimit") + sizeFormat(zipMax));
+    }
+  }
+
   try {
     const zip = new JSZip();
     const ctx: ZipContext = { zip, total: 0 };
@@ -3428,6 +3480,18 @@ explorerApi.all("/index/unzip", async (c) => {
   const pathTo = typeof params.pathTo === "string" ? params.pathTo : "";
   if (!zipPath || !pathTo) return emit(false, "参数错误");
   const unzipPart = params.unzipPart ?? "-1";
+
+  // filter/limit::checkUnzip - 解压文件大小限制
+  {
+    const unzipMax = await gbLimit(c.env.DB, "unzipFileSizeMax");
+    if (unzipMax) {
+      const info = await resolveFileSource(c.env, user, zipPath);
+      const head = info.ok ? await headObject(c, info.source, info.relPath) : null;
+      if (head && head.size > unzipMax) {
+        return emit(false, t("explorer.filter.unzipSizeLimit") + sizeFormat(unzipMax));
+      }
+    }
+  }
 
   try {
     const zsrc = await resolveFileSource(c.env, user, zipPath);
@@ -3555,6 +3619,16 @@ explorerApi.all("/index/zipDownload", async (c) => {
   };
   const items = parseDataArr(params.dataArr);
   if (items.length === 0) return emit(false, "参数错误");
+
+  // filter/limit::checkZip - 压缩文件大小限制
+  {
+    const zipMax = await gbLimit(c.env.DB, "zipFileSizeMax");
+    if (zipMax) {
+      let total = 0;
+      for (const it of items) total += await vpathTotalSize(c, user, it.path);
+      if (total > zipMax) return emit(false, t("explorer.filter.zipSizeLimit") + sizeFormat(zipMax));
+    }
+  }
 
   // 001 listPassword::authCheck: 压缩下载前校验加密文件夹
   {
@@ -4430,6 +4504,14 @@ explorerApi.post("/upload/fileUpload", async (c) => {
   }
   // 对齐 001 逻辑: 分片大小不小于文件大小时视为不分片, 避免小文件触发 R2 multipart 最小 5MiB 限制
   if (chunkSizeParam > 0 && size > 0 && chunkSizeParam >= size) chunks = 1;
+
+  // filter/limit::checkUpload - 上传大小限制
+  {
+    const uploadMax = await gbLimit(c.env.DB, "ignoreFileSize");
+    if (size && uploadMax && size > uploadMax) {
+      return c.json({ code: false, data: t("explorer.filter.uploadSizeLimit") + sizeFormat(uploadMax) });
+    }
+  }
 
   // 上传预检(秒传/断点续传): 返回 uploadToKod=true + kodDriverType=Local, 使前端直接走后端上传
   if (checkType) {
