@@ -7,6 +7,7 @@ import type { Context } from "hono";
 import { md5 } from "./mcrypt";
 import { hashPassword } from "./auth";
 import { getVerifyCode, setVerifyCode, deleteVerifyCode, updateVerifyCodeCnt, userSearch, userEdit, getUserOption, setUserOption } from "./db";
+import { toUnix } from "./time";
 
 const CAPTCHA_COOKIE = "kod_captcha";
 
@@ -248,7 +249,7 @@ export async function buildLoginList(c: Ctx, userId: number) {
     sign: s.id,
     ip: "",
     address: "",
-    time: Math.floor(new Date(s.created_at).getTime() / 1000),
+    time: toUnix(s.created_at),
     browser: "Unknown",
     os: "Unknown",
     isSelf: false,

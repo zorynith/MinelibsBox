@@ -9,6 +9,7 @@ import { authRequired, isAdmin } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
 import { getUserById } from "../lib/db";
 import { getShareById, removeShares, resolveShareSource, shareOptions } from "../lib/share";
+import { toUnix } from "../lib/time";
 
 type Vars = { currentUser: AuthUser };
 const adminShareApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -45,6 +46,8 @@ async function buildShareItem(env: Env, db: D1Database, row: any): Promise<Recor
   const isFolder = String(row.sourcePath || "").endsWith("/");
   return {
     ...row,
+    createTime: toUnix(row.createTime),
+    modifyTime: toUnix(row.modifyTime),
     options: shareOptions(row),
     userInfo: await shareUserInfoOf(db, row.userID),
     sourceInfo: source ? { type: source.type, name: source.name, path: source.realPath, isFolder } : null,
@@ -122,7 +125,7 @@ adminShareApi.all("/share/get", async (c) => {
       `SELECT r.id, r.shareID, r.reason, r.status, r.createTime AS reportTime, s.title, s.shareHash, s.sourcePath, s.isLink, s.isShareTo, s.userID AS ownerID, u.nickname AS reportUser ${base} ORDER BY r.createTime DESC LIMIT ? OFFSET ?`
     ).bind(...binds, ...stBinds, ...wbinds, pageNum, (page - 1) * pageNum).all().catch(() => ({ results: [] as any[] }))).results || [];
     return c.json(ok({
-      list: rows,
+      list: rows.map((r: any) => ({ ...r, createTime: toUnix(r.reportTime) })),
       pageInfo: { page, pageTotal, pageNum, totalNum: total },
     }));
   }

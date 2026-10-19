@@ -25,6 +25,7 @@ import JSZip from "jszip";
 import { readZipCentralDirectory } from "../lib/zip-central";
 import type { ZipCentralRangeResult } from "../lib/zip-central";
 import { safeZipEntryName, zipDecodeFileName, parseZipInnerPath, fileOutHandler } from "./explorer-api";
+import { nowSec, toUnix } from "../lib/time";
 import type { ShareRow } from "../lib/share";
 import {
   shareOptions,
@@ -256,7 +257,7 @@ async function shareCanEdit(env: Env, share: ShareRow): Promise<boolean> {
 function shareItemInfo(
   share: ShareRow,
   sourceName: string,
-  o: { name: string; relPath: string; isFolder: boolean; size: number; modifyTime: string; canEdit: boolean }
+  o: { name: string; relPath: string; isFolder: boolean; size: number; modifyTime: string | number | Date | null | undefined; canEdit: boolean }
 ): Record<string, unknown> {
   const root = shareLinkRoot(share.shareHash);
   const rel = o.relPath || "";
@@ -273,8 +274,8 @@ function shareItemInfo(
     isFolder: o.isFolder,
     ext: o.isFolder ? "folder" : (o.name.includes(".") ? o.name.split(".").pop()!.toLowerCase() : ""),
     size: o.size,
-    modifyTime: o.modifyTime,
-    createTime: o.modifyTime,
+    modifyTime: toUnix(o.modifyTime),
+    createTime: toUnix(o.modifyTime),
     sourceID: share.sourceID,
     isReadable: true,
     isWriteable: o.canEdit,
@@ -313,7 +314,7 @@ async function buildSharePageData(
     numView: share.numView,
     numDownload: share.numDownload,
     options: shareOptions(share),
-    createTime: share.createTime,
+    createTime: toUnix(share.createTime),
     sourceInfo: shareItemInfo(share, source.name, {
       name: source.name,
       relPath: "",
@@ -360,8 +361,8 @@ async function buildManageShareInfo(env: Env, share: ShareRow, source: { type: "
     numView: share.numView,
     numDownload: share.numDownload,
     options: shareOptions(share),
-    createTime: share.createTime,
-    modifyTime: share.modifyTime,
+    createTime: toUnix(share.createTime),
+    modifyTime: toUnix(share.modifyTime),
     sourceInfo: source
       ? {
           name: source.name,
@@ -370,7 +371,7 @@ async function buildManageShareInfo(env: Env, share: ShareRow, source: { type: "
           isFolder: source.type === "folder",
           ext: source.type === "folder" ? "folder" : (source.name.includes(".") ? source.name.split(".").pop()!.toLowerCase() : ""),
           size: 0,
-          modifyTime: share.modifyTime,
+          modifyTime: toUnix(share.modifyTime),
           isReadable: true,
           isWriteable: true,
         }
@@ -383,7 +384,7 @@ async function buildManageShareInfo(env: Env, share: ShareRow, source: { type: "
           isFolder: true,
           ext: "folder",
           size: 0,
-          modifyTime: share.modifyTime,
+          modifyTime: toUnix(share.modifyTime),
           isReadable: true,
           isWriteable: true,
         },
@@ -1738,8 +1739,8 @@ export async function listUserShareVirtual(
       isWriteable: true,
       isReadable: true,
       shareID: share.shareID,
-      shareCreateTime: share.createTime,
-      shareModifyTime: share.modifyTime,
+      shareCreateTime: toUnix(share.createTime),
+      shareModifyTime: toUnix(share.modifyTime),
       sharePathFrom: "分享者(" + (user.nickname || user.username) + ")",
       shareUser: shareUserInfo(user),
       shareFromShow: true,
@@ -1865,8 +1866,8 @@ async function shareToMeItemMake(
     isWriteable: false,
     isReadable: true,
     shareID: share.shareID,
-    shareCreateTime: share.createTime,
-    shareModifyTime: share.modifyTime,
+    shareCreateTime: toUnix(share.createTime),
+    shareModifyTime: toUnix(share.modifyTime),
     sharePathFrom: "分享者(" + (owner.nickname || owner.username) + ")",
     shareUser: shareUserInfo({ id: owner.id, username: owner.username, nickname: owner.nickname } as AuthUser),
     shareFromShow: true,
@@ -2462,8 +2463,8 @@ export async function listShareItemDir(
         isReadable: true,
         ext: "folder",
         size: 0,
-        modifyTime: new Date().toISOString(),
-        createTime: new Date().toISOString(),
+        modifyTime: nowSec(),
+        createTime: nowSec(),
       }));
     const fileList = files
       .filter((f) => {
@@ -2482,8 +2483,8 @@ export async function listShareItemDir(
           isReadable: true,
           ext: name.includes(".") ? name.split(".").pop()!.toLowerCase() : "",
           size: f.size,
-          modifyTime: f.uploaded ? new Date(f.uploaded).toISOString() : new Date().toISOString(),
-          createTime: new Date().toISOString(),
+          modifyTime: toUnix(f.uploaded),
+          createTime: nowSec(),
         };
       });
     const curRel = rel.replace(/\/+$/, "");
@@ -2757,7 +2758,7 @@ async function shareZipCollect(
   out: Record<string, unknown>[]
 ): Promise<void> {
   const isFolder = rel.endsWith("/") || (rel === "" && source.type === "folder");
-  const now = new Date().toISOString();
+  const now = nowSec();
   if (!isFolder) {
     const fullRel = shareJoinRel(storage.relPath, rel);
     const head = await shareHeadOf(c.env, owner, storage.source, fullRel);
@@ -2766,7 +2767,7 @@ async function shareZipCollect(
       folder: false,
       filePath: shareLinkRoot(share.shareHash) + rel,
       size: head?.size ?? 0,
-      modifyTime: head?.lastModified ? new Date(head.lastModified).toISOString() : now,
+      modifyTime: toUnix(head?.lastModified),
     });
     return;
   }
@@ -2790,7 +2791,7 @@ async function shareZipCollect(
       folder: false,
       filePath: shareLinkRoot(share.shareHash) + (baseRel ? baseRel + "/" : "") + n,
       size: f.size,
-      modifyTime: f.uploaded ? f.uploaded : now,
+      modifyTime: toUnix(f.uploaded),
     });
   }
 }

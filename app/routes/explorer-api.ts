@@ -37,6 +37,9 @@ import { mcryptEncode, mcryptDecode } from "../lib/mcrypt";
 import { parseShareItemPath, listUserShareVirtual, listShareItemDir, listShareToMeVirtual, shareItemFileOut } from "./share-api";
 import { checkAllowPassword, folderPasswordNeed, folderPasswordChildNeed, parentVirtualDir } from "../lib/folder-password";
 import { t } from "../lib/i18n";
+import { nowSec, toUnix } from "../lib/time";
+
+export { nowSec, toUnix };
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const explorerApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -434,8 +437,8 @@ function folderItem(name: string, dirPath: string, targetID?: string | number, p
     targetID,
     ext: "",
     size: 0,
-    modifyTime: new Date().toISOString(),
-    createTime: new Date().toISOString(),
+    modifyTime: nowSec(),
+    createTime: nowSec(),
   };
 }
 
@@ -458,8 +461,8 @@ function fileItem(obj: R2Object, dirPath: string, targetID?: string | number, pa
     targetID,
     ext,
     size: obj.size,
-    modifyTime: obj.uploaded ? new Date(obj.uploaded).toISOString() : new Date().toISOString(),
-    createTime: new Date().toISOString(),
+    modifyTime: toUnix(obj.uploaded),
+    createTime: nowSec(),
   };
 }
 
@@ -872,8 +875,8 @@ async function listRecycleData(c: AppContext, user: Vars["currentUser"], thisPat
       sourceID: fileSourceID(recycleVPath),
       ext: isFolder ? "" : name.includes(".") ? name.split(".").pop()!.toLowerCase() : "",
       size: isFolder ? 0 : objSize,
-      modifyTime: objTime ? new Date(objTime).toISOString() : new Date().toISOString(),
-      createTime: new Date().toISOString(),
+      modifyTime: toUnix(objTime),
+      createTime: nowSec(),
     };
     if (isFolder) folderList.push(base);
     else fileList.push(base);
@@ -1132,8 +1135,8 @@ async function listFilesByType(c: AppContext, user: Vars["currentUser"], parsed:
       sourceID: fileSourceID("{source:home}/" + rel),
       ext,
       size: o.size,
-      modifyTime: o.uploaded ? new Date(o.uploaded).toISOString() : new Date().toISOString(),
-      createTime: new Date().toISOString(),
+      modifyTime: toUnix(o.uploaded),
+      createTime: nowSec(),
     });
   }
   const typeNames: Record<string, string> = { photo: "我的相册", doc: "文档", image: "图片", music: "音乐", movie: "视频", zip: "压缩包", others: "其他" };
@@ -1282,8 +1285,8 @@ async function listPhotoData(
       sourceID: fileSourceID("{source:home}/" + rel),
       ext,
       size: o.size,
-      modifyTime: o.uploaded ? o.uploaded.toISOString() : new Date().toISOString(),
-      createTime: o.uploaded ? o.uploaded.toISOString() : new Date().toISOString(),
+      modifyTime: toUnix(o.uploaded),
+      createTime: toUnix(o.uploaded),
       imageTime,
     });
   }
@@ -1354,8 +1357,8 @@ async function listTagSourcesData(c: AppContext, user: Vars["currentUser"], pars
         sourceID: fileSourceID(rawPath + "/"),
         ext: "",
         size: 0,
-        modifyTime: s.modifyTime || new Date().toISOString(),
-        createTime: s.createTime || new Date().toISOString(),
+        modifyTime: toUnix(s.modifyTime || undefined),
+        createTime: toUnix(s.createTime || undefined),
         sourceInfo: { listTag: "1" },
       });
     } else {
@@ -1373,8 +1376,8 @@ async function listTagSourcesData(c: AppContext, user: Vars["currentUser"], pars
         sourceID: fileSourceID(rawPath),
         ext,
         size: 0,
-        modifyTime: s.modifyTime || new Date().toISOString(),
-        createTime: s.createTime || new Date().toISOString(),
+        modifyTime: toUnix(s.modifyTime || undefined),
+        createTime: toUnix(s.createTime || undefined),
         sourceInfo: { listTag: "1" },
       });
     }
@@ -1886,8 +1889,8 @@ explorerApi.all("/list/path", async (c) => {
           groupPathDisplay: cmeta.groupPathDisplay,
           ext: "",
           size: 0,
-          modifyTime: new Date().toISOString(),
-          createTime: new Date().toISOString(),
+          modifyTime: nowSec(),
+          createTime: nowSec(),
         });
       }
       if (groupList.length > 0) {
@@ -2022,8 +2025,8 @@ async function listFav(c: AppContext, user: Vars["currentUser"], thisPath: strin
       sourceID: fileSourceID(isFolder ? item.path.replace(/\/?$/, "/") : item.path),
       targetType: "user",
       targetID: user.id,
-      modifyTime: item.modifyTime || new Date().toISOString(),
-      createTime: item.createTime || new Date().toISOString(),
+      modifyTime: toUnix(item.modifyTime || undefined),
+      createTime: toUnix(item.createTime || undefined),
       sourceInfo: { isFav: 1, favName: item.name, favID: item.id },
     };
     if (isFolder) {
@@ -2084,8 +2087,8 @@ async function listGroupSelf(env: Env, user: Vars["currentUser"], thisPath: stri
       groupPathDisplay: meta.groupPathDisplay,
       ext: "",
       size: 0,
-      modifyTime: new Date().toISOString(),
-      createTime: new Date().toISOString(),
+      modifyTime: nowSec(),
+      createTime: nowSec(),
       sourceInfo: { sourceID: g.id, sourceRoot: "groupPath", authValue: 63 },
     });
   }
@@ -2128,8 +2131,8 @@ async function listGroupSelf(env: Env, user: Vars["currentUser"], thisPath: stri
         groupPathDisplay: ameta.groupPathDisplay,
         ext: "",
         size: 0,
-        modifyTime: new Date().toISOString(),
-        createTime: new Date().toISOString(),
+        modifyTime: nowSec(),
+        createTime: nowSec(),
       });
     }
   }
@@ -2228,8 +2231,8 @@ explorerApi.all("/index/pathInfo", async (c) => {
         sourceID: fileSourceID(path),
         size: 0,
         ext: "",
-        modifyTime: new Date().toISOString(),
-        createTime: new Date().toISOString(),
+        modifyTime: nowSec(),
+        createTime: nowSec(),
         metaInfo: meta,
         desc: meta.desc || "",
       });
@@ -2262,8 +2265,8 @@ explorerApi.all("/index/pathInfo", async (c) => {
           sourceID: fileSourceID(path),
           size: obj.size,
           ext,
-          modifyTime: obj.uploaded ? new Date(obj.uploaded).toISOString() : new Date().toISOString(),
-          createTime: new Date().toISOString(),
+          modifyTime: toUnix(obj.uploaded),
+          createTime: nowSec(),
           metaInfo: meta,
           desc: meta.desc || "",
           downloadPath: await fileHashLink(c, path),
@@ -2352,8 +2355,8 @@ async function listRecentData(c: AppContext, user: Vars["currentUser"], parsed: 
               sourceID: fileSourceID(raw),
               ext: name.includes(".") ? name.split(".").pop()!.toLowerCase() : "",
               size: info.size,
-              modifyTime: info.lastModified || new Date().toISOString(),
-              createTime: info.lastModified || new Date().toISOString(),
+              modifyTime: toUnix(info.lastModified),
+              createTime: toUnix(info.lastModified),
               viewTime: r.viewTime,
             });
             continue;
@@ -2486,8 +2489,8 @@ explorerApi.all("/index/pathLog", async (c) => {
     userID: r.user_id,
     path: r.path,
     desc: r.detail || "",
-    time: r.created_at,
-    createTime: r.created_at,
+    time: toUnix(r.created_at),
+    createTime: toUnix(r.created_at),
   }));
   return c.json({
     code: true,
@@ -3606,11 +3609,11 @@ async function zipClientCollect(
       folder: false,
       filePath: path,
       size: h?.size ?? 0,
-      modifyTime: h?.lastModified || new Date().toISOString(),
+      modifyTime: toUnix(h?.lastModified),
     });
     return;
   }
-  out.push({ path: zipName, folder: true, modifyTime: new Date().toISOString() });
+  out.push({ path: zipName, folder: true, modifyTime: nowSec() });
 
   const dirPath = path.endsWith("/") ? path : path + "/";
   const src = await resolveFileSource(c.env, user, dirPath);
@@ -3645,7 +3648,7 @@ async function zipClientCollect(
       folder: false,
       filePath: base + n,
       size: f.size,
-      modifyTime: f.uploaded ? new Date(f.uploaded).toISOString() : new Date().toISOString(),
+      modifyTime: toUnix(f.uploaded),
     });
   }
 }
@@ -4021,7 +4024,7 @@ async function searchSourcePrefix(
         size: obj.size,
         type: "file",
         typeCat: kodFileType(name),
-        modifyTime: new Date().toISOString(),
+        modifyTime: nowSec(),
       });
     }
     cursor = listed.truncated ? listed.cursor : undefined;
@@ -5051,8 +5054,8 @@ explorerApi.all("/fav/get", async (c) => {
       name,
       path,
       type: item.type === "file" ? "file" : "folder",
-      modifyTime: item.modifyTime,
-      createTime: item.createTime,
+      modifyTime: toUnix(item.modifyTime),
+      createTime: toUnix(item.createTime),
       isFolder: isFolder,
     };
     info.sourceInfo = { isFav: 1, favName: name, favID: item.id };

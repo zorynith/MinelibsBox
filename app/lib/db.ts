@@ -2,6 +2,8 @@
  * D1 Database initialization and helper functions
  */
 
+import { toUnix } from "./time";
+
 export async function initDatabase(db: D1Database): Promise<void> {
   const stmts = [
     // Users table (replaces system_member.php)
@@ -746,7 +748,7 @@ export async function getDeviceList(db: D1Database, userId: number, fromTime: nu
      FROM audit_logs WHERE user_id = ? AND created_at >= ? AND action IN ('login', 'user.index.loginSubmit')
      GROUP BY ip, desc ORDER BY createTime DESC`
   ).bind(userId, new Date(fromTime * 1000).toISOString()).all();
-  return result.results;
+  return (result.results as any[]).map((r) => ({ ...r, createTime: toUnix(r.createTime) }));
 }
 
 export async function getUserLogs(db: D1Database, userId: number, page: number = 1, pageNum: number = 10, action?: string) {
@@ -760,7 +762,8 @@ export async function getUserLogs(db: D1Database, userId: number, page: number =
   const totalRow = await db.prepare(
     `SELECT COUNT(*) AS total FROM audit_logs WHERE user_id = ? ${where}`
   ).bind(...(action ? [userId, action] : [userId]) as any).first<{ total: number }>();
-  return { list: result.results, total: totalRow?.total ?? 0 };
+  const list = (result.results as any[]).map((r) => ({ ...r, createTime: toUnix(r.createTime) }));
+  return { list, total: totalRow?.total ?? 0 };
 }
 
 // Session helpers

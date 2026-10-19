@@ -15,6 +15,7 @@ import { detectLang, loadLangPack } from "../lib/i18n-lang";
 import { getStaticHost } from "../lib/user-system";
 import { handleUserNotice } from "../lib/user-notice";
 import { htmlClean } from "../lib/html-filter";
+import { toUnixCN } from "../lib/time";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const adminApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -2091,7 +2092,7 @@ adminApi.all("/notice/add", async (c) => {
       content,
       p.auth || "",
       p.mode || "0",
-      parseInt(p.time, 10) || ts,
+      toUnixCN(p.time),
       parseInt(p.type, 10) || 1,
       parseInt(p.level, 10) || 0,
       p.enable === "1" || p.enable === "true" ? 1 : 0,
@@ -2122,7 +2123,7 @@ adminApi.all("/notice/edit", async (c) => {
       content,
       p.auth || "",
       p.mode || "0",
-      parseInt(p.time, 10) || 0,
+      toUnixCN(p.time),
       parseInt(p.type, 10) || 1,
       parseInt(p.level, 10) || 0,
       p.enable === "1" || p.enable === "true" ? 1 : 0,

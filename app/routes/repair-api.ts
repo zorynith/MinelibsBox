@@ -15,6 +15,7 @@ import { authRequired, isAdmin } from "../lib/auth";
 import { getUserOption, setUserOption } from "../lib/db";
 import { getUserFileKey } from "../lib/r2";
 import { resolveShareSource } from "../lib/share";
+import { toUnix } from "../lib/time";
 
 const repairApi = new Hono<{ Bindings: Env; Variables: { currentUser: import("../lib/auth").AuthUser } }>();
 
@@ -192,7 +193,7 @@ async function listFileNotExists(env: Env): Promise<Record<string, unknown>[]> {
         title: r.title,
         sourcePath: r.sourcePath,
         shareUser: r.username,
-        createTime: r.createTime,
+        createTime: toUnix(r.createTime),
       });
     }
   }
