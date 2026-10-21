@@ -25,7 +25,7 @@ import { md5, mcryptDecode, mcryptEncode } from "../lib/mcrypt";
 import JSZip from "jszip";
 import { readZipCentralDirectory } from "../lib/zip-central";
 import type { ZipCentralRangeResult } from "../lib/zip-central";
-import { safeZipEntryName, zipDecodeFileName, parseZipInnerPath, fileOutHandler } from "./explorer-api";
+import { safeZipEntryName, zipDecodeFileName, parseZipInnerPath } from "../lib/zip-path";
 import { nowSec, toUnix } from "../lib/time";
 import type { ShareRow } from "../lib/share";
 import {
@@ -728,6 +728,7 @@ shareApi.all("/share/file", async (c) => {
   const downFilename = typeof params.downFilename === "string" ? params.downFilename : "";
   const rawName = typeof params.name === "string" ? params.name.replace(/^\/+/, "") : "";
   const name = downFilename || rawName || undefined;
+  const { fileOutHandler } = await import("./explorer-api");
   return fileOutHandler(c, isDownload ? "attachment" : "inline", { path, name });
 });
 

@@ -39,6 +39,7 @@ import { parseShareItemPath, listUserShareVirtual, listShareItemDir, listShareTo
 import { checkAllowPassword, folderPasswordNeed, folderPasswordChildNeed, parentVirtualDir } from "../lib/folder-password";
 import { t } from "../lib/i18n";
 import { nowSec, toUnix } from "../lib/time";
+import { safeZipEntryName, zipDecodeFileName, parseZipInnerPath } from "../lib/zip-path";
 
 export { nowSec, toUnix };
 
@@ -190,33 +191,6 @@ async function headObject(c: AppContext, src: SourceRef, relPath: string): Promi
   const o = await c.env.FILES.head(key).catch(() => null);
   if (!o) return null;
   return { size: o.size, contentType: o.httpMetadata?.contentType || "", lastModified: o.uploaded ? o.uploaded.toISOString() : null };
-}
-
-/** 统计虚拟路径大小 (文件=对象大小; 目录=递归文件字节和), 供 filter/limit 使用。 */
-async function vpathTotalSize(c: AppContext, user: Vars["currentUser"], path: string): Promise<number> {
-  const src = await resolveFileSource(c.env, user, path);
-  if (!src.ok) return 0;
-  const isFolder = path.endsWith("/") || src.relPath.endsWith("/");
-  if (!isFolder) {
-    const head = await headObject(c, src.source, src.relPath);
-    return head?.size ?? 0;
-  }
-  const key = keyFromBase(src.source.baseKey, src.relPath);
-  const prefix = key.endsWith("/") ? key : key + "/";
-  let total = 0;
-  const io = ioClientOf(src.source);
-  if (io) {
-    const all = await io.listAll(prefix).catch(() => [] as { key: string; size: number }[]);
-    for (const o of all) total += o.size ?? 0;
-    return total;
-  }
-  let cursor: string | undefined;
-  do {
-    const listed = await c.env.FILES.list({ prefix, cursor });
-    for (const o of listed.objects) total += o.size ?? 0;
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor);
-  return total;
 }
 
 /** 计算目标目录内不冲突名 (R2 或 io), name, name_1, name_2, ... */
@@ -3208,7 +3182,7 @@ explorerApi.all("/index/fileOutBy", (c) => fileOutHandler(c, "inline"));
 
 // ============ zip / unzip (对齐 001 IOArchive) ============
 
-type ZipContext = { zip: JSZip; total: number; error?: string };
+type ZipContext = { zip: JSZip; total: number; error?: string; maxTotal?: number };
 
 function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
@@ -3226,64 +3200,8 @@ function dirOfVPath(vPath: string): string {
   return prefix + (idx >= 0 ? rest.slice(0, idx + 1) : "/");
 }
 
-/** 去除 zip 条目中的危险路径段 (.. / . / 反斜杠)。 */
-export function safeZipEntryName(name: string): string {
-  const n = (name || "").replace(/\\/g, "/");
-  const parts = n.split("/").filter((s) => s && s !== "." && s !== "..");
-  return parts.join("/");
-}
+export { safeZipEntryName, zipDecodeFileName, parseZipInnerPath };
 
-/**
- * JSZip loadAsync 自定义文件名解码 (复刻 001 前端对 GBK zip 的处理语义)。
- * JSZip 默认把未置 UTF-8 flag 的条目按 UTF-8 解码 -> 中文 zip 文件名乱码;
- * 这里优先严格 UTF-8, 失败回退 GBK (Windows 老 zip), 最后 latin1 兜底。
- */
-export function zipDecodeFileName(bytes: Uint8Array | ArrayLike<number> | string[]): string {
-  let u8: Uint8Array;
-  if (bytes instanceof Uint8Array) u8 = bytes;
-  else if (Array.isArray(bytes)) u8 = new Uint8Array(bytes.map((b) => (typeof b === "number" ? b : 0)));
-  else u8 = new Uint8Array(Array.from(bytes as ArrayLike<number>));
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(u8);
-  } catch {
-    try {
-      return new TextDecoder("gbk").decode(u8);
-    } catch {
-      return new TextDecoder("latin1").decode(u8);
-    }
-  }
-}
-
-/**
- * 解析 zip 预览面板传入的虚拟路径 (完整 unzipList URL 串)。
- * 前端 makeTree 生成: `explorer/index/unzipList?path={source:home}/x.zip&index=[{index,name}...]&name=/inner.txt`
- * 返回 zip 真实路径 + 条目索引数组; 无法解析返回 null。
- */
-export function parseZipInnerPath(raw: string): { zipPath: string; indexArray: number[]; name: string } | null {
-  const m = raw.match(/[?&]path=([^&]*)/);
-  const im = raw.match(/[?&]index=([^&]*)/);
-  if (!m || !im) return null;
-  let zipPath = "";
-  let indexArray: number[] = [];
-  try {
-    zipPath = decodeURIComponent(m[1]);
-    const arr = JSON.parse(decodeURIComponent(im[1]));
-    if (Array.isArray(arr)) indexArray = arr.map((x: any) => Number(x && x.index)).filter((n: number) => Number.isInteger(n));
-  } catch {
-    return null;
-  }
-  if (!zipPath || indexArray.length === 0) return null;
-  const nm = raw.match(/[?&]name=([^&]*)/);
-  let name = "";
-  if (nm) {
-    try {
-      name = decodeURIComponent(nm[1]).replace(/^\/+/, "");
-    } catch {
-      name = "";
-    }
-  }
-  return { zipPath, indexArray, name };
-}
 
 /** 从 zip 中按条目索引读取单个文件内容 (对齐 unzipList 的 index 顺序)。 */
 async function readZipInnerEntry(c: AppContext, user: any, zipPath: string, indexArray: number[]): Promise<{ name: string; content: ArrayBuffer } | null> {
@@ -3346,6 +3264,14 @@ async function zipAddItem(c: AppContext, user: Vars["currentUser"], ctx: ZipCont
     ctx.error = "explorer.pathNotSupport";
     return;
   }
+  const setLimitError = () => {
+    ctx.error = t("explorer.filter.zipSizeLimit") + sizeFormat(ctx.maxTotal || 0);
+  };
+  const overLimit = () => {
+    if (!ctx.maxTotal || ctx.total <= ctx.maxTotal) return false;
+    setLimitError();
+    return true;
+  };
   const isFolder = item.type === "folder" || src.relPath.endsWith("/");
   const baseName = (item.name || src.relPath.split("/").filter(Boolean).pop() || "item").replace(/\/+$/, "");
   const key = keyFromBase(src.source.baseKey, src.relPath);
@@ -3360,12 +3286,17 @@ async function zipAddItem(c: AppContext, user: Vars["currentUser"], ctx: ZipCont
       for (const o of all) {
         const rel = o.key.slice(prefix.length);
         if (!rel || rel.split("/").some((seg: string) => seg.startsWith("."))) continue;
+        if (ctx.maxTotal && ctx.total + (o.size || 0) > ctx.maxTotal) {
+          setLimitError();
+          return;
+        }
         const g = await io.get(o.key).catch(() => null);
         if (!g) continue;
         const buf = await streamToBytes(g.body).catch(() => null);
         if (buf) {
           ctx.zip.file(zipPrefix + rel, buf);
           ctx.total += buf.byteLength;
+          if (overLimit()) return;
         }
         cnt++;
         if (cnt > 100000) break;
@@ -3377,12 +3308,17 @@ async function zipAddItem(c: AppContext, user: Vars["currentUser"], ctx: ZipCont
         for (const o of listed.objects) {
           const rel = o.key.slice(prefix.length);
           if (!rel || rel.split("/").some((seg: string) => seg.startsWith("."))) continue;
+          if (ctx.maxTotal && ctx.total + (o.size || 0) > ctx.maxTotal) {
+            setLimitError();
+            return;
+          }
           const obj = await c.env.FILES.get(o.key).catch(() => null);
           if (!obj) continue;
           const buf = await obj.arrayBuffer().catch(() => null);
           if (buf) {
             ctx.zip.file(zipPrefix + rel, buf);
             ctx.total += buf.byteLength;
+            if (overLimit()) return;
           }
           cnt++;
           if (cnt > 100000) break;
@@ -3399,6 +3335,7 @@ async function zipAddItem(c: AppContext, user: Vars["currentUser"], ctx: ZipCont
     }
     ctx.zip.file(baseName, bytes);
     ctx.total += bytes.byteLength;
+    if (overLimit()) return;
   }
 }
 
@@ -3417,19 +3354,11 @@ explorerApi.all("/index/zip", async (c) => {
   const type = params.type === "tar" || params.type === "tgz" ? params.type : "zip";
   if (type !== "zip") return emit(false, "仅支持 zip 格式");
 
-  // filter/limit::checkZip - 压缩文件大小限制
-  {
-    const zipMax = await gbLimit(c.env.DB, "zipFileSizeMax");
-    if (zipMax) {
-      let total = 0;
-      for (const it of items) total += await vpathTotalSize(c, user, it.path);
-      if (total > zipMax) return emit(false, t("explorer.filter.zipSizeLimit") + sizeFormat(zipMax));
-    }
-  }
-
+  // filter/limit::checkZip - 压缩文件大小限制在 zipAddItem 收集时增量校验, 避免重复遍历
   try {
     const zip = new JSZip();
-    const ctx: ZipContext = { zip, total: 0 };
+    const zipMax = await gbLimit(c.env.DB, "zipFileSizeMax");
+    const ctx: ZipContext = { zip, total: 0, maxTotal: zipMax || undefined };
     for (const it of items) {
       await zipAddItem(c, user, ctx, it);
       if (ctx.error) return emit(false, ctx.error);
@@ -3620,15 +3549,7 @@ explorerApi.all("/index/zipDownload", async (c) => {
   const items = parseDataArr(params.dataArr);
   if (items.length === 0) return emit(false, "参数错误");
 
-  // filter/limit::checkZip - 压缩文件大小限制
-  {
-    const zipMax = await gbLimit(c.env.DB, "zipFileSizeMax");
-    if (zipMax) {
-      let total = 0;
-      for (const it of items) total += await vpathTotalSize(c, user, it.path);
-      if (total > zipMax) return emit(false, t("explorer.filter.zipSizeLimit") + sizeFormat(zipMax));
-    }
-  }
+  // filter/limit::checkZip - 压缩文件大小限制在 zipAddItem 收集时增量校验, 避免重复遍历
 
   // 001 listPassword::authCheck: 压缩下载前校验加密文件夹
   {
@@ -3646,7 +3567,8 @@ explorerApi.all("/index/zipDownload", async (c) => {
 
   try {
     const zip = new JSZip();
-    const ctx: ZipContext = { zip, total: 0 };
+    const zipMax = await gbLimit(c.env.DB, "zipFileSizeMax");
+    const ctx: ZipContext = { zip, total: 0, maxTotal: zipMax || undefined };
     for (const it of items) {
       await zipAddItem(c, user, ctx, it);
       if (ctx.error) return emit(false, ctx.error);
