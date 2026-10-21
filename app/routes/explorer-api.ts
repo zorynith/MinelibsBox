@@ -3197,7 +3197,9 @@ function dirOfVPath(vPath: string): string {
   const prefix = m ? m[1] : "";
   const rest = vPath.slice(prefix.length).replace(/\/+$/, "");
   const idx = rest.lastIndexOf("/");
-  return prefix + (idx >= 0 ? rest.slice(0, idx + 1) : "/");
+  // 根目录文件: prefix 已带尾斜杠, 直接返回, 避免拼出 {source:x}// 双斜杠
+  if (idx < 0) return prefix || "/";
+  return prefix + rest.slice(0, idx + 1);
 }
 
 export { safeZipEntryName, zipDecodeFileName, parseZipInnerPath };
