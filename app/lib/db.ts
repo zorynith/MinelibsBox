@@ -131,6 +131,13 @@ export async function initDatabase(db: D1Database): Promise<void> {
       value TEXT NOT NULL
     )`,
 
+    // 密码连续错误锁定记录 (mirrors 001 Cache user_login_lock_{userID}_{ip})
+    `CREATE TABLE IF NOT EXISTS login_lock (
+      lock_key TEXT PRIMARY KEY,
+      times TEXT NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    )`,
+
     // Favorites (replaces user_fav.php, follows original user_fav table structure)
     `CREATE TABLE IF NOT EXISTS user_fav (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

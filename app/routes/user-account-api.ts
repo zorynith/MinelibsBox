@@ -18,6 +18,7 @@ import { listViewSave } from "../lib/list-view";
 import { detectLang } from "../lib/i18n-lang";
 import { sendEmail, sendSms } from "./msg-api";
 import { handleUserNotice } from "../lib/user-notice";
+import { passwordError } from "../lib/user-check";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const accountApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -296,6 +297,9 @@ accountApi.post("/setting/setUserInfo", authRequired, async (c) => {
     if (!row) return c.json(fail("explorer.error"));
     const oldValid = await verifyPassword(plainOld, row.password_hash as string);
     if (!oldValid) return c.json(fail("user.oldPwdError"));
+    // filter/userCheck::password - 修改密码强度校验
+    const pwdError = await passwordError(c.env.DB, plainNew);
+    if (pwdError) return c.json(fail(pwdError));
     const newHash = await hashPassword(plainNew);
     await userEdit(c.env.DB, user.id, { password_hash: newHash });
     await addAuditLog(c.env.DB, "user.setUserInfo", user.id, null, null, null, "change password");
@@ -369,6 +373,9 @@ async function findPasswordHandler(c: any) {
   if (!res || String(resId) !== String(cache.userID)) {
     return c.json(fail("common.illegalRequest"));
   }
+  // filter/userCheck::password - 找回密码重置强度校验
+  const pwdError = await passwordError(c.env.DB, plainPassword);
+  if (pwdError) return c.json(fail(pwdError));
   await c.env.DB.prepare("DELETE FROM verify_code WHERE code_key = ?").bind(`findpwd_${token}`).run();
   const newHash = await hashPassword(plainPassword);
   await userEdit(c.env.DB, resId as number, { password_hash: newHash });
@@ -569,7 +576,10 @@ accountApi.post("/regist/regist", async (c) => {
   if (!check.ok) return c.json(fail(check.msg));
 
   const plainPassword = parseKodPassword(password, body.salt === "1" ? "1" : "");
-  if (!plainPassword || plainPassword.length < 6) return c.json(fail("user.pwdError"));
+  if (!plainPassword) return c.json(fail("user.pwdError"));
+  // filter/userCheck::password - 密码强度校验
+  const pwdError = await passwordError(c.env.DB, plainPassword);
+  if (pwdError) return c.json(fail(pwdError));
 
   // duplicate check
   const dupName = await getUserByUsername(c.env.DB, name);

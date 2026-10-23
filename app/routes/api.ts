@@ -26,6 +26,7 @@ import { shareOutRouter } from "./shareout-api";
 import { authRequired, isAdmin } from "../lib/auth";
 import { csrfCheck, readCsrfCookie, setCsrfCookie, clearCsrfCookie, randomCsrfToken } from "../lib/csrf";
 import { t } from "../lib/i18n";
+import { loginIpAllowed } from "../lib/user-check";
 
 const apiRoutes = new Hono<{ Bindings: Env }>();
 
@@ -53,6 +54,13 @@ apiRoutes.use("*", async (c, next) => {
   if (!readCsrfCookie(c)) {
     setCsrfCookie(c, randomCsrfToken(16));
   }
+});
+
+// filter/userCheck::ipCheck - 全局 IP+设备黑名单 (仅 userSelect.all=1 的规则), 复刻 001 在鉴权前拦截。
+apiRoutes.use("*", async (c, next) => {
+  const blocked = await loginIpAllowed(c.env.DB, c.req.raw);
+  if (blocked) return c.json({ code: false, data: blocked });
+  await next();
 });
 
 // /admin 前缀统一鉴权: 登录 + admin 角色。autoRun 为 cron/前端轮询触发, 排除 admin 校验。

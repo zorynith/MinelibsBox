@@ -16,6 +16,7 @@ import { getStaticHost } from "../lib/user-system";
 import { handleUserNotice } from "../lib/user-notice";
 import { htmlClean } from "../lib/html-filter";
 import { toUnixCN } from "../lib/time";
+import { passwordError } from "../lib/user-check";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const adminApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -818,7 +819,10 @@ adminApi.all("/member/add", async (c) => {
 
   const salt = q.salt === "1" ? "1" : undefined;
   const plain = parseKodPassword(q.password || "", salt);
-  if (!plain || plain.length < 6) return c.json(fail("user.pwdError"));
+  if (!plain) return c.json(fail("user.pwdError"));
+  // filter/userCheck::password - 管理员添加用户强度校验
+  const pwdError = await passwordError(c.env.DB, plain);
+  if (pwdError) return c.json(fail(pwdError));
 
   const passwordHash = await hashPassword(plain);
   const role = roleID === 1 ? "admin" : "user";
@@ -891,7 +895,10 @@ adminApi.all("/member/edit", async (c) => {
   if (q.password) {
     const salt = q.salt === "1" ? "1" : undefined;
     const plain = parseKodPassword(q.password, salt);
-    if (plain && plain.length >= 6) {
+    if (plain) {
+      // filter/userCheck::password - 管理员修改用户强度校验
+      const pwdError = await passwordError(c.env.DB, plain);
+      if (pwdError) return c.json(fail(pwdError));
       updates.push("password_hash = ?");
       args.push(await hashPassword(plain));
     }

@@ -13,6 +13,7 @@ import { taskResultGet } from "../lib/task-result-cache";
 import { accountApi } from "./user-account-api";
 import { taskListData } from "./admin-task-api";
 import { getAppHost, getStaticHost } from "../lib/user-system";
+import { clientIp, loginLockCheck, userLoginCheck } from "../lib/user-check";
 
 const userApi = new Hono<{ Bindings: Env; Variables: { currentUser: import("../lib/auth").AuthUser } }>();
 
@@ -85,8 +86,19 @@ userApi.post("/index/loginSubmit", async (c) => {
   }
 
   const valid = await verifyPassword(plainPassword, user.password_hash as string);
+  // filter/userCheck::loginSubmitBefore - 密码连续错误锁定 (按 userID+IP)
+  const lockError = await loginLockCheck(c.env.DB, Number(user.id), clientIp(c.req.raw), valid);
+  if (lockError) {
+    return c.json({ code: false, data: lockError });
+  }
   if (!valid) {
     return c.json({ code: false, data: "用户名或密码错误!" });
+  }
+
+  // filter/userCheck::loginBefore - 登录 IP/设备限制
+  const loginError = await userLoginCheck(c.env.DB, Number(user.id), c.req.raw);
+  if (loginError) {
+    return c.json({ code: false, data: loginError });
   }
 
   const maxAge = remember ? 30 * 86400 : 86400;
@@ -571,7 +583,7 @@ userApi.get("/view/options", async (c) => {
         orderSort: "desc", dateFormat: "Y-m-d",
         fileEncryption: "all",
         passwordErrorLock: "1", passwordLockNumber: "5", passwordLockTime: "60",
-        passwordRule: "none", loginCheckAllow: "",
+        passwordRule: "strongMore", loginCheckAllow: "",
         csrfProtect: "1", downloadZipClient: "1", downloadZipLimit: "0",
         dragDownload: "1", dragDownloadZip: "0", dragDownloadLimit: 20,
         showFileLink: "1", showFileMd5: "1",

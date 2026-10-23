@@ -24,6 +24,8 @@ export function normalizeLang(raw: string | null | undefined): string {
     "zh-tw": "zh-TW",
     "zh_tw": "zh-TW",
     "zh_TW": "zh-TW",
+    "zh-Hans": "zh-CN",
+    "zh-Hant": "zh-TW",
     "en-us": "en",
     "en_us": "en",
     "en-gb": "en",
@@ -48,6 +50,16 @@ export function detectLang(c: { req: { query: (k: string) => string | undefined;
   if (inLang) {
     const n = normalizeLang(inLang);
     if (n) return n;
+  }
+
+  // filter/userCheck::setAppLang - iOS APP 自带 Language:xx; 在 cookie 之前生效
+  const ua = c.req.header("user-agent") || "";
+  if (ua.includes("kodCloud-System:iOS")) {
+    const m = ua.match(/Language:(.*);/);
+    if (m) {
+      const n = normalizeLang(m[1]);
+      if (n) return n;
+    }
   }
 
   const cookieHeader = c.req.header("cookie") || "";
