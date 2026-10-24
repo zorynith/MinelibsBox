@@ -42,15 +42,19 @@ export function clientIp(req: Request): string {
   return "";
 }
 
+/** 读取原始 X-Platform (新版 APP 做了 base64 编码), 供登录设备列表原样保存 */
+export function platformJsonOf(req: Request): string {
+  const encoded = req.headers.get("x-platform-1") || "";
+  if (encoded) return b64DecodeUtf8(encoded);
+  return req.headers.get("x-platform") || "";
+}
+
 /** 设备类型 (001 filterUserCheck::getDevice) */
 export function getDevice(req: Request): LoginDevice {
   const ua = req.headers.get("user-agent") || "";
   const device: LoginDevice = { type: "web", system: "", systemVersion: "", appVersion: "" };
 
-  // 新版 APP 对 X-Platform 做了 base64 编码
-  let platformRaw = req.headers.get("x-platform-1") || "";
-  if (platformRaw) platformRaw = b64DecodeUtf8(platformRaw);
-  else platformRaw = req.headers.get("x-platform") || "";
+  const platformRaw = platformJsonOf(req);
   let platform: any = false;
   if (platformRaw) {
     try {

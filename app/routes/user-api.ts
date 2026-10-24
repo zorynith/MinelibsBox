@@ -14,6 +14,7 @@ import { accountApi } from "./user-account-api";
 import { taskListData } from "./admin-task-api";
 import { getAppHost, getStaticHost } from "../lib/user-system";
 import { clientIp, loginLockCheck, userLoginCheck } from "../lib/user-check";
+import { loginStateCheck } from "../lib/login-state";
 
 const userApi = new Hono<{ Bindings: Env; Variables: { currentUser: import("../lib/auth").AuthUser } }>();
 
@@ -103,6 +104,8 @@ userApi.post("/index/loginSubmit", async (c) => {
 
   const maxAge = remember ? 30 * 86400 : 86400;
   const sessionId = await createSession(c.env.DB, user.id as number, remember ? 720 : 24);
+  // filter/userLoginState::checkLimit - 同账号并发登录限制 + 记录登录设备
+  await loginStateCheck(c.env.DB, Number(user.id), sessionId, c.req.raw);
   setSessionCookie(c, sessionId, maxAge);
 
   // 登录时若显式设置了 kodUserLanguage cookie, 持久化到用户配置(跨会话/设备兜底)。

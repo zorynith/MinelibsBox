@@ -242,19 +242,27 @@ async function getAllUserOptionsFor(c: Ctx, userId: number) {
  * Each item: {sign, ip, address, time, browser, os, isSelf}
  */
 export async function buildLoginList(c: Ctx, userId: number) {
+  // 001 filter/userLoginState::userListLoad - 直接由在线 session 派生, 更早登录的排前面
   const result = await c.env.DB.prepare(
-    "SELECT id, created_at, expires_at FROM sessions WHERE user_id = ? AND expires_at > datetime('now') ORDER BY created_at DESC"
-  ).bind(userId).all<{ id: string; created_at: string; expires_at: string }>();
-  const list = result.results.map((s) => ({
-    sign: s.id,
-    ip: "",
-    address: "",
-    time: toUnix(s.created_at),
-    browser: "Unknown",
-    os: "Unknown",
-    isSelf: false,
-  }));
-  return list;
+    "SELECT id, ip, ua, platform, device_json, login_time, created_at FROM sessions WHERE user_id = ? AND expires_at > datetime('now') ORDER BY login_time ASC, created_at ASC"
+  ).bind(userId).all<{
+    id: string; ip: string; ua: string; platform: string; device_json: string; login_time: number; created_at: string;
+  }>();
+  return result.results.map((s) => {
+    let device: any = {};
+    try { device = JSON.parse(s.device_json || "{}"); } catch { device = {}; }
+    const item: Record<string, any> = {
+      time: Number(s.login_time) > 0 ? Number(s.login_time) : toUnix(s.created_at),
+      sid: s.id,
+      ip: s.ip || "",
+      ua: s.ua || "",
+      device,
+      isSelf: false,
+      address: "",
+    };
+    if (s.platform) item.HTTP_X_PLATFORM = s.platform;
+    return item;
+  });
 }
 
 export async function getSelfSessionSign(c: Ctx): Promise<string> {

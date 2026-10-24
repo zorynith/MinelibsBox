@@ -520,7 +520,7 @@ accountApi.post("/setting/userLoginList", authRequired, async (c) => {
   const selfSign = await getSelfSessionSign(c);
   const list = await buildLoginList(c, user.id);
   for (const item of list) {
-    if (item.sign === selfSign) item.isSelf = true;
+    if (item.sid === selfSign) item.isSelf = true;
   }
   return c.json(ok(list));
 });
@@ -530,10 +530,10 @@ accountApi.post("/setting/userLogoutSet", authRequired, async (c) => {
   const user = c.get("currentUser");
   const body = await parseBody(c);
   const sign = body.sign || "";
-  if (!sign) return c.json(fail("common.invalid"));
-  const selfSign = await getSelfSessionSign(c);
-  if (sign === selfSign) return c.json(fail("common.invalid"));
-  await c.env.DB.prepare("DELETE FROM sessions WHERE id = ? AND user_id = ?").bind(sign, user.id).run();
+  // 001 filter.userLoginState::userLogoutTrigger - 不存在时同样返回成功
+  if (sign) {
+    await c.env.DB.prepare("DELETE FROM sessions WHERE id = ? AND user_id = ?").bind(sign, user.id).run();
+  }
   return c.json(ok("explorer.success"));
 });
 

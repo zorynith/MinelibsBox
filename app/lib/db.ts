@@ -122,6 +122,11 @@ export async function initDatabase(db: D1Database): Promise<void> {
       user_id INTEGER NOT NULL,
       created_at TEXT DEFAULT (datetime('now')),
       expires_at TEXT NOT NULL,
+      ip TEXT NOT NULL DEFAULT '',
+      ua TEXT NOT NULL DEFAULT '',
+      platform TEXT NOT NULL DEFAULT '',
+      device_json TEXT NOT NULL DEFAULT '',
+      login_time INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
 
@@ -511,6 +516,13 @@ export async function initDatabase(db: D1Database): Promise<void> {
   await ensureColumns("user_groups", [
     ["authID", "authID INTEGER NOT NULL DEFAULT 0"],
     ["sort", "sort INTEGER NOT NULL DEFAULT 0"],
+  ]);
+  await ensureColumns("sessions", [
+    ["ip", "ip TEXT NOT NULL DEFAULT ''"],
+    ["ua", "ua TEXT NOT NULL DEFAULT ''"],
+    ["platform", "platform TEXT NOT NULL DEFAULT ''"],
+    ["device_json", "device_json TEXT NOT NULL DEFAULT ''"],
+    ["login_time", "login_time INTEGER NOT NULL DEFAULT 0"],
   ]);
   await ensureColumns("users", [
     ["roleID", "roleID INTEGER NOT NULL DEFAULT 0"],
