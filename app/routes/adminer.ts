@@ -1051,9 +1051,14 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <link rel="stylesheet" href="${pluginHost}adminer/adminer.css">
 <style>
 #menu{display:flex;flex-direction:column;}
-#menu #dbs{color:#fff;font-size:13px;}
+#menu #dbNav{margin:10px 10px 6px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.14);flex:none;}
+body #menu #dbs{margin:0;padding:8px 12px;border:none;background:transparent;color:#fff;font-size:13px;font-weight:600;letter-spacing:.2px;}
+body #menu #dbNav .links{display:flex;width:100%;margin:0;padding:0;border:none;border-top:1px solid rgba(255,255,255,0.12);border-radius:0;background:transparent;flex:none;}
+body #menu #dbNav .links a{flex:1;display:block;padding:6px 2px;text-align:center;font-size:12px;line-height:16px;color:#b3d3f3;text-decoration:none;}
+body #menu #dbNav .links a:hover{background:rgba(255,255,255,0.2);}
+#menu #tableFilter{margin:0 10px !important;padding:0 !important;border:none;flex:none;}
+#menu #tableFilter input{width:100% !important;box-sizing:border-box;height:28px;}
 #lang select{position:absolute !important;left:10px !important;right:auto !important;top:9px !important;width:auto !important;max-width:210px;background-color:#456079;border:none;color:#fff;border-radius:4px;height:23px;line-height:23px;}
-#menu .links{width:auto !important;margin:0 !important;flex:none;}
 #menu #tables{position:static !important;top:auto !important;bottom:auto !important;left:auto !important;right:auto !important;margin:0 !important;flex:1 1 auto;overflow-y:auto !important;width:100%;}
 #page input[type=button]{margin:0 5px 6px 0;padding:5px 11px;border:1px solid #d0cdc4;border-radius:3px;background:#fff;color:#2c3e50;cursor:pointer;vertical-align:middle;}
 #page input[type=button]:hover{background:#eef3f8;}
@@ -1073,14 +1078,16 @@ td a{margin-right:8px;}
 <div id="foot" class="foot"><div id="menu">
   <h1><a href="javascript:void(0)" id="h1">Adminer</a> <span class="version" id="version">D1</span></h1>
   <form onsubmit="return false"><div id="lang"><label>Language: <select id="langSel"><option value="en">English</option><option value="zh">简体中文</option><option value="zh-tw">繁體中文</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="es">Español</option><option value="ru">Русский</option><option value="pt">Português</option><option value="it">Italiano</option></select></label></div></form>
-  <p id="dbs">SQLite / D1</p>
+  <div id="dbNav">
+    <p id="dbs">SQLite / D1</p>
+    <p class="links">
+      <a href="javascript:void(0)" data-nav="sql">SQL command</a>
+      <a href="javascript:void(0)" data-nav="import">Import</a>
+      <a href="javascript:void(0)" data-nav="export">Export</a>
+      <a href="javascript:void(0)" data-nav="create">Create table</a>
+    </p>
+  </div>
   <p id="tableFilter" style="display:none"><input type="text" id="tableFilterInput" oninput="filterTables(this.value)" placeholder="filter" style="width:92%"></p>
-  <p class="links">
-    <a href="javascript:void(0)" data-nav="sql">SQL command</a>
-    <a href="javascript:void(0)" data-nav="import">Import</a>
-    <a href="javascript:void(0)" data-nav="export">Export</a>
-    <a href="javascript:void(0)" data-nav="create">Create table</a>
-  </p>
   <ul id="tables"></ul>
 </div></div>
 <div id="adminerDebug" style="display:none;position:fixed;left:0;right:0;bottom:0;max-height:35%;overflow:auto;background:#1e1e1e;color:#d4d4d4;font:12px/1.5 monospace;padding:8px 12px;border-top:2px solid #e8a33d;z-index:9999"></div>
