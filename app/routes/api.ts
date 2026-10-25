@@ -27,6 +27,7 @@ import { authRequired, isAdmin } from "../lib/auth";
 import { csrfCheck, readCsrfCookie, setCsrfCookie, clearCsrfCookie, randomCsrfToken } from "../lib/csrf";
 import { t } from "../lib/i18n";
 import { loginIpAllowed } from "../lib/user-check";
+import { requestRateLimited } from "../lib/request-rate";
 
 const apiRoutes = new Hono<{ Bindings: Env }>();
 
@@ -54,6 +55,12 @@ apiRoutes.use("*", async (c, next) => {
   if (!readCsrfCookie(c)) {
     setCsrfCookie(c, randomCsrfToken(16));
   }
+});
+
+// filter/userRequest::checkRequestMany - 请求频率限制 (管理员不受限, 未配置时不生效)
+apiRoutes.use("*", async (c, next) => {
+  if (await requestRateLimited(c)) return c.json({ code: false, data: "request too many!" });
+  await next();
 });
 
 // filter/userCheck::ipCheck - 全局 IP+设备黑名单 (仅 userSelect.all=1 的规则), 复刻 001 在鉴权前拦截。

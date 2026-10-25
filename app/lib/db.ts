@@ -143,6 +143,13 @@ export async function initDatabase(db: D1Database): Promise<void> {
       updated_at INTEGER NOT NULL DEFAULT 0
     )`,
 
+    // 请求频率限制记录 (mirrors 001 Session userRequest / userRequestAllow)
+    `CREATE TABLE IF NOT EXISTS request_rate (
+      rate_key TEXT PRIMARY KEY,
+      times TEXT NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    )`,
+
     // Favorites (replaces user_fav.php, follows original user_fav table structure)
     `CREATE TABLE IF NOT EXISTS user_fav (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
