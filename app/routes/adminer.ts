@@ -1048,9 +1048,14 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=3">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <style>
+.toggle-menu{position:fixed;left:260px;top:32px;bottom:auto;width:24px;height:24px;cursor:pointer;z-index:100;}
+.toggle-menu:before{content:"\\ea64";font-family:"remixicon";font-style:normal;font-weight:400;position:absolute;top:2px;left:2px;width:20px;height:20px;line-height:20px;text-align:center;font-size:14px;color:#888;background:#fff;border:1px solid #ddd;border-radius:20px;box-shadow:0 2px 8px rgba(0,0,0,0.1);opacity:0;-webkit-transition:all .2s;transition:all .2s;}
+.toggle-menu:hover:before{opacity:1;border-color:#1890ff;color:#1890ff;}
+.menu-hide .toggle-menu{left:0;}
+.menu-hide .toggle-menu:before{content:"\\ea6e";}
 #menu{display:flex;flex-direction:column;}
 #menu #dbNav{margin:10px 10px 6px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.14);flex:none;}
 body #menu #dbs{margin:0;padding:8px 12px;border:none;background:transparent;color:#fff;font-size:13px;font-weight:600;letter-spacing:.2px;}
