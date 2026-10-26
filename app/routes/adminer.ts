@@ -1049,6 +1049,7 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
 <link rel="stylesheet" href="${pluginHost}adminer/adminer.css">
+<link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <style>
 #menu{display:flex;flex-direction:column;}
 #menu #dbNav{margin:10px 10px 6px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.14);flex:none;}
