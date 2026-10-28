@@ -24,7 +24,7 @@ body #menu #dbs select{position: relative;max-width: 190px;left: 0;}
 body #menu #tables{margin: 0 0 !important;padding: 5px 0;left: 10px;right: 10px;top: 150px;}
 body #menu #tables a{padding: 5px 10px;line-height: 16px;}
 
-body .toggle-menu{left:260px;}
+body .toggle-menu{left:272px;}
 body.js.menu-hide .toggle-menu{left:0;}
 @media (max-width: 800px){
 	body #menu .links{width:279px;}
@@ -838,31 +838,30 @@ textarea{padding:5px;}
 
 .toggle-menu{
     position: fixed;
-    left: 260px;top:50%;margin-top:-12px;
-    width: 24px;height:24px;
-    cursor: pointer;
-    z-index: 100;
+    left: 272px;top:50%;bottom:auto;margin-top:0;
+    transform: translateY(-50%);
+    width:50px;height:36px;line-height:36px;
+    text-align:center;
+    color:#fff;
+    background:#1890ffa3;
+    border-radius:0 5px 5px 0;
+    box-shadow:2px 0 8px rgba(0,0,0,0.1);
+    backdrop-filter:blur(5px);
+    -webkit-backdrop-filter:blur(5px);
+    cursor:pointer;
+    z-index:100;
+    opacity:0;
+    transition:all .3s;
 }
+.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:#0076e4;}
 .toggle-menu:before{
     content:"\ea64";
     font-family:"remixicon";
     font-style:normal;
-    font-weight:400;
-    position:absolute;
-    top:2px;left:2px;
-    width:20px;height:20px;line-height:20px;
-    text-align:center;
-    font-size:14px;
-    color:#888;
-    background:#fff;
-    border:1px solid #ddd;
-    border-radius:20px;
-    box-shadow:0 2px 8px rgba(0,0,0,0.1);
-    opacity:0;
-    -webkit-transition:all .2s;
-    transition:all .2s;
+    font-size:16px;
+    line-height:36px;
+    color:#fff;
 }
-.toggle-menu:hover:before,.toggle-menu.toggle-visible:before{opacity:1;border-color:#1890ff;color:#1890ff;}
 .menu-hide .toggle-menu:before{content:"\ea6e";}
 pre, textarea{display: inline-block;}
 

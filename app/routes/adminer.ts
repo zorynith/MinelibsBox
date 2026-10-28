@@ -1048,12 +1048,12 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=5">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=6">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <style>
-.toggle-menu{position:fixed;left:260px;top:50%;margin-top:-12px;bottom:auto;width:24px;height:24px;cursor:pointer;z-index:100;}
-.toggle-menu:before{content:"\\ea64";font-family:"remixicon";font-style:normal;font-weight:400;position:absolute;top:2px;left:2px;width:20px;height:20px;line-height:20px;text-align:center;font-size:14px;color:#888;background:#fff;border:1px solid #ddd;border-radius:20px;box-shadow:0 2px 8px rgba(0,0,0,0.1);opacity:0;-webkit-transition:all .2s;transition:all .2s;}
-.toggle-menu:hover:before,.toggle-menu.toggle-visible:before{opacity:1;border-color:#1890ff;color:#1890ff;}
+.toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:50px;height:36px;line-height:36px;text-align:center;color:#fff;background:#1890ffa3;border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:all .3s;}
+.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:#0076e4;}
+.toggle-menu:before{content:"\\ea64";font-family:"remixicon";font-style:normal;position:static;display:inline;width:auto;height:auto;font-size:16px;line-height:36px;color:#fff;background:none;border:0;border-radius:0;box-shadow:none;opacity:1;}
 .menu-hide .toggle-menu{left:0;}
 .menu-hide .toggle-menu:before{content:"\\ea6e";}
 #menu{top:0;display:flex;flex-direction:column;}
