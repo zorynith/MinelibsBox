@@ -430,20 +430,25 @@ table:after
 }
 
 #menu {
-    top:-23px;padding:0;    
+    top:0;padding:0;
     bottom: 0;
     width: 272px;
     border-right:none;
 }
 #menu h1{
-    padding: 16px 0px 6px 28px;
+    height: 40px;
+    padding: 0 0 0 28px;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    line-height: 1;
     border-bottom: 1px solid #465a6f;
     background: #3f576f;
     border: none;
 }
 #menu h1:before {
     content: "Adminer ";
-    line-height: 40px;
+    line-height: 1;
     color: #fff;
     font-style: italic;
 }
@@ -454,7 +459,7 @@ table:after
     font-size:24px;
 }
 .version {color: #677d8e;font-size:14px;}
-#breadcrumb {left: 290px;padding-left: 20px;}
+#breadcrumb {left: 272px;right: 0;width: auto;padding-left: 20px;}
 #breadcrumb a {
     color: #ecf0f1;
     font-size: 15px;
@@ -856,7 +861,7 @@ textarea{padding:5px;}
     -webkit-transition:all .2s;
     transition:all .2s;
 }
-.toggle-menu:hover:before{opacity:1;border-color:#1890ff;color:#1890ff;}
+.toggle-menu:hover:before,.toggle-menu.toggle-visible:before{opacity:1;border-color:#1890ff;color:#1890ff;}
 .menu-hide .toggle-menu:before{content:"\ea6e";}
 pre, textarea{display: inline-block;}
 

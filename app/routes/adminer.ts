@@ -1048,15 +1048,18 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=3">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=4">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <style>
 .toggle-menu{position:fixed;left:260px;top:32px;bottom:auto;width:24px;height:24px;cursor:pointer;z-index:100;}
 .toggle-menu:before{content:"\\ea64";font-family:"remixicon";font-style:normal;font-weight:400;position:absolute;top:2px;left:2px;width:20px;height:20px;line-height:20px;text-align:center;font-size:14px;color:#888;background:#fff;border:1px solid #ddd;border-radius:20px;box-shadow:0 2px 8px rgba(0,0,0,0.1);opacity:0;-webkit-transition:all .2s;transition:all .2s;}
-.toggle-menu:hover:before{opacity:1;border-color:#1890ff;color:#1890ff;}
+.toggle-menu:hover:before,.toggle-menu.toggle-visible:before{opacity:1;border-color:#1890ff;color:#1890ff;}
 .menu-hide .toggle-menu{left:0;}
 .menu-hide .toggle-menu:before{content:"\\ea6e";}
-#menu{display:flex;flex-direction:column;}
+#menu{top:0;display:flex;flex-direction:column;}
+#menu h1{height:40px;padding:0 0 0 28px;display:flex;align-items:center;box-sizing:border-box;line-height:1;}
+#menu h1:before{line-height:1;}
+#breadcrumb{left:272px;right:0;width:auto;}
 #menu #dbNav{margin:10px 10px 6px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.14);flex:none;}
 body #menu #dbs{margin:0;padding:8px 12px;border:none;background:transparent;color:#fff;font-size:13px;font-weight:600;letter-spacing:.2px;}
 body #menu #dbNav .links{display:flex;width:100%;margin:0;padding:0;border:none;border-top:1px solid rgba(255,255,255,0.12);border-radius:0;background:transparent;flex:none;}
@@ -1700,6 +1703,9 @@ var tgl = document.createElement('div');
 tgl.className = 'toggle-menu';
 document.body.appendChild(tgl);
 tgl.addEventListener('click', function(){ document.body.classList.toggle('menu-hide'); });
+var menuEl = $('menu');
+menuEl.addEventListener('mouseenter', function(){ tgl.classList.add('toggle-visible'); });
+menuEl.addEventListener('mouseleave', function(){ tgl.classList.remove('toggle-visible'); });
 if (window.innerWidth < 769) { document.body.classList.add('app-page-small'); document.body.classList.add('menu-hide'); }
 loadTables();
 showSql();
