@@ -436,7 +436,7 @@ table:after
     border-right:none;
 }
 #menu h1{
-    height: 40px;
+    height: 62px;
     padding: 0 0 0 28px;
     display: flex;
     align-items: center;
@@ -549,6 +549,7 @@ p#dbs {padding-left: 21px;}
 #menu .links a:hover{background: #507394;}
 #menu .links a:active{background: #5f83a5;}
 
+#menu #tables li{margin:0 8px;}
 #menu #tables{
     margin: 0 -15px !important;
     position: absolute;
@@ -837,7 +838,7 @@ textarea{padding:5px;}
 
 .toggle-menu{
     position: fixed;
-    left: 260px;top:32px;
+    left: 260px;top:50%;margin-top:-12px;
     width: 24px;height:24px;
     cursor: pointer;
     z-index: 100;
