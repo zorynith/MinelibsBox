@@ -1048,13 +1048,13 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=6">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=7">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <style>
-.toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:50px;height:36px;line-height:36px;text-align:center;color:#fff;background:#1890ffa3;border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:all .3s;}
-.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:#0076e4;}
-.toggle-menu:before{content:"\\ea64";font-family:"remixicon";font-style:normal;position:static;display:inline;width:auto;height:auto;font-size:16px;line-height:36px;color:#fff;background:none;border:0;border-radius:0;box-shadow:none;opacity:1;}
-.menu-hide .toggle-menu{left:0;}
+.toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:36px;height:50px;line-height:50px;text-align:center;color:#fff;background:#3f576f;border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:all .3s;}
+.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:#4b6a87;}
+.toggle-menu:before{content:"\\ea64";font-family:"remixicon";font-style:normal;position:static;display:inline;width:auto;height:auto;font-size:16px;line-height:50px;color:#fff;background:none;border:0;border-radius:0;box-shadow:none;opacity:1;}
+.menu-hide .toggle-menu{left:0;opacity:1;}
 .menu-hide .toggle-menu:before{content:"\\ea6e";}
 #menu{top:0;display:flex;flex-direction:column;}
 #menu h1{height:62px;padding:0 0 0 28px;display:flex;align-items:center;box-sizing:border-box;line-height:1;}
