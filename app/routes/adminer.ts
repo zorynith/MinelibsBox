@@ -1048,11 +1048,11 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=11">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=12">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <style>
-.toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:30px;height:42px;line-height:42px;text-align:center;color:#fff;background:#3f576f;border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:left .2s,opacity .2s,background .2s;}
-.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:#4b6a87;}
+.toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:30px;height:42px;line-height:42px;text-align:center;color:#fff;background:rgba(63,87,111,0.85);border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:left .2s,opacity .2s,background .2s;}
+.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:rgba(75,106,135,0.95);}
 .toggle-menu:before{content:"\\ea64";font-family:"remixicon";font-style:normal;position:static;display:inline;width:auto;height:auto;font-size:15px;line-height:42px;color:#fff;background:none;border:0;border-radius:0;box-shadow:none;opacity:1;}
 .menu-hide .toggle-menu{left:0;opacity:1;}
 .menu-hide .toggle-menu:before{content:"\\ea6e";}
@@ -1060,7 +1060,7 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 #menu{top:0;display:flex;flex-direction:column;}
 body.app-page-small #menu{z-index:200;}
 body.app-page-small .toggle-menu{opacity:1;}
-#menu h1{height:62px;flex:none;padding:0 0 0 28px;display:flex;align-items:center;box-sizing:border-box;line-height:1;}
+#menu h1{height:62px;gap:6px;flex:none;padding:0 0 0 28px;display:flex;align-items:center;box-sizing:border-box;line-height:1;}
 #menu h1:before{line-height:1;}
 #breadcrumb{left:272px;right:0;width:auto;}
 #menu #dbNav{margin:10px 10px 6px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.14);flex:none;}
@@ -1693,8 +1693,8 @@ function applyLang(){
 document.addEventListener('click', function(e){
   var el = e.target;
   while (el && el.nodeType === 1) {
-    if (el.hasAttribute('data-table')) { showTable(el.getAttribute('data-table')); return; }
-    if (el.hasAttribute('data-nav')) { nav(el.getAttribute('data-nav')); return; }
+    if (el.hasAttribute('data-table')) { showTable(el.getAttribute('data-table')); if (window.innerWidth < 769) document.body.classList.add('menu-hide'); return; }
+    if (el.hasAttribute('data-nav')) { nav(el.getAttribute('data-nav')); if (window.innerWidth < 769) document.body.classList.add('menu-hide'); return; }
     if (el.hasAttribute('data-sort')) { sortBy(el.getAttribute('data-sort'), e.shiftKey); return; }
     if (el.hasAttribute('data-drop')) { dropObjectByName(el.getAttribute('data-drop'), el.getAttribute('data-drop-name')); return; }
     if (el.hasAttribute('data-edit-view')) { editView(el.getAttribute('data-edit-view')); return; }

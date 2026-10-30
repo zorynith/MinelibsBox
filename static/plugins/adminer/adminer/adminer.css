@@ -437,6 +437,7 @@ table:after
 }
 #menu h1{
     height: 62px;
+    gap: 6px;
     flex: none;
     padding: 0 0 0 28px;
     display: flex;
@@ -486,7 +487,7 @@ table:after
     color: #b3d3f3;
 }
 #menu #logins a:hover{
-    background:#3f576f;
+    background:rgba(63,87,111,0.85);
 }
 #menu #logins br{display:none;}
 
@@ -856,7 +857,7 @@ textarea{padding:5px;}
     opacity:0;
     transition:left .2s,opacity .2s,background .2s;
 }
-.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:#4b6a87;}
+.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:rgba(75,106,135,0.95);}
 .toggle-menu:before{
     content:"\ea64";
     font-family:"remixicon";
