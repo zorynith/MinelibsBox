@@ -1048,7 +1048,7 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=13">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=14">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <style>
 .toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:30px;height:42px;line-height:42px;text-align:center;color:#fff;background:rgba(63,87,111,0.6);border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:left .2s,opacity .2s,background .2s;}
@@ -1078,6 +1078,7 @@ body #menu #dbNav .links a:hover{background:rgba(255,255,255,0.2);}
 #lang select{position:absolute !important;left:10px !important;right:auto !important;top:19px !important;width:auto !important;max-width:210px;background-color:#456079;border:none;color:#fff;border-radius:4px;height:23px;line-height:23px;}
 #menu #tables li{margin:0 8px;}
 #menu #tables{list-style:none;padding:0 !important;position:static !important;top:auto !important;bottom:auto !important;left:auto !important;right:auto !important;margin:0 !important;flex:1 1 auto;overflow-y:auto !important;width:100%;}
+#tabs{margin:10px 0 14px;}
 #page input[type=button]{margin:0 5px 6px 0;padding:5px 11px;border:1px solid #d0cdc4;border-radius:3px;background:#fff;color:#2c3e50;cursor:pointer;vertical-align:middle;}
 #page input[type=button]:hover{background:#eef3f8;}
 #page input[type=button]:disabled{opacity:.45;cursor:default;}

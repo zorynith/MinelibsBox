@@ -587,6 +587,9 @@ a,input,button{transition:all .168s;}
 #ajaxstatus + .links{
     /*border-bottom:1px solid #ccc;*/
 }
+#tabs{
+    margin: 10px 0 14px;
+}
 #ajaxstatus + .links a {
     border: 1px solid #ccc;
     display: inline-block;
