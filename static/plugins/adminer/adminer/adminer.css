@@ -842,7 +842,7 @@ textarea{padding:5px;}
     position: fixed;
     left: 272px;top:50%;bottom:auto;margin-top:0;
     transform: translateY(-50%);
-    width:36px;height:50px;line-height:50px;
+    width:30px;height:42px;line-height:42px;
     text-align:center;
     color:#fff;
     background:#3f576f;
@@ -860,11 +860,15 @@ textarea{padding:5px;}
     content:"\ea64";
     font-family:"remixicon";
     font-style:normal;
-    font-size:16px;
-    line-height:50px;
+    font-size:15px;
+    line-height:42px;
     color:#fff;
 }
 .menu-hide .toggle-menu:before{content:"\ea6e";}
+@media (max-width: 800px){
+    body #menu{z-index:200;}
+    body .toggle-menu{opacity:1;}
+}
 pre, textarea{display: inline-block;}
 
 #menu{-webkit-transition:left .2s;transition:left .2s;}
