@@ -552,6 +552,8 @@ p#dbs {padding-left: 21px;}
 #menu #tables li{margin:0 8px;}
 #menu #tables{
     margin: 0 -15px !important;
+    padding: 0;
+    list-style: none;
     position: absolute;
     left: 15px;
     right: 15px;
@@ -851,7 +853,7 @@ textarea{padding:5px;}
     cursor:pointer;
     z-index:100;
     opacity:0;
-    transition:all .3s;
+    transition:left .2s,opacity .2s,background .2s;
 }
 .toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:#4b6a87;}
 .toggle-menu:before{
