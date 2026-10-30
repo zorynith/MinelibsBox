@@ -1048,7 +1048,7 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=10">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=11">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <style>
 .toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:30px;height:42px;line-height:42px;text-align:center;color:#fff;background:#3f576f;border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:left .2s,opacity .2s,background .2s;}
@@ -1056,17 +1056,17 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 .toggle-menu:before{content:"\\ea64";font-family:"remixicon";font-style:normal;position:static;display:inline;width:auto;height:auto;font-size:15px;line-height:42px;color:#fff;background:none;border:0;border-radius:0;box-shadow:none;opacity:1;}
 .menu-hide .toggle-menu{left:0;opacity:1;}
 .menu-hide .toggle-menu:before{content:"\\ea6e";}
-@media (max-width: 800px){body #menu{z-index:200;}body .toggle-menu{opacity:1;}}
+@media (max-width: 800px){body #menu{z-index:200;}body #menu h1{height:62px;}body .toggle-menu{opacity:1;}}
 #menu{top:0;display:flex;flex-direction:column;}
 body.app-page-small #menu{z-index:200;}
 body.app-page-small .toggle-menu{opacity:1;}
-#menu h1{height:62px;padding:0 0 0 28px;display:flex;align-items:center;box-sizing:border-box;line-height:1;}
+#menu h1{height:62px;flex:none;padding:0 0 0 28px;display:flex;align-items:center;box-sizing:border-box;line-height:1;}
 #menu h1:before{line-height:1;}
 #breadcrumb{left:272px;right:0;width:auto;}
 #menu #dbNav{margin:10px 10px 6px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.14);flex:none;}
 body #menu #dbs{margin:0;padding:8px 12px;border:none;background:transparent;color:#fff;font-size:13px;font-weight:600;letter-spacing:.2px;}
 body #menu #dbNav .links{display:flex;width:100%;margin:0;padding:0;border:none;border-top:1px solid rgba(255,255,255,0.12);border-radius:0;background:transparent;flex:none;}
-body #menu #dbNav .links a{flex:1;display:block;padding:6px 2px;text-align:center;font-size:12px;line-height:16px;color:#b3d3f3;text-decoration:none;}
+body #menu #dbNav .links a{flex:1;display:flex;align-items:center;justify-content:center;padding:6px 4px;text-align:center;font-size:12px;line-height:1.3;color:#b3d3f3;text-decoration:none;}
 body #menu #dbNav .links a:hover{background:rgba(255,255,255,0.2);}
 #menu #tableFilter{margin:0 10px !important;padding:0 !important;border:none;flex:none;}
 #menu #tableFilter input{width:100% !important;box-sizing:border-box;height:28px;}

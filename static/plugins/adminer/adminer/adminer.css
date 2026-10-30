@@ -437,6 +437,7 @@ table:after
 }
 #menu h1{
     height: 62px;
+    flex: none;
     padding: 0 0 0 28px;
     display: flex;
     align-items: center;
@@ -867,6 +868,7 @@ textarea{padding:5px;}
 .menu-hide .toggle-menu:before{content:"\ea6e";}
 @media (max-width: 800px){
     body #menu{z-index:200;}
+    body #menu h1{height:62px;}
     body .toggle-menu{opacity:1;}
 }
 pre, textarea{display: inline-block;}
