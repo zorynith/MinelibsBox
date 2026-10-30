@@ -409,6 +409,7 @@ table:after
 
 #menu p, #logins, #tables {border-bottom: 1px solid rgba(255, 255, 255, 0.04);}
 #lang {
+    position: absolute;
     top: 0;
     left: 170px;
     z-index: 10;
@@ -420,7 +421,7 @@ table:after
     position: absolute;
     left: 0px;
     right: 0px;
-    top: 13px;
+    top: 19px;
     color: #677d8e;
     width: 100%;
     background: #4e6175;
@@ -847,7 +848,7 @@ textarea{padding:5px;}
     width:30px;height:42px;line-height:42px;
     text-align:center;
     color:#fff;
-    background:rgba(63,87,111,0.85);
+    background:rgba(63,87,111,0.6);
     border-radius:0 5px 5px 0;
     box-shadow:2px 0 8px rgba(0,0,0,0.1);
     backdrop-filter:blur(5px);
@@ -857,7 +858,7 @@ textarea{padding:5px;}
     opacity:0;
     transition:left .2s,opacity .2s,background .2s;
 }
-.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:rgba(75,106,135,0.95);}
+.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:rgba(75,106,135,0.85);}
 .toggle-menu:before{
     content:"\ea64";
     font-family:"remixicon";
@@ -883,7 +884,7 @@ pre, textarea{display: inline-block;}
 .menu-hide #menu{left: -272px;}
 .menu-hide #content{margin-left:10px;}
 .menu-hide #breadcrumb{left: 0;}
-.menu-hide #lang{display:none;}
+
 .menu-hide .jush{width: 90% !important;}
 
 input[type=submit]{color:#fff;background-color: #1890ff;}

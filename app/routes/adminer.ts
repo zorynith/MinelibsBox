@@ -1048,11 +1048,11 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=12">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=13">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <style>
-.toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:30px;height:42px;line-height:42px;text-align:center;color:#fff;background:rgba(63,87,111,0.85);border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:left .2s,opacity .2s,background .2s;}
-.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:rgba(75,106,135,0.95);}
+.toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:30px;height:42px;line-height:42px;text-align:center;color:#fff;background:rgba(63,87,111,0.6);border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:left .2s,opacity .2s,background .2s;}
+.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:rgba(75,106,135,0.85);}
 .toggle-menu:before{content:"\\ea64";font-family:"remixicon";font-style:normal;position:static;display:inline;width:auto;height:auto;font-size:15px;line-height:42px;color:#fff;background:none;border:0;border-radius:0;box-shadow:none;opacity:1;}
 .menu-hide .toggle-menu{left:0;opacity:1;}
 .menu-hide .toggle-menu:before{content:"\\ea6e";}
@@ -1063,6 +1063,11 @@ body.app-page-small .toggle-menu{opacity:1;}
 #menu h1{height:62px;gap:6px;flex:none;padding:0 0 0 28px;display:flex;align-items:center;box-sizing:border-box;line-height:1;}
 #menu h1:before{line-height:1;}
 #breadcrumb{left:272px;right:0;width:auto;}
+#lang{position:absolute !important;top:0 !important;left:170px !important;}
+*{-webkit-tap-highlight-color:transparent;}
+a:active,button:active,input:active{background-color:transparent !important;}
+a:focus,button:focus,input:focus,select:focus,textarea:focus{outline:none !important;}
+input:focus,textarea:focus,select:focus{box-shadow:none !important;}
 #menu #dbNav{margin:10px 10px 6px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.14);flex:none;}
 body #menu #dbs{margin:0;padding:8px 12px;border:none;background:transparent;color:#fff;font-size:13px;font-weight:600;letter-spacing:.2px;}
 body #menu #dbNav .links{display:flex;width:100%;margin:0;padding:0;border:none;border-top:1px solid rgba(255,255,255,0.12);border-radius:0;background:transparent;flex:none;}
@@ -1070,7 +1075,7 @@ body #menu #dbNav .links a{flex:1;display:flex;align-items:center;justify-conten
 body #menu #dbNav .links a:hover{background:rgba(255,255,255,0.2);}
 #menu #tableFilter{margin:0 10px !important;padding:0 !important;border:none;flex:none;}
 #menu #tableFilter input{width:100% !important;box-sizing:border-box;height:28px;}
-#lang select{position:absolute !important;left:10px !important;right:auto !important;top:9px !important;width:auto !important;max-width:210px;background-color:#456079;border:none;color:#fff;border-radius:4px;height:23px;line-height:23px;}
+#lang select{position:absolute !important;left:10px !important;right:auto !important;top:19px !important;width:auto !important;max-width:210px;background-color:#456079;border:none;color:#fff;border-radius:4px;height:23px;line-height:23px;}
 #menu #tables li{margin:0 8px;}
 #menu #tables{list-style:none;padding:0 !important;position:static !important;top:auto !important;bottom:auto !important;left:auto !important;right:auto !important;margin:0 !important;flex:1 1 auto;overflow-y:auto !important;width:100%;}
 #page input[type=button]{margin:0 5px 6px 0;padding:5px 11px;border:1px solid #d0cdc4;border-radius:3px;background:#fff;color:#2c3e50;cursor:pointer;vertical-align:middle;}
