@@ -487,7 +487,7 @@ table:after
     color: #b3d3f3;
 }
 #menu #logins a:hover{
-    background:rgba(63,87,111,0.85);
+    background:#3f576f;
 }
 #menu #logins br{display:none;}
 
@@ -847,7 +847,7 @@ textarea{padding:5px;}
     width:30px;height:42px;line-height:42px;
     text-align:center;
     color:#fff;
-    background:#3f576f;
+    background:rgba(63,87,111,0.85);
     border-radius:0 5px 5px 0;
     box-shadow:2px 0 8px rgba(0,0,0,0.1);
     backdrop-filter:blur(5px);
