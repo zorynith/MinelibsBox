@@ -590,6 +590,8 @@ a,input,button{transition:all .168s;}
 #tabs{
     margin: 10px 0 14px;
 }
+.row-actions{white-space:nowrap;}
+.row-actions a{display:block;white-space:nowrap;line-height:1.9;}
 #ajaxstatus + .links a {
     border: 1px solid #ccc;
     display: inline-block;
