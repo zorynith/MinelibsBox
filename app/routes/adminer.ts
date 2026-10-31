@@ -1156,7 +1156,7 @@ function loadingStart(){
       el = document.createElement('div');
       el.id = 'adminerLoading';
       el.className = 'loading-msg loading-msg-mask';
-      el.innerHTML = '<div class="loading-mask"></div><div class="loading-msg-content"><div class="loading-msg-box"><img src="' + staticPath + 'images/common/loading-pin3.gif"><div class="loader loader-moon"><div></div><div></div><div></div><div></div></div></div><div class="loading-msg-title"></div></div>';
+      el.innerHTML = '<div class="loading-mask"></div><div class="loading-msg-content"><div class="loading-msg-box"><img src="' + staticPath + 'images/common/loading-pin3.gif"></div><div class="loading-msg-title"></div></div>';
       box.appendChild(el);
     }
     el.querySelector('.loading-msg-title').textContent = t('loading');
