@@ -1048,7 +1048,7 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=17">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=18">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <link rel="stylesheet" href="${staticPath}style/dist/loading.css?v=1">
 <style>
@@ -1082,10 +1082,9 @@ body #menu #dbNav .links a:hover{background:rgba(255,255,255,0.2);}
 #tabs{margin:10px 0 14px;}
 #adminerLoading{position:fixed;left:0;top:0;right:0;bottom:0;z-index:9998;pointer-events:auto;}
 #adminerLoading .loading-mask{opacity:.45 !important;}
-#adminerLoading .loading-msg-content{left:50%;top:50%;margin:0;transform:translate(-50%,-50%);width:96px;padding-bottom:2px;background:rgba(255,255,255,0.85);box-shadow:0 4px 16px rgba(0,0,0,0.12);}
-#adminerLoading .loading-msg-box{margin:14px auto 2px auto;font-size:26px;}
-#adminerLoading .loading-msg-box img{max-height:28px;max-width:28px;}
-#adminerLoading .loading-msg-title{padding:0 2px 4px;font-size:12px;line-height:1.5;min-height:0;}
+#adminerLoading .loading-msg-content{left:50%;top:50%;margin:0;transform:translate(-50%,-50%);width:100px;padding-bottom:10px;background:rgba(255,255,255,0.8);box-shadow:2px 4px 10px rgba(0,0,0,0.07);}
+#adminerLoading .loading-msg-box{margin:25px auto 6px auto;font-size:30px;}
+#adminerLoading .loading-msg-box img{max-height:32px;max-width:32px;}
 .row-actions{white-space:nowrap;}
 .row-actions a{display:block;white-space:nowrap;line-height:1.9;}
 #page input[type=button]{margin:0 5px 6px 0;padding:5px 11px;border:1px solid #d0cdc4;border-radius:3px;background:#fff;color:#2c3e50;cursor:pointer;vertical-align:middle;}
