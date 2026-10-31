@@ -44,6 +44,20 @@ export function userSource(user: AuthUser): SourceRef {
   };
 }
 
+/**
+ * 稳定数字 sourceID (001 Source.sourceID 语义): 由虚拟路径确定性 hash 生成。
+ * 001 以 sourceID 标识文件/文件夹; worker 以虚拟路径驱动, 故按路径生成稳定
+ * sourceID, 供评论/元数据/分享等以 sourceID 为键的数据使用。
+ */
+export function pathSourceID(path: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < path.length; i++) {
+    h ^= path.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
 export function isAdminUser(user: AuthUser): boolean {
   return user.role === "admin" || user.role === "root";
 }

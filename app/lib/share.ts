@@ -120,6 +120,8 @@ export async function addShare(
     timeTo?: number;
     options?: Record<string, any>;
     url?: string;
+    /** 001 Source.sourceID; 个人空间/io/URL 分享为 '0', 部门等真实源为路径 sourceID */
+    sourceID?: string;
   }
 ): Promise<number> {
   const now = new Date().toISOString();
@@ -127,12 +129,13 @@ export async function addShare(
   const res = await db
     .prepare(
       `INSERT INTO share (title, shareHash, userID, sourceID, sourcePath, url, isLink, isShareTo, password, timeTo, numView, numDownload, options, createTime, modifyTime)
-       VALUES (?, ?, ?, '0', ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`
     )
     .bind(
       data.title,
       data.shareHash,
       data.userID,
+      data.sourceID || "0",
       normShareSourcePath(data.sourcePath),
       data.url || "",
       data.isLink,

@@ -17,7 +17,7 @@ import { authRequired } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
 import { hashPassword, verifyPassword } from "../lib/auth";
 import { keyFromBase, listDirectory, listAllFiles, deleteDirectory, getFileMimeType, cleanupStaleUploadTmp } from "../lib/r2";
-import { resolveFileSource, userSource, toRealPath, groupChainMeta } from "../lib/source";
+import { resolveFileSource, userSource, toRealPath, groupChainMeta, pathSourceID } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { getGroupAuthValue, getPersonalAuthValue, hasAuth, AUTH_SHOW, AUTH_VIEW, AUTH_DOWNLOAD, AUTH_UPLOAD, AUTH_EDIT, AUTH_REMOVE, AUTH_SHARE, AUTH_ROOT } from "../lib/source-auth";
 import { sizeFormat, gbLimit } from "../lib/limit";
@@ -394,14 +394,7 @@ function itemPathDisplay(path: string, pathDisplayBase?: string): string {
  * 001 文件评论 (TYPE_SOURCE) 以 sourceID 为目标标识; worker 以虚拟路径驱动,
  * 故对每个文件/文件夹注入稳定 sourceID, 供评论面板 targetID 使用。
  */
-function fileSourceID(path: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < path.length; i++) {
-    h ^= path.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h >>> 0;
-}
+const fileSourceID = pathSourceID;
 
 /**
  * 将 sourceID（path 的 FNV-1a hash，前端 filesAddToTag/filesRemoveFromTag 传的是 sourceID）

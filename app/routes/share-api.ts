@@ -16,7 +16,7 @@ import { getUserById, addAuditLog, getSetting, getUserOption, setUserOption } fr
 import { getAppHost } from "../lib/user-system";
 import { t } from "../lib/i18n";
 import { getUserFileKey, listDirectory, getFileMimeType, keyFromBase } from "../lib/r2";
-import { resolveFileSource } from "../lib/source";
+import { resolveFileSource, pathSourceID } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { ioClientOf } from "../lib/io";
 import { getGroupAuthValue } from "../lib/source-auth";
@@ -1594,6 +1594,11 @@ shareApi.all("/userShare/add", async (c) => {
     title,
     shareHash,
     sourcePath: source.realPath,
+    // 001 userShare.add: io/无类型路径传 '0'; 个人空间/部门等真实源传 sourceID
+    sourceID:
+      src.type === "io"
+        ? "0"
+        : String(pathSourceID(src.type === "group" ? `{source:${src.sourceId}}${relPath}` : `{source:home}${relPath}`)),
     isLink,
     isShareTo,
     password: typeof params.password === "string" ? params.password : "",

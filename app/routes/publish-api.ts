@@ -12,7 +12,7 @@
 import { Hono } from "hono";
 import { authRequired } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
-import { resolveFileSource } from "../lib/source";
+import { resolveFileSource, pathSourceID } from "../lib/source";
 import { keyFromBase, deleteDirectory } from "../lib/r2";
 import {
   addShare,
@@ -144,6 +144,7 @@ publishApi.all("/publish/makeTemp", async (c) => {
     title: srcName,
     shareHash,
     sourcePath: normShareSourcePath(tempPath, srcInfo.isFolder),
+    sourceID: String(pathSourceID(normShareSourcePath(tempPath, srcInfo.isFolder))),
     isLink: 0,
     isShareTo: 1,
     password: "",
