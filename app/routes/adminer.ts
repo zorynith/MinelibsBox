@@ -1048,8 +1048,9 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=15">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=16">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
+<link rel="stylesheet" href="${staticPath}style/dist/loading.css?v=1">
 <style>
 .toggle-menu{position:fixed;left:272px;top:50%;bottom:auto;margin-top:0;transform:translateY(-50%);width:30px;height:42px;line-height:42px;text-align:center;color:#fff;background:rgba(63,87,111,0.6);border-radius:0 5px 5px 0;box-shadow:2px 0 8px rgba(0,0,0,0.1);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);cursor:pointer;z-index:100;opacity:0;transition:left .2s,opacity .2s,background .2s;}
 .toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:rgba(75,106,135,0.85);}
@@ -1079,6 +1080,11 @@ body #menu #dbNav .links a:hover{background:rgba(255,255,255,0.2);}
 #menu #tables li{margin:0 8px;}
 #menu #tables{list-style:none;padding:0 !important;position:static !important;top:auto !important;bottom:auto !important;left:auto !important;right:auto !important;margin:0 !important;flex:1 1 auto;overflow-y:auto !important;width:100%;}
 #tabs{margin:10px 0 14px;}
+#content{position:relative;}
+#adminerLoading{z-index:9998;pointer-events:auto;}
+#adminerLoading .loading-mask{opacity:.45 !important;}
+#adminerLoading .loading-msg-content{background:rgba(255,255,255,0.85);box-shadow:0 4px 16px rgba(0,0,0,0.12);}
+#adminerLoading .loading-msg-box img{max-height:32px;max-width:32px;}
 .row-actions{white-space:nowrap;}
 .row-actions a{display:block;white-space:nowrap;line-height:1.9;}
 #page input[type=button]{margin:0 5px 6px 0;padding:5px 11px;border:1px solid #d0cdc4;border-radius:3px;background:#fff;color:#2c3e50;cursor:pointer;vertical-align:middle;}
@@ -1114,12 +1120,13 @@ td a{margin-right:8px;}
 <div id="adminerDebug" style="display:none;position:fixed;left:0;right:0;bottom:0;max-height:35%;overflow:auto;background:#1e1e1e;color:#d4d4d4;font:12px/1.5 monospace;padding:8px 12px;border-top:2px solid #e8a33d;z-index:9999"></div>
 <script>
 var apiBase = ${JSON.stringify(apiBase)};
+var staticPath = ${JSON.stringify(staticPath)};
 var DEBUG = ${debug ? 1 : 0};
 var TYPE_LIST = ['INTEGER','TEXT','REAL','BLOB','NUMERIC','BOOLEAN','DATE','DATETIME','TIMESTAMP','VARCHAR','CHAR','DECIMAL','DOUBLE','FLOAT','BIGINT','SMALLINT','CLOB','JSON'];
 var LANG = {
   en: { sqlCommand:'SQL command', import:'Import', export:'Export', createTable:'Create table', alterTable:'Alter table', selectData:'Select data', structure:'Structure', newItem:'New item', edit:'edit', del:'delete', save:'Save', cancel:'Cancel', refresh:'Refresh', execute:'Execute', clear:'Clear', rows:'row(s)', page:'Page', prev:'<', next:'>', indexes:'Indexes', foreignKeys:'Foreign keys', triggers:'Triggers', ddl:'Create code', columns:'Columns', name:'Name', type:'Type', nullable:'Nullable', default:'Default', primaryKey:'Primary key', unique:'Unique', importSql:'Import SQL / CSV', importHint:'Paste SQL statements (or CSV data with a header row), or choose a file.', loading:'Loading...', noTables:'No tables', noRows:'No rows', views:'Views', db:'D1', table:'Table', tableName:'Table name', format:'Format', file:'File', executed:'statement(s) executed', actions:'Actions', where:'WHERE', rowsPerPage:'Rows', size:'Size', addColumn:'Add column', dropColumn:'Drop column', renameColumn:'Rename column', renameTable:'Rename table', addIndex:'Add index', dropIndex:'Drop index', column:'Column', length:'Length', notnull:'Not NULL', autoIncrement:'Auto increment', add:'Add', remove:'Remove', drop:'Drop', empty:'Empty', confirmDrop:'Drop this object? This cannot be undone.', confirmEmpty:'Delete ALL rows in this table?', confirmDelete:'Delete this row?', newTableName:'New name', from:'From', to:'To', ifNotExists:'IF NOT EXISTS', affected:'row(s) affected', selectTable:'Select a table from the left.', search:'Search', searchHint:'Search text across all tables', clone:'clone', print:'Print', createView:'Create view', createTrigger:'Create trigger', first:'<<', last:'>>', structureOnly:'Structure only', dataOnly:'Data only', both:'Structure + data', skipErrors:'Skip errors', history:'History', filter:'Filter', viewName:'View name', selectSql:'SELECT statement', triggerName:'Trigger name', timing:'Timing', event:'Event', triggerBody:'Trigger body (SQL statements)', refTable:'Reference table', refColumn:'Reference column', foreignKey:'Foreign key', noMatches:'No matches', copied:'row copied', columnsHint:'blank = all, comma-separated' },
-  zh: { sqlCommand:'SQL 命令', import:'导入', export:'导出', createTable:'新建数据表', alterTable:'修改表', selectData:'浏览数据', structure:'结构', newItem:'新建记录', edit:'编辑', del:'删除', save:'保存', cancel:'取消', refresh:'刷新', execute:'执行', clear:'清空', rows:'行', page:'第', prev:'<', next:'>', indexes:'索引', foreignKeys:'外键', triggers:'触发器', ddl:'建表语句', columns:'字段', name:'名称', type:'类型', nullable:'可空', default:'默认值', primaryKey:'主键', unique:'唯一', importSql:'导入 SQL / CSV', importHint:'粘贴 SQL 语句（或带表头的 CSV 数据），也可选择文件。', loading:'加载中...', noTables:'没有数据表', noRows:'没有数据', views:'视图', db:'D1', table:'表', tableName:'表名', format:'格式', file:'文件', executed:'条语句已执行', actions:'操作', where:'条件', rowsPerPage:'每页', size:'宽度', addColumn:'添加字段', dropColumn:'删除字段', renameColumn:'重命名字段', renameTable:'重命名表', addIndex:'添加索引', dropIndex:'删除索引', column:'字段', length:'长度', notnull:'非空', autoIncrement:'自增', add:'添加', remove:'删除', drop:'删除表', empty:'清空', confirmDrop:'确定删除该对象？不可恢复。', confirmEmpty:'确定删除该表全部数据？', confirmDelete:'确定删除该行？', newTableName:'新名称', from:'从', to:'到', ifNotExists:'若不存在', affected:'行受影响', selectTable:'请从左侧选择数据表。', search:'搜索', searchHint:'在所有表中搜索文本', clone:'克隆', print:'打印', createView:'新建视图', createTrigger:'新建触发器', first:'<<', last:'>>', structureOnly:'仅结构', dataOnly:'仅数据', both:'结构+数据', skipErrors:'跳过错误继续', history:'历史', filter:'过滤', viewName:'视图名', selectSql:'SELECT 语句', triggerName:'触发器名', timing:'时机', event:'事件', triggerBody:'触发器体（SQL 语句）', refTable:'引用表', refColumn:'引用列', foreignKey:'外键', noMatches:'无匹配', copied:'行已复制', columnsHint:'留空=全部，逗号分隔' },
-  'zh-tw': { sqlCommand:'SQL 命令', import:'匯入', export:'匯出', createTable:'建立資料表', alterTable:'修改資料表', selectData:'瀏覽資料', structure:'結構', newItem:'新增記錄', edit:'編輯', del:'刪除', save:'儲存', cancel:'取消', refresh:'重新整理', execute:'執行', clear:'清除', rows:'列', page:'第', prev:'<', next:'>', indexes:'索引', foreignKeys:'外鍵', triggers:'觸發器', ddl:'建表語句', columns:'欄位', name:'名稱', type:'類型', nullable:'可空', default:'預設值', primaryKey:'主鍵', unique:'唯一', importSql:'匯入 SQL / CSV', importHint:'貼上 SQL 語句（或帶表頭的 CSV 資料），也可選擇檔案。', loading:'載入中...', noTables:'沒有資料表', noRows:'沒有資料', views:'檢視', db:'D1', table:'資料表', tableName:'表名', format:'格式', file:'檔案', executed:'條語句已執行', actions:'操作', where:'條件', rowsPerPage:'每頁', size:'寬度', addColumn:'新增欄位', dropColumn:'刪除欄位', renameColumn:'重新命名欄位', renameTable:'重新命名資料表', addIndex:'新增索引', dropIndex:'刪除索引', column:'欄位', length:'長度', notnull:'非空', autoIncrement:'自動遞增', add:'新增', remove:'刪除', drop:'刪除資料表', empty:'清空', confirmDrop:'確定刪除該物件？不可恢復。', confirmEmpty:'確定刪除該表全部資料？', confirmDelete:'確定刪除該列？', newTableName:'新名稱', from:'從', to:'到', ifNotExists:'若不存在', affected:'列受影響', selectTable:'請從左側選擇資料表。', search:'搜尋', searchHint:'在所有資料表中搜尋文字', clone:'複製', print:'列印', createView:'建立檢視', createTrigger:'建立觸發器', first:'<<', last:'>>', structureOnly:'僅結構', dataOnly:'僅資料', both:'結構+資料', skipErrors:'跳過錯誤繼續', history:'歷史', filter:'過濾', viewName:'檢視名', selectSql:'SELECT 語句', triggerName:'觸發器名', timing:'時機', event:'事件', triggerBody:'觸發器體（SQL 語句）', refTable:'引用資料表', refColumn:'引用欄位', foreignKey:'外鍵', noMatches:'無匹配', copied:'列已複製', columnsHint:'留空=全部，逗號分隔' },
+  zh: { sqlCommand:'SQL 命令', import:'导入', export:'导出', createTable:'新建数据表', alterTable:'修改表', selectData:'浏览数据', structure:'结构', newItem:'新建记录', edit:'编辑', del:'删除', save:'保存', cancel:'取消', refresh:'刷新', execute:'执行', clear:'清空', rows:'行', page:'第', prev:'<', next:'>', indexes:'索引', foreignKeys:'外键', triggers:'触发器', ddl:'建表语句', columns:'字段', name:'名称', type:'类型', nullable:'可空', default:'默认值', primaryKey:'主键', unique:'唯一', importSql:'导入 SQL / CSV', importHint:'粘贴 SQL 语句（或带表头的 CSV 数据），也可选择文件。', loading:'操作中...', noTables:'没有数据表', noRows:'没有数据', views:'视图', db:'D1', table:'表', tableName:'表名', format:'格式', file:'文件', executed:'条语句已执行', actions:'操作', where:'条件', rowsPerPage:'每页', size:'宽度', addColumn:'添加字段', dropColumn:'删除字段', renameColumn:'重命名字段', renameTable:'重命名表', addIndex:'添加索引', dropIndex:'删除索引', column:'字段', length:'长度', notnull:'非空', autoIncrement:'自增', add:'添加', remove:'删除', drop:'删除表', empty:'清空', confirmDrop:'确定删除该对象？不可恢复。', confirmEmpty:'确定删除该表全部数据？', confirmDelete:'确定删除该行？', newTableName:'新名称', from:'从', to:'到', ifNotExists:'若不存在', affected:'行受影响', selectTable:'请从左侧选择数据表。', search:'搜索', searchHint:'在所有表中搜索文本', clone:'克隆', print:'打印', createView:'新建视图', createTrigger:'新建触发器', first:'<<', last:'>>', structureOnly:'仅结构', dataOnly:'仅数据', both:'结构+数据', skipErrors:'跳过错误继续', history:'历史', filter:'过滤', viewName:'视图名', selectSql:'SELECT 语句', triggerName:'触发器名', timing:'时机', event:'事件', triggerBody:'触发器体（SQL 语句）', refTable:'引用表', refColumn:'引用列', foreignKey:'外键', noMatches:'无匹配', copied:'行已复制', columnsHint:'留空=全部，逗号分隔' },
+  'zh-tw': { sqlCommand:'SQL 命令', import:'匯入', export:'匯出', createTable:'建立資料表', alterTable:'修改資料表', selectData:'瀏覽資料', structure:'結構', newItem:'新增記錄', edit:'編輯', del:'刪除', save:'儲存', cancel:'取消', refresh:'重新整理', execute:'執行', clear:'清除', rows:'列', page:'第', prev:'<', next:'>', indexes:'索引', foreignKeys:'外鍵', triggers:'觸發器', ddl:'建表語句', columns:'欄位', name:'名稱', type:'類型', nullable:'可空', default:'預設值', primaryKey:'主鍵', unique:'唯一', importSql:'匯入 SQL / CSV', importHint:'貼上 SQL 語句（或帶表頭的 CSV 資料），也可選擇檔案。', loading:'操作中...', noTables:'沒有資料表', noRows:'沒有資料', views:'檢視', db:'D1', table:'資料表', tableName:'表名', format:'格式', file:'檔案', executed:'條語句已執行', actions:'操作', where:'條件', rowsPerPage:'每頁', size:'寬度', addColumn:'新增欄位', dropColumn:'刪除欄位', renameColumn:'重新命名欄位', renameTable:'重新命名資料表', addIndex:'新增索引', dropIndex:'刪除索引', column:'欄位', length:'長度', notnull:'非空', autoIncrement:'自動遞增', add:'新增', remove:'刪除', drop:'刪除資料表', empty:'清空', confirmDrop:'確定刪除該物件？不可恢復。', confirmEmpty:'確定刪除該表全部資料？', confirmDelete:'確定刪除該列？', newTableName:'新名稱', from:'從', to:'到', ifNotExists:'若不存在', affected:'列受影響', selectTable:'請從左側選擇資料表。', search:'搜尋', searchHint:'在所有資料表中搜尋文字', clone:'複製', print:'列印', createView:'建立檢視', createTrigger:'建立觸發器', first:'<<', last:'>>', structureOnly:'僅結構', dataOnly:'僅資料', both:'結構+資料', skipErrors:'跳過錯誤繼續', history:'歷史', filter:'過濾', viewName:'檢視名', selectSql:'SELECT 語句', triggerName:'觸發器名', timing:'時機', event:'事件', triggerBody:'觸發器體（SQL 語句）', refTable:'引用資料表', refColumn:'引用欄位', foreignKey:'外鍵', noMatches:'無匹配', copied:'列已複製', columnsHint:'留空=全部，逗號分隔' },
   ja: { sqlCommand:'SQL コマンド', import:'インポート', export:'エクスポート', createTable:'テーブル作成', alterTable:'テーブル変更', selectData:'データ表示', structure:'構造', newItem:'新規レコード', edit:'編集', del:'削除', save:'保存', cancel:'キャンセル', refresh:'更新', execute:'実行', clear:'クリア', rows:'行', page:'ページ', prev:'<', next:'>', indexes:'インデックス', foreignKeys:'外部キー', triggers:'トリガー', ddl:'CREATE 文', columns:'カラム', name:'名前', type:'型', nullable:'NULL 可', default:'デフォルト', primaryKey:'主キー', unique:'一意', importSql:'SQL / CSV インポート', importHint:'SQL 文（またはヘッダー付き CSV データ）を貼り付けるか、ファイルを選択してください。', loading:'読み込み中...', noTables:'テーブルなし', noRows:'データなし', views:'ビュー', db:'D1', table:'テーブル', tableName:'テーブル名', format:'形式', file:'ファイル', executed:'文を実行しました', actions:'操作', where:'条件', rowsPerPage:'表示件数', size:'サイズ', addColumn:'カラム追加', dropColumn:'カラム削除', renameColumn:'カラム名変更', renameTable:'テーブル名変更', addIndex:'インデックス追加', dropIndex:'インデックス削除', column:'カラム', length:'長さ', notnull:'NOT NULL', autoIncrement:'自動採番', add:'追加', remove:'削除', drop:'テーブル削除', empty:'空にする', confirmDrop:'このオブジェクトを削除しますか？元に戻せません。', confirmEmpty:'このテーブルの全データを削除しますか？', confirmDelete:'この行を削除しますか？', newTableName:'新しい名前', from:'元', to:'先', ifNotExists:'存在しない場合', affected:'行が影響を受けました', selectTable:'左側からテーブルを選択してください。', search:'検索', searchHint:'すべてのテーブルでテキストを検索', clone:'複製', print:'印刷', createView:'ビュー作成', createTrigger:'トリガー作成', first:'<<', last:'>>', structureOnly:'構造のみ', dataOnly:'データのみ', both:'構造+データ', skipErrors:'エラーをスキップ', history:'履歴', filter:'絞り込み', viewName:'ビュー名', selectSql:'SELECT 文', triggerName:'トリガー名', timing:'タイミング', event:'イベント', triggerBody:'トリガー本体（SQL 文）', refTable:'参照テーブル', refColumn:'参照カラム', foreignKey:'外部キー', noMatches:'一致なし', copied:'行を複製しました' },
   ko: { sqlCommand:'SQL 명령', import:'가져오기', export:'내보내기', createTable:'테이블 생성', alterTable:'테이블 변경', selectData:'데이터 보기', structure:'구조', newItem:'새 레코드', edit:'편집', del:'삭제', save:'저장', cancel:'취소', refresh:'새로고침', execute:'실행', clear:'지우기', rows:'행', page:'페이지', prev:'<', next:'>', indexes:'인덱스', foreignKeys:'외래 키', triggers:'트리거', ddl:'CREATE 문', columns:'열', name:'이름', type:'유형', nullable:'NULL 허용', default:'기본값', primaryKey:'기본 키', unique:'고유', importSql:'SQL / CSV 가져오기', importHint:'SQL 문(또는 헤더가 있는 CSV 데이터)을 붙여넣거나 파일을 선택하세요.', loading:'불러오는 중...', noTables:'테이블 없음', noRows:'데이터 없음', views:'뷰', db:'D1', table:'테이블', tableName:'테이블 이름', format:'형식', file:'파일', executed:'문 실행됨', actions:'작업', where:'조건', rowsPerPage:'페이지당 행', size:'크기', addColumn:'열 추가', dropColumn:'열 삭제', renameColumn:'열 이름 변경', renameTable:'테이블 이름 변경', addIndex:'인덱스 추가', dropIndex:'인덱스 삭제', column:'열', length:'길이', notnull:'NOT NULL', autoIncrement:'자동 증가', add:'추가', remove:'삭제', drop:'테이블 삭제', empty:'비우기', confirmDrop:'이 개체를 삭제할까요? 되돌릴 수 없습니다.', confirmEmpty:'이 테이블의 모든 데이터를 삭제할까요?', confirmDelete:'이 행을 삭제할까요?', newTableName:'새 이름', from:'원본', to:'대상', ifNotExists:'없는 경우', affected:'행이 영향받음', selectTable:'왼쪽에서 테이블을 선택하세요.', search:'검색', searchHint:'모든 테이블에서 텍스트 검색', clone:'복제', print:'인쇄', createView:'뷰 생성', createTrigger:'트리거 생성', first:'<<', last:'>>', structureOnly:'구조만', dataOnly:'데이터만', both:'구조+데이터', skipErrors:'오류 건너뛰기', history:'기록', filter:'필터', viewName:'뷰 이름', selectSql:'SELECT 문', triggerName:'트리거 이름', timing:'시점', event:'이벤트', triggerBody:'트리거 본문(SQL 문)', refTable:'참조 테이블', refColumn:'참조 열', foreignKey:'외래 키', noMatches:'일치 없음', copied:'행 복사됨' },
   fr: { sqlCommand:'Commande SQL', import:'Importer', export:'Exporter', createTable:'Créer une table', alterTable:'Modifier la table', selectData:'Afficher les données', structure:'Structure', newItem:'Nouvel enregistrement', edit:'modifier', del:'supprimer', save:'Enregistrer', cancel:'Annuler', refresh:'Actualiser', execute:'Exécuter', clear:'Effacer', rows:'lignes', page:'Page', prev:'<', next:'>', indexes:'Index', foreignKeys:'Clés étrangères', triggers:'Déclencheurs', ddl:'Code CREATE', columns:'Colonnes', name:'Nom', type:'Type', nullable:'Nullable', default:'Défaut', primaryKey:'Clé primaire', unique:'Unique', importSql:'Importer SQL / CSV', importHint:'Collez des instructions SQL (ou des données CSV avec en-tête), ou choisissez un fichier.', loading:'Chargement...', noTables:'Aucune table', noRows:'Aucune donnée', views:'Vues', db:'D1', table:'Table', tableName:'Nom de la table', format:'Format', file:'Fichier', executed:'instruction(s) exécutée(s)', actions:'Actions', where:'WHERE', rowsPerPage:'Lignes', size:'Taille', addColumn:'Ajouter une colonne', dropColumn:'Supprimer une colonne', renameColumn:'Renommer une colonne', renameTable:'Renommer la table', addIndex:'Ajouter un index', dropIndex:'Supprimer un index', column:'Colonne', length:'Longueur', notnull:'NOT NULL', autoIncrement:'Auto-incrément', add:'Ajouter', remove:'Supprimer', drop:'Supprimer', empty:'Vider', confirmDrop:'Supprimer cet objet ? Action irréversible.', confirmEmpty:'Supprimer TOUTES les lignes de cette table ?', confirmDelete:'Supprimer cette ligne ?', newTableName:'Nouveau nom', from:'De', to:'Vers', ifNotExists:'SI INEXISTANT', affected:'ligne(s) affectée(s)', selectTable:'Sélectionnez une table à gauche.', search:'Rechercher', searchHint:'Rechercher du texte dans toutes les tables', clone:'cloner', print:'Imprimer', createView:'Créer une vue', createTrigger:'Créer un déclencheur', first:'<<', last:'>>', structureOnly:'Structure seule', dataOnly:'Données seules', both:'Structure + données', skipErrors:'Ignorer les erreurs', history:'Historique', filter:'Filtrer', viewName:'Nom de la vue', selectSql:'Instruction SELECT', triggerName:'Nom du déclencheur', timing:'Moment', event:'Événement', triggerBody:'Corps du déclencheur (instructions SQL)', refTable:'Table de référence', refColumn:'Colonne de référence', foreignKey:'Clé étrangère', noMatches:'Aucune correspondance', copied:'ligne copiée' },
@@ -1136,6 +1143,33 @@ function t(k){ return (L[k] !== undefined ? L[k] : (LANG.en[k] !== undefined ? L
 function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function qi(n){ return '"' + String(n).replace(/"/g, '""') + '"'; }
 function $(id){ return document.getElementById(id); }
+var loadCount = 0, loadTimer = null;
+function loadingStart(){
+  loadCount++;
+  if (loadCount > 1 || loadTimer) return;
+  loadTimer = setTimeout(function(){
+    loadTimer = null;
+    if (!loadCount) return;
+    var box = $('content'); if (!box) return;
+    var el = $('adminerLoading');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'adminerLoading';
+      el.className = 'loading-msg loading-msg-mask';
+      el.innerHTML = '<div class="loading-mask"></div><div class="loading-msg-content"><div class="loading-msg-box"><img src="' + staticPath + 'images/common/loading-pin3.gif"><div class="loader loader-moon"><div></div><div></div><div></div><div></div></div></div><div class="loading-msg-title"></div></div>';
+      box.appendChild(el);
+    }
+    el.querySelector('.loading-msg-title').textContent = t('loading');
+    el.style.display = 'block';
+  }, 120);
+}
+function loadingEnd(){
+  loadCount = Math.max(0, loadCount - 1);
+  if (loadCount) return;
+  if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
+  var el = $('adminerLoading');
+  if (el) el.style.display = 'none';
+}
 function busy(on){ $('ajaxstatus').textContent = on ? t('loading') : ''; }
 var state = { view:'sql', table:'', type:'table', columns:[], pk:[], canRowid:false, page:1, size:50, total:0, rows:[], where:'', order:'', dir:'asc' };
 
@@ -1153,11 +1187,13 @@ function apiGet(act, params){
   for (k in (params || {})) { var v = params[k]; if (v !== undefined && v !== null && v !== '') qs.push(k + '=' + encodeURIComponent(v)); }
   if (qs.length) u += '&' + qs.join('&');
   dbg('GET ' + act, params);
-  return fetch(u, { credentials:'include' }).then(function(r){ return r.json(); }).then(function(j){ dbg('GET ' + act + ' ->', j); return j; });
+  loadingStart();
+  return fetch(u, { credentials:'include' }).then(function(r){ return r.json(); }).then(function(j){ dbg('GET ' + act + ' ->', j); return j; }).finally(loadingEnd);
 }
 function apiPost(act, body){
   dbg('POST ' + act, body);
-  return fetch(apiBase + act, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body || {}), credentials:'include' }).then(function(r){ return r.json(); }).then(function(j){ dbg('POST ' + act + ' ->', j); return j; });
+  loadingStart();
+  return fetch(apiBase + act, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body || {}), credentials:'include' }).then(function(r){ return r.json(); }).then(function(j){ dbg('POST ' + act + ' ->', j); return j; }).finally(loadingEnd);
 }
 function doPost(act, body, done){
   busy(true);
@@ -1244,7 +1280,7 @@ function runSql(sqlOverride){
   if (!sql || !sql.trim()) return false;
   if (!sqlOverride) sqlHistoryPush(sql);
   $('sql').value = sql;
-  $('result').innerHTML = '<p>' + t('loading') + '</p>';
+  $('result').innerHTML = '';
   apiPost('query', { sql: sql }).then(function(res){ renderQueryResults('result', res); });
   return false;
 }
@@ -1400,7 +1436,7 @@ function showStructure(){
   if (!state.table) return notEditable();
   state.view = 'structure';
   setTitle(t('structure') + ': ' + state.table); setCrumb([t('db'), state.table, t('structure')]); tableTabs('structure');
-  $('page').innerHTML = '<p>' + t('loading') + '</p>';
+  $('page').innerHTML = '';
   apiGet('structure', { table: state.table }).then(renderStructure);
 }
 function renderStructure(res){
@@ -1460,7 +1496,7 @@ function showSearch(){
 function runSearch(){
   var q = $('searchInput').value.trim();
   if (!q) return false;
-  $('result').innerHTML = '<p>' + t('loading') + '</p>';
+  $('result').innerHTML = '';
   apiGet('search', { q: q }).then(function(res){
     var box = $('result');
     if (!res || !res.code) { box.innerHTML = '<p class="error">' + esc(res && res.data) + '</p>'; return; }
@@ -1504,7 +1540,7 @@ function submitCreateView(ev){
 
 function showCreateTrigger(){
   state.view = 'createTrigger'; state.table = ''; setTitle(t('createTrigger')); setCrumb([t('createTrigger')]); tabs('');
-  $('page').innerHTML = '<p>' + t('loading') + '</p>';
+  $('page').innerHTML = '';
   apiGet('tables').then(function(res){
     var list = (res && res.data) || [], opts = '';
     list.forEach(function(it){ if (it.type !== 'view') opts += '<option value="' + esc(it.name) + '">' + esc(it.name) + '</option>'; });
@@ -1593,7 +1629,7 @@ function showAlter(){
   if (!state.table) return notEditable();
   state.view = 'alter';
   setTitle(t('alterTable') + ': ' + state.table); setCrumb([t('db'), state.table, t('alterTable')]); tableTabs('alter');
-  $('page').innerHTML = '<p>' + t('loading') + '</p>';
+  $('page').innerHTML = '';
   apiGet('structure', { table: state.table }).then(function(res){
     if (!res || !res.code) { $('page').innerHTML = '<p class="error">' + esc(res && res.data) + '</p>'; return; }
     var d = res.data, colOpts = '', idxOpts = '';
@@ -1620,7 +1656,7 @@ function alterDropIndex(){ var n = $('diName').value; if (!n || !confirm(t('conf
 
 function showExport(){
   state.view = 'export'; state.table = ''; setTitle(t('export')); setCrumb([t('export')]); tabs('');
-  $('page').innerHTML = '<p>' + t('loading') + '</p>';
+  $('page').innerHTML = '';
   apiGet('tables').then(function(res){
     var list = (res && res.data) || [], h = '<form onsubmit="return doExport();">';
     h += '<table class="nowrap"><thead><tr><th><input type="checkbox" id="chkAll" onchange="toggleAll(this)"></th><th>' + esc(t('name')) + '</th><th>' + esc(t('type')) + '</th></tr></thead><tbody>';
@@ -1649,7 +1685,7 @@ function doExport(){
 
 function showImport(){
   state.view = 'import'; state.table = ''; setTitle(t('importSql')); setCrumb([t('import')]); tabs('');
-  $('page').innerHTML = '<p>' + t('loading') + '</p>';
+  $('page').innerHTML = '';
   apiGet('tables').then(function(res){
     var list = (res && res.data) || [], opts = '';
     list.forEach(function(it){ if (it.type !== 'view') opts += '<option value="' + esc(it.name) + '">' + esc(it.name) + '</option>'; });
@@ -1668,7 +1704,7 @@ function doImport(ev){
   ev.preventDefault();
   var fmt = $('impFmt').value, table = $('impTable') ? $('impTable').value : '', file = $('impFile').files[0], text = $('impSql').value;
   var skip = $('impSkip') ? $('impSkip').checked : false;
-  $('result').innerHTML = '<p>' + t('loading') + '</p>';
+  $('result').innerHTML = '';
   var p;
   if (file){
     var fd = new FormData(); fd.append('format', fmt); fd.append('table', table); fd.append('skipErrors', skip ? '1' : '0'); fd.append('file', file);
