@@ -1670,11 +1670,13 @@ adminApi.all("/analysis/table", async (c) => {
 
   const stats = await scanBucketStats(c.env.FILES);
   const result = await c.env.DB.prepare(
-    "SELECT id, username, nickname, last_login, created_at FROM users ORDER BY last_login DESC, id ASC LIMIT 500"
+    "SELECT id, username, nickname, avatar, last_login, created_at FROM users ORDER BY last_login DESC, id ASC LIMIT 500"
   ).all();
   const list = (result.results as any[]).map((u) => ({
     userID: u.id,
+    name: u.username,
     nickName: u.nickname || u.username,
+    avatar: u.avatar || "",
     sizeUse: stats.perUser[u.username]?.size || 0,
     lastLogin: u.last_login || 0,
     createTime: isoToUnix(u.created_at),
