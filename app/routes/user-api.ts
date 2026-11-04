@@ -13,7 +13,7 @@ import { taskResultGet } from "../lib/task-result-cache";
 import { accountApi } from "./user-account-api";
 import { taskListData } from "./admin-task-api";
 import { getAppHost, getStaticHost } from "../lib/user-system";
-import { clientIp, loginLockCheck, userLoginCheck } from "../lib/user-check";
+import { clientIp, loginLockCheck, userLoginCheck, platformJsonOf } from "../lib/user-check";
 import { loginStateCheck } from "../lib/login-state";
 
 const userApi = new Hono<{ Bindings: Env; Variables: { currentUser: import("../lib/auth").AuthUser } }>();
@@ -134,7 +134,14 @@ userApi.post("/index/loginSubmit", async (c) => {
   // 登录日志 (001 admin/log::loginLog → model->addLog('user.index.loginSubmit', ...))
   const ip = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || "";
   const ua = c.req.header("user-agent") || "";
-  await addAuditLog(c.env.DB, "user.index.loginSubmit", user.id as number, null, ip, ua, null).catch(() => {});
+  // 001 admin/log::loginLog - detail 记录 {is_wap, ua, HTTP_X_PLATFORM}, 供登录设备/日志解析
+  const platformRaw = platformJsonOf(c.req.raw);
+  const loginDetail: Record<string, any> = { is_wap: false, ua };
+  if (platformRaw) {
+    loginDetail.is_wap = true;
+    loginDetail.HTTP_X_PLATFORM = platformRaw;
+  }
+  await addAuditLog(c.env.DB, "user.index.loginSubmit", user.id as number, null, ip, ua, JSON.stringify(loginDetail)).catch(() => {});
 
   // 001: show_json('ok', true, accessToken) —— data 固定 'ok', info 为 accessToken, 官方客户端据此认证。
   // worker accessToken 即会话 id (与 kod_session cookie 等价), 供客户端通过 query accessToken 携带。

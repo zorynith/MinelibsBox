@@ -768,13 +768,36 @@ export async function deleteVerifyCode(db: D1Database, key: string) {
 }
 
 // Device list helpers (mirrors 001 Model('SystemLog')->deviceList)
+// 001 中 desc 是登录时记录的设备数组 {is_wap, ua, HTTP_X_PLATFORM}, 前端据此解析
+// 浏览器/系统; 这里从 detail (JSON) 还原, 无 detail 时回退到 user_agent。
+function parseLoginDesc(detail: string | null, userAgent: string | null) {
+  let data: any = null;
+  if (detail) {
+    try { data = JSON.parse(detail); } catch { data = null; }
+  }
+  if (!data || typeof data !== "object") {
+    data = { ua: userAgent || "" };
+  } else if (!data.ua) {
+    data.ua = userAgent || "";
+  }
+  return data;
+}
+
 export async function getDeviceList(db: D1Database, userId: number, fromTime: number) {
   const result = await db.prepare(
-    `SELECT id, created_at AS createTime, user_agent AS desc, ip, '' AS browser, '' AS os
+    `SELECT id, created_at AS createTime, user_agent, detail, ip
      FROM audit_logs WHERE user_id = ? AND created_at >= ? AND action IN ('login', 'user.index.loginSubmit')
-     GROUP BY ip, desc ORDER BY createTime DESC`
+     GROUP BY ip, user_agent ORDER BY createTime DESC`
   ).bind(userId, new Date(fromTime * 1000).toISOString()).all();
-  return (result.results as any[]).map((r) => ({ ...r, createTime: toUnix(r.createTime) }));
+  return (result.results as any[]).map((r) => ({
+    id: r.id,
+    createTime: toUnix(r.createTime),
+    desc: parseLoginDesc(r.detail, r.user_agent),
+    ip: r.ip || "",
+    browser: "",
+    os: "",
+    address: r.ip || "",
+  }));
 }
 
 export async function getUserLogs(db: D1Database, userId: number, page: number = 1, pageNum: number = 10, action?: string) {
@@ -782,13 +805,22 @@ export async function getUserLogs(db: D1Database, userId: number, page: number =
   const where = action ? "AND action = ?" : "";
   const args = action ? [userId, action, pageNum, offset] : [userId, pageNum, offset];
   const result = await db.prepare(
-    `SELECT id, action AS desc, path, ip, user_agent, detail, created_at AS createTime
+    `SELECT id, action, path, ip, user_agent, detail, created_at AS createTime
      FROM audit_logs WHERE user_id = ? ${where} ORDER BY createTime DESC LIMIT ? OFFSET ?`
   ).bind(...(args as any)).all();
   const totalRow = await db.prepare(
     `SELECT COUNT(*) AS total FROM audit_logs WHERE user_id = ? ${where}`
   ).bind(...(action ? [userId, action] : [userId]) as any).first<{ total: number }>();
-  const list = (result.results as any[]).map((r) => ({ ...r, createTime: toUnix(r.createTime) }));
+  // 登录日志: desc 需要是设备对象, 供前端解析出浏览器/系统; 其他日志 desc 仍为 action 名
+  const list = (result.results as any[]).map((r) => {
+    const isLogin = r.action === "user.index.loginSubmit" || r.action === "login";
+    return {
+      ...r,
+      desc: isLogin ? parseLoginDesc(r.detail, r.user_agent) : r.action,
+      createTime: toUnix(r.createTime),
+      address: r.ip || "",
+    };
+  });
   return { list, total: totalRow?.total ?? 0 };
 }
 
