@@ -10,6 +10,7 @@ import { apiRoutes } from "../app/routes/api";
 import { pageRoutes } from "../app/routes/pages";
 import { webdavApi } from "../app/routes/webdav-api";
 import { initDatabase } from "../app/lib/db";
+import { markInstalled } from "../app/routes/install-api";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -86,7 +87,7 @@ app.use("*", async (c, next) => {
     const newReq = new Request(url.toString(), c.req.raw);
     return app.fetch(newReq, c.env, c.executionCtx);
   }
-  if (firstSeg && ["user", "explorer", "admin", "setting", "fav", "share", "desktop", "seo", "shareOut"].includes(firstSeg)) {
+  if (firstSeg && ["user", "explorer", "admin", "setting", "fav", "share", "desktop", "seo", "shareOut", "install"].includes(firstSeg)) {
     url.pathname = "/api" + path;
     const newReq = new Request(url.toString(), c.req.raw);
     return app.fetch(newReq, c.env, c.executionCtx);
@@ -151,6 +152,10 @@ export default {
         `INSERT INTO users (username, password_hash, nickname, role, roleID, status) VALUES (?, ?, ?, 'admin', 1, 1)
          ON CONFLICT(username) DO NOTHING`
       ).bind(username, passwordHash, "Administrator").run();
+
+      // 001 install.lock: Worker 由平台预置 D1/存储, 启动即视为已完成安装,
+      // 等价 001 安装成功后写入 install.lock (安装向导随之关闭)。
+      await markInstalled(env.DB);
 
       dbInitialized = true;
     }

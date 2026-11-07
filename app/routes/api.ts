@@ -11,6 +11,7 @@ import { shareApi } from "./share-api";
 import { publishApi } from "./publish-api";
 import { adminApi } from "./admin-api";
 import { repairApi } from "./repair-api";
+import { installApi } from "./install-api";
 import { autoTaskApi } from "./autotask-api";
 import { msgApi } from "./msg-api";
 import { pluginApi } from "./plugin-api";
@@ -106,6 +107,8 @@ apiRoutes.route("/admin", adminShareApi);
 apiRoutes.route("/admin", adminTaskApi);
 // Mount admin server API (服务器信息/缓存/数据库)
 apiRoutes.route("/admin", adminServerApi);
+// Mount install API (001 install/index: 安装向导, 已安装时全部拒绝)
+apiRoutes.route("/install", installApi);
 // Mount admin repair API (异常数据修复)
 apiRoutes.route("/admin", repairApi);
 // Mount admin autoTask API (计划任务)

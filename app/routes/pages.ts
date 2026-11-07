@@ -8,6 +8,7 @@ import { getSessionId } from "../lib/auth";
 import { getSession } from "../lib/db";
 import { getStaticHost } from "../lib/user-system";
 import { devLicenseItem, DEV_KOD } from "../lib/license";
+import { installInitCheck, renderInstallPage } from "./install-api";
 
 const pageRoutes = new Hono<{ Bindings: Env }>();
 
@@ -28,6 +29,11 @@ function getAppHost(c: Context<{ Bindings: Env }>) {
 }
 
 async function serveIndex(c: Context<{ Bindings: Env }>) {
+  // 001 user.index.init: 未安装 (install.lock 不存在) 时 ActionCall('install.index.check')
+  // 输出安装向导页, 已安装才输出 SPA。
+  const installState = await installInitCheck(c.env.DB).catch(() => 2);
+  if (installState !== 2) return renderInstallPage(c);
+
   const appHost = getAppHost(c);
   // Static files are hosted on GitHub Pages (STATIC_HOST) in production;
   // without STATIC_HOST we fall back to "/" (ASSETS binding serves ./static at root).
