@@ -3768,8 +3768,73 @@ async function historyResolve(c: AppContext, user: Vars["currentUser"], path: st
   return { src: src.source, relPath: src.relPath };
 }
 
-function historyRow(row: any): Record<string, unknown> {
-  return { id: row.id, path: row.path, size: row.size, detail: row.detail, createUser: row.createUser, createTime: row.createTime };
+/** 001 User::getInfoSimpleOuter: 批量查询 {userID,name,nickName,avatar} 供历史列表渲染。 */
+async function simpleUserMap(db: D1Database, ids: number[]): Promise<Map<number, Record<string, unknown>>> {
+  const map = new Map<number, Record<string, unknown>>();
+  const uniq = [...new Set(ids.filter((n) => Number.isInteger(n) && n > 0))];
+  if (uniq.length === 0) return map;
+  const rows = await db
+    .prepare(`SELECT id, username, nickname, avatar FROM users WHERE id IN (${uniq.map(() => "?").join(",")})`)
+    .bind(...uniq)
+    .all<any>();
+  for (const u of rows.results as any[]) {
+    map.set(u.id, { userID: u.id, name: u.username, nickName: u.nickname || u.username, avatar: u.avatar || "" });
+  }
+  return map;
+}
+
+function simpleUserOf(id: number, users: Map<number, Record<string, unknown>>): Record<string, unknown> {
+  return users.get(id) || { userID: id, name: "", nickName: "", avatar: "" };
+}
+
+function historyRow(row: any, users?: Map<number, Record<string, unknown>>): Record<string, unknown> {
+  const createUser = users ? simpleUserOf(Number(row.createUser), users) : row.createUser;
+  return { id: row.id, path: row.path, size: row.size, detail: row.detail, createUser, createTime: row.createTime };
+}
+
+/** 001 IO::info($path): 当前文件信息 (历史面板头部/"当前版本"行使用)。 */
+async function historyCurrentInfo(
+  c: AppContext,
+  src: SourceRef,
+  relPath: string,
+  path: string,
+  ownerId: number,
+  users: Map<number, Record<string, unknown>>
+): Promise<Record<string, unknown>> {
+  const isFolder = path.endsWith("/");
+  const name = path.split("/").filter(Boolean).pop() || path;
+  const ext = !isFolder && name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
+  const meta = await getSourceMeta(c.env.DB, fileSourceID(path));
+  let size = 0;
+  let modifyTime = nowSec();
+  if (!isFolder) {
+    const obj = await headObject(c, src, relPath);
+    if (obj) {
+      size = obj.size;
+      modifyTime = toUnix(obj.lastModified);
+    }
+  }
+  const owner = simpleUserOf(ownerId, users);
+  return {
+    name,
+    path,
+    pathDisplay: displayPath(path),
+    type: isFolder ? "folder" : "file",
+    typeCat: isFolder ? "" : kodFileType(name),
+    isFolder,
+    isWriteable: true,
+    isReadable: true,
+    isTruePath: true,
+    sourceID: fileSourceID(path),
+    size,
+    ext,
+    modifyTime,
+    createTime: modifyTime,
+    metaInfo: meta,
+    desc: meta.desc || "",
+    createUser: owner,
+    modifyUser: owner,
+  };
 }
 
 explorerApi.all("/history/get", async (c) => {
@@ -3779,8 +3844,27 @@ explorerApi.all("/history/get", async (c) => {
   if (!path) return c.json({ code: false, data: "参数错误" });
   const r = await historyResolve(c, user, path);
   if (r instanceof Response) return r;
-  const rows = await c.env.DB.prepare("SELECT * FROM source_history WHERE path = ? ORDER BY id DESC").bind(path).all<any>();
-  return c.json({ code: true, data: { list: rows.results.map(historyRow) } });
+  const rows = (await c.env.DB.prepare("SELECT * FROM source_history WHERE path = ? ORDER BY id DESC").bind(path).all<any>()).results as any[];
+  const users = await simpleUserMap(c.env.DB, [...rows.map((row) => Number(row.createUser)), user.id]);
+
+  // 001 array_page_split: pageNum 默认/下限 5, 上限 5000; page 夹在 [1, pageTotal]
+  const pageNumRaw = parseInt(String(params.pageNum ?? ""), 10);
+  const pageNum = !pageNumRaw || pageNumRaw <= 5 ? 5 : Math.min(pageNumRaw, 5000);
+  const pageTotal = Math.max(1, Math.ceil(rows.length / pageNum));
+  const pageRaw = parseInt(String(params.page ?? ""), 10);
+  const page = Math.min(!pageRaw || pageRaw <= 1 ? 1 : pageRaw, pageTotal);
+  const list = rows.slice((page - 1) * pageNum, page * pageNum);
+
+  const ownerId = rows.length > 0 ? Number(rows[0].createUser) : user.id;
+  const current = await historyCurrentInfo(c, r.src, r.relPath, path, ownerId, users);
+  return c.json({
+    code: true,
+    data: {
+      list: list.map((row) => historyRow(row, users)),
+      current,
+      pageInfo: { totalNum: rows.length, pageNum, page, pageTotal },
+    },
+  });
 });
 
 explorerApi.all("/history/remove", async (c) => {
@@ -3875,7 +3959,8 @@ explorerApi.all("/history/fileInfo", async (c) => {
   if (r instanceof Response) return r;
   const row = await c.env.DB.prepare("SELECT * FROM source_history WHERE id = ? AND path = ?").bind(id, path).first<any>();
   if (!row) return c.json({ code: false, data: "explorer.dataError" });
-  return c.json({ code: true, data: historyRow(row) });
+  const users = await simpleUserMap(c.env.DB, [Number(row.createUser)]);
+  return c.json({ code: true, data: historyRow(row, users) });
 });
 
 // ============ editor ============
@@ -3969,6 +4054,8 @@ explorerApi.all("/editor/fileSave", async (c) => {
   // 001 auth: 编辑器保存需 edit 权限 (含文档单独权限覆盖)
   const editAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, "common.noPermission", fileSourceID(path));
   if (!editAuth.ok) return c.json({ code: false, data: editAuth.error });
+  // 001 IO::setContent: 保存前把旧内容写入历史版本
+  await saveFileHistory(c, src.source, src.relPath, path, user.id);
   const okWrite = await writeObject(c, src.source, src.relPath, content, "text/plain; charset=utf-8");
   if (!okWrite) return c.json({ code: false, data: "保存失败" });
   await addAuditLog(c.env.DB, "editorSave", user.id, path, null, null, null);
@@ -4472,6 +4559,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
     respVirtualDir = virtualDir + father;
   }
 
+  let willOverwrite = false;
   if (fileSave === "1") {
     // 001 fileSave: 保存内容到已存在文件 (编辑器保存), 强制覆盖
     const tsrc = await resolveFileSource(c.env, user, path);
@@ -4481,6 +4569,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
     destDir = idx >= 0 ? rel.slice(0, idx + 1) : "/";
     destName = rel.slice(idx + 1);
     respVirtualDir = path.slice(0, path.lastIndexOf("/") + 1);
+    willOverwrite = (await headObject(c, src.source, destDir + destName)) !== null;
   } else {
     // 001 同名文件处理: replace(默认覆盖) / rename / skip
     const repeat = repeatParam || (await getUserOption(c.env.DB, user.id, "fileRepeat")) || "replace";
@@ -4491,13 +4580,24 @@ explorerApi.post("/upload/fileUpload", async (c) => {
       }
       if (repeat === "rename") {
         destName = await uniqueNameInDirSrc(c, src.source, destDir, destName);
+      } else {
+        willOverwrite = true;
       }
     }
   }
 
   const fileName = destName;
+  const virtualTargetPath = respVirtualDir + fileName;
   const key = keyFromBase(src.source.baseKey, destDir + fileName);
   const io = ioClientOf(src.source);
+
+  // 001 IO::setContent: 覆盖写入前把旧内容存为历史版本 (分片上传只在真正合并时存一次)
+  let historySaved = false;
+  const saveHistoryOnce = async () => {
+    if (!willOverwrite || historySaved) return;
+    historySaved = true;
+    await saveFileHistory(c, src.source, destDir + fileName, virtualTargetPath, user.id);
+  };
 
   try {
     // 每个文件的第一个分片(含单分片)到达时顺带清理过期残留分片
@@ -4539,6 +4639,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
             merged.set(p, off);
             off += p.byteLength;
           }
+          await saveHistoryOnce();
           const resp = await io.put(key, merged.buffer, file.type || getFileMimeType(fileName));
           if (!resp.ok) throw new Error("外部存储上传失败: " + resp.status);
           await c.env.FILES.put(mergedKey, "1");
@@ -4547,6 +4648,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
         if (tmpKeys.length > 0) await c.env.FILES.delete(tmpKeys);
       } else {
         const buf = await file.arrayBuffer();
+        await saveHistoryOnce();
         const resp = await io.put(key, buf, file.type || getFileMimeType(fileName));
         if (!resp.ok) throw new Error("外部存储上传失败: " + resp.status);
       }
@@ -4586,6 +4688,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
       const mergedObj = await c.env.FILES.head(mergedKey);
       if (!mergedObj) {
         try {
+          await saveHistoryOnce();
           await mergeChunks(c.env.FILES, chunkKeys, size, key, { httpMetadata: { contentType: file.type || getFileMimeType(fileName) } });
           await c.env.FILES.put(mergedKey, "1");
         } catch (err) {
@@ -4598,6 +4701,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
       const tmpKeys = await listAllKeys(c.env.FILES, tmpPrefix);
       if (tmpKeys.length > 0) await c.env.FILES.delete(tmpKeys);
     } else {
+      await saveHistoryOnce();
       await c.env.FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || getFileMimeType(fileName) } });
     }
 
