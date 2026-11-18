@@ -18,7 +18,7 @@ import { t } from "../lib/i18n";
 import { loadPluginLang } from "../lib/plugins";
 import { getFileMimeType, getUserFileKey, keyFromBase } from "../lib/r2";
 import { getShareByHash } from "../lib/share";
-import { getPluginMeta, getUserById, setPluginConfig } from "../lib/db";
+import { getPluginMeta, getUserById, setPluginConfig, getAllUserOptions, deleteUserOption } from "../lib/db";
 import { AUTO_VIEWER_CAD_FONTS } from "../lib/autoviewer-fonts";
 import { md5, hmacMd5 } from "../lib/mcrypt";
 import { resolveFileSource } from "../lib/source";
@@ -28,6 +28,14 @@ import { ioClientOf } from "../lib/io";
 import type { IoClient } from "../lib/io";
 import { parseShareLinkRel, joinShareRealPath } from "./share-api";
 import { handleAdminer } from "./adminer";
+import {
+  msgWarningTableHandler,
+  msgWarningActionHandler,
+  msgWarningNoticeHandler,
+  msgWarningTaskInfoHandler,
+  msgWarningMessageHandler,
+  msgWarningSendTypeHandler,
+} from "../lib/msg-warning";
 
 type Vars = { currentUser: AuthUser };
 const pluginApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -1561,77 +1569,215 @@ async function oauthCallbackHandler(c: any): Promise<Response> {
   return c.body(tpl, 200, { "Content-Type": "text/html; charset=utf-8" });
 }
 
-// ---------- msgWarning 通知中心 (复刻 001 plugins/msgWarning) ----------
+// ---------- 环境检测页 (fileThumb / libreOffice / OnlyOffice 共用) ----------
 
-async function msgWarningNoticeHandler(c: any): Promise<Response> {
-  // 001 msgWarning 通知依赖计划任务与预警规则表; 云端无预警数据时返回空列表
-  return c.json({ code: true, data: [] });
+function checkPageHtml(title: string, rows: Array<{ label: string; ok: boolean; desc?: string }>): string {
+  const items = rows
+    .map(
+      (r) =>
+        `<div class="row"><span class="ico ${r.ok ? "ok" : "err"}">${r.ok ? "✓" : "✕"}</span>` +
+        `<b>${r.label}</b>${r.desc ? `<div class="desc">${r.desc}</div>` : ""}</div>`
+    )
+    .join("");
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>${title}</title><style>
+body{margin:0;background:#f0f2f5;font-size:13px;color:#666;font-family:system-ui,-apple-system,sans-serif}
+.panel{width:78%;max-width:720px;margin:5% auto;background:#fff;border-radius:4px;padding:32px 40px;box-shadow:0 5px 20px rgba(0,0,0,.05)}
+h2{margin:0 0 20px;font-size:20px;color:#222;border-left:4px solid #2196F3;padding-left:12px}
+.row{margin-bottom:16px;line-height:22px}
+.row b{color:#333;font-weight:500}
+.ico{display:inline-block;width:20px;font-weight:700;margin-right:6px}
+.ico.ok{color:#52c41a}.ico.err{color:#f5222d}
+.desc{color:#999;margin-left:26px}
+</style></head><body><div class="panel"><h2>${title}</h2>${items}</div></body></html>`;
 }
 
-/** 001 msgWarningSysTask::getTask/addTask: 通知中心的计划任务 (event 固定) */
-const MSG_WARNING_TASK_EVENT = "msgWarningPlugin.autoTask";
-const MSG_WARNING_TASK_TIME = '{"type":"minute","month":"1","week":"1","day":"08:00","minute":"1"}';
+// ---------- fileThumb 缩略图/转码检测 ----------
 
-/**
- * 001 msgWarning/app::taskInfo: 返回通知中心对应的 system_task 行。
- * 前端 checkTask 依赖 data.enable / data.id: 任务不存在时若返回 null,
- * 确认框会用 id=0 调 admin/autoTask/enable, 得到「无效的参数」。
- * 001 在插件启用时由 msgWarningSysTask::updateTask 建任务, 这里按需补建。
- */
-async function msgWarningTaskInfoHandler(c: any): Promise<Response> {
-  const db = c.env.DB;
-  const findTask = async () =>
-    (await db
-      .prepare("SELECT * FROM system_task WHERE event = ? ORDER BY id ASC")
-      .bind(MSG_WARNING_TASK_EVENT)
-      .first()) as any;
+const WORKER_MEDIA_LIMIT = "当前运行环境 (Cloudflare Worker) 不支持 shell_exec / ffmpeg / imaginary，无法生成视频截图与视频转码；图片缩略图由浏览器直接加载原图。";
 
-  let task = await findTask().catch(() => null);
-  if (!task) {
-    const lng = await loadPluginLang(c.env.ASSETS, "msgWarning", detectLang(c)).catch(
-      () => ({}) as Record<string, string>
-    );
-    const name = lng["msgWarning.meta.name"] || "通知中心";
-    const desc = lng["msgWarning.main.taskDesc"] || "系统消息通知，任务来源于【通知中心】";
-    const maxRow = (await db
-      .prepare("SELECT COALESCE(MAX(sort), 0) + 1 AS nextSort FROM system_task")
-      .first()
-      .catch(() => null)) as { nextSort?: number } | null;
-    // WHERE NOT EXISTS: 并发打开两次不会建出重复任务
-    await db
-      .prepare(
-        `INSERT INTO system_task (name, type, event, time, desc, enable, system, sort, last_time)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, 0
-         WHERE NOT EXISTS (SELECT 1 FROM system_task WHERE event = ?)`
-      )
-      .bind(
-        name, "method", MSG_WARNING_TASK_EVENT, MSG_WARNING_TASK_TIME, desc, 0, 1,
-        maxRow?.nextSort ?? 1, MSG_WARNING_TASK_EVENT
-      )
-      .run()
-      .catch(() => null);
-    task = await findTask().catch(() => null);
+async function fileThumbCheckHandler(c: any): Promise<Response> {
+  if ((c.req.query("action") || "") === "stopAll") {
+    return c.body("Success !", 200, { "Content-Type": "text/plain; charset=utf-8" });
   }
-  return c.json({ code: true, data: task || null });
+  if (c.req.query("check") !== undefined) {
+    // 001: 带 check 时返回 JSON 检测结果, 前端据此显示红/绿
+    return c.json({ code: false, data: WORKER_MEDIA_LIMIT });
+  }
+  return c.body(
+    checkPageHtml("缩略图服务检测", [
+      { label: "imaginary 图片服务", ok: false, desc: "Worker 无外部图片处理服务，图片走原图预览" },
+      { label: "ffmpeg 视频转码", ok: false, desc: "Worker 无二进制执行能力，视频不做转码/截图" },
+      { label: "shell_exec / proc_open", ok: false, desc: WORKER_MEDIA_LIMIT },
+    ]),
+    200,
+    HTML_HEADERS
+  );
 }
 
-// ---------- storeImport 存储导入 (复刻 001 plugins/storeImport) ----------
+/** 001 videoPreview: ffmpeg 生成进度条雪碧图; Worker 无 ffmpeg → 404, DPlayer 自动忽略 */
+async function fileThumbVideoPreviewHandler(c: any): Promise<Response> {
+  return new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
+}
+
+// ---------- oauth 第三方账号绑定 (001 plugins/oauth controller/bind) ----------
+
+const OAUTH_BIND_TYPES = ["qq", "weixin", "github", "google", "facebook"];
+
+async function oauthBindHandler(c: any): Promise<Response> {
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!user) return c.json({ code: false, data: t("user.notLogin") });
+  const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, string>;
+  const get = (k: string) => String(body[k] ?? c.req.query(k) ?? "");
+  const method = get("method");
+  const type = get("type");
+
+  if (method === "bindInfo") {
+    const opts = await getAllUserOptions(c.env.DB, Number(user.id), "bind");
+    const bind: Record<string, number> = {};
+    for (const item of OAUTH_BIND_TYPES) bind[`${item}Bind`] = opts[`${item}Unionid`] ? 1 : 0;
+    // 001 isEmptyPwd: 空密码账号不允许解绑
+    const row = (await c.env.DB.prepare("SELECT password_hash FROM users WHERE id = ?")
+      .bind(user.id)
+      .first()) as { password_hash?: string } | null;
+    const emptyPwd = row?.password_hash ? 0 : 1;
+    return c.json({ code: true, data: { bind, emptyPwd } });
+  }
+
+  if (method === "unbind") {
+    if (!OAUTH_BIND_TYPES.includes(type)) return c.json({ code: false, data: t("user.bindTypeError") });
+    const row = (await c.env.DB.prepare("SELECT password_hash FROM users WHERE id = ?")
+      .bind(user.id)
+      .first()) as { password_hash?: string } | null;
+    if (!row?.password_hash) return c.json({ code: false, data: t("user.unbindWarning") });
+    await deleteUserOption(c.env.DB, Number(user.id), `${type}Unionid`, "bind");
+    await deleteUserOption(c.env.DB, Number(user.id), `${type}Info`, "bind");
+    return c.json({ code: true, data: t("explorer.success") });
+  }
+
+  // oauth: 001 会向 kodapi 换取第三方授权地址; 本版本未接入第三方开放平台
+  if (method === "oauth" || method === "bind" || method === "bindApi") {
+    if (!OAUTH_BIND_TYPES.includes(type)) return c.json({ code: false, data: t("common.invalidParam") });
+    return c.json({ code: false, data: "第三方账号登录/绑定未接入（当前版本无 kodapi 授权服务）" });
+  }
+  return c.json({ code: false, data: `${t("common.invalidParam")}[method]` });
+}
+
+// ---------- storeImport 存储导入 ----------
+
+const STORE_IMPORT_LIMIT =
+  "Cloudflare Worker 环境没有本地文件系统与后台任务队列，无法执行批量存储导入；请在「存储管理」中直接挂载对象存储后使用。";
 
 async function storeImportCheckHandler(c: any): Promise<Response> {
-  // 001 storeImport 扫描对象存储构建索引; 云端对象存储扫描返回基础统计
-  return c.json({ code: true, data: { folder: 0, file: 0 } });
+  const params = (await c.req.parseBody().catch(() => ({}))) as Record<string, string>;
+  const pathFrom = String(params.pathFrom || c.req.query("pathFrom") || "");
+  // 001 check: 只接受 KodIO 路径 {io:N}/path
+  if (!/^\{io:\d+\}/.test(pathFrom)) return c.json({ code: false, data: t("storeImport.main.ioPathErr") });
+  return c.json({ code: false, data: STORE_IMPORT_LIMIT });
+}
+
+async function storeImportStartHandler(c: any): Promise<Response> {
+  return c.json({ code: false, data: STORE_IMPORT_LIMIT });
 }
 
 async function storeImportLogGetHandler(c: any): Promise<Response> {
   return c.json({ code: true, data: [] });
 }
 
+/** 001 fileHashSet: 仅本地存储需要重算 hash, Worker 全部走对象存储 → 无操作 */
+async function storeImportFileHashSetHandler(c: any): Promise<Response> {
+  return c.json({ code: true, data: "" });
+}
+
+// ---------- officeViewer/libreOffice 检测 ----------
+
+const LIBREOFFICE_LIMIT = "当前运行环境 (Cloudflare Worker) 无法执行 soffice 命令，Office 文档不走 LibreOffice 转换；请使用 Office 阅读器或 OnlyOffice 插件预览。";
+
+async function officeViewerLibreOfficeCheckHandler(c: any): Promise<Response> {
+  if (c.req.query("check") !== undefined) return c.json({ code: false, data: LIBREOFFICE_LIMIT });
+  return c.body(
+    checkPageHtml("LibreOffice 检测", [
+      { label: "检测结果", ok: false, desc: "未通过" },
+      { label: "soffice 可执行文件", ok: false, desc: LIBREOFFICE_LIMIT },
+    ]),
+    200,
+    HTML_HEADERS
+  );
+}
+
+// ---------- OnlyOffice 检测 ----------
+
+async function onlyOfficeCheckHandler(c: any): Promise<Response> {
+  const meta = await getPluginMeta(c.env.DB, "OnlyOffice").catch(() => null);
+  const serverApi = String(meta?.config?.serverApi || "").trim().replace(/\/+$/, "");
+  if (!serverApi) {
+    return c.body(
+      checkPageHtml("OnlyOffice 服务检测", [
+        { label: "文档服务地址", ok: false, desc: "未配置 serverApi，请先在插件设置中填写 Document Server 地址" },
+      ]),
+      200,
+      HTML_HEADERS
+    );
+  }
+  let ok = false;
+  let desc = "";
+  try {
+    // Document Server 自带的健康检查端点, 返回 true
+    const res = await fetch(`${serverApi}/healthcheck`, { signal: AbortSignal.timeout?.(5000) } as any);
+    const text = (await res.text()).trim();
+    ok = res.ok && /true/i.test(text);
+    desc = ok ? "" : `HTTP ${res.status} ${text.slice(0, 120)}`;
+  } catch (e: any) {
+    desc = String(e?.message || e);
+  }
+  return c.body(
+    checkPageHtml("OnlyOffice 服务检测", [
+      { label: "文档服务地址", ok: true, desc: serverApi },
+      { label: "健康检查 /healthcheck", ok, desc: desc || "连接正常" },
+    ]),
+    200,
+    HTML_HEADERS
+  );
+}
+
+// ---------- webdav ----------
+
+async function webdavDownloadHandler(c: any): Promise<Response> {
+  const file = await loadTemplate(c.env.ASSETS, "plugins/webdav/static/webdav.cmd");
+  if (!file) return c.json({ code: false, data: "webdav.cmd not found" });
+  return c.body(file, 200, {
+    "Content-Type": "application/octet-stream",
+    "Content-Disposition": 'attachment; filename="webdav.cmd"',
+  });
+}
+
+/** 001 webdav::check: 回显 Authorization, 供客户端自检 */
+async function webdavAuthEchoHandler(c: any): Promise<Response> {
+  const auth = c.req.header("authorization") || "";
+  return c.body(auth, 200, { "Content-Type": "text/plain; charset=utf-8" });
+}
+
 pluginApi.all("/:name", (c) => pluginHandler(c));
 pluginApi.all("/:name/", (c) => pluginHandler(c));
 pluginApi.all("/:name/:act", (c) => pluginHandler(c));
+// 001 的插件地址常带 3 段以上 (如 plugin/officeViewer/libreOffice/index/check),
+// 多出来的段只用于 001 控制器路由, worker 用 /:name/:act 即已定位到处理函数。
+pluginApi.all("/:name/:act/*", (c) => pluginHandler(c));
+
+/** URL 里的插件名大小写不敏感 (001 按目录名匹配, 但前端有 plugin/onlyoffice/check 这类小写地址) */
+const PLUGIN_CANONICAL_NAMES = [
+  "pdfjs", "simpleClock", "webodf", "officeViewer", "OnlyOffice", "autoViewer",
+  "excalidraw", "minder", "tuiImage", "svgEditor", "drawio", "Photopea", "bisheng",
+  "officeLive", "yzOffice", "fileThumb", "adminer", "oauth", "msgWarning", "storeImport", "webdav",
+];
+
+function normalizePluginName(raw: string): string {
+  const lower = String(raw || "").toLowerCase();
+  return PLUGIN_CANONICAL_NAMES.find((n) => n.toLowerCase() === lower) || raw;
+}
 
 async function pluginHandler(c: any) {
-  const name = c.req.param("name");
+  const name = normalizePluginName(c.req.param("name"));
   const act = c.req.param("act") || "";
   const rawPath = c.req.query("path") || "";
   const fileName = c.req.query("name") || "";
@@ -1672,6 +1818,8 @@ async function pluginHandler(c: any) {
       // no office editor is configured; keep the viewer read-only
       return c.json({ code: false, data: "没有有效的文件编辑方式" });
     }
+    // plugin/officeViewer/libreOffice/index/check → 重写后 act=libreOffice
+    if (act === "libreOffice") return officeViewerLibreOfficeCheckHandler(c);
     const lng = await officeViewerLng(c.env.ASSETS, lang);
     const title = lng["officeViewer.meta.name"] || "Office阅读器";
     // wb 解析失败后前端会带着 skip=wb 重新加载；没有其他 fallback 方式时直接报错，避免死循环
@@ -1685,6 +1833,7 @@ async function pluginHandler(c: any) {
     // file/save 为匿名端点(中间件已放行), 这里独立处理
     if (act === "file") return onlyOfficeFileHandler(c);
     if (act === "save") return onlyOfficeSaveHandler(c);
+    if (act === "check") return onlyOfficeCheckHandler(c);
     return renderOnlyOffice(c, { rawPath, fileName, ext, appHost, staticPath, lang });
   }
 
@@ -1730,6 +1879,8 @@ async function pluginHandler(c: any) {
   if (name === "fileThumb") {
     if (act === "cover") return fileThumbCoverHandler(c);
     if (act === "videoSmall") return fileThumbVideoSmallHandler(c);
+    if (act === "check") return fileThumbCheckHandler(c);
+    if (act === "videoPreview") return fileThumbVideoPreviewHandler(c);
     return c.json({ code: false, data: "未知插件" });
   }
 
@@ -1739,18 +1890,31 @@ async function pluginHandler(c: any) {
 
   if (name === "oauth") {
     if (act === "callback") return oauthCallbackHandler(c);
+    if (act === "bind") return oauthBindHandler(c);
     return c.json({ code: false, data: "未知插件" });
   }
 
   if (name === "msgWarning") {
+    if (act === "table") return msgWarningTableHandler(c);
+    if (act === "action") return msgWarningActionHandler(c);
     if (act === "notice" || act === "autoTask") return msgWarningNoticeHandler(c);
     if (act === "taskInfo") return msgWarningTaskInfoHandler(c);
+    if (act === "message") return msgWarningMessageHandler(c);
+    if (act === "sendType") return msgWarningSendTypeHandler(c);
     return c.json({ code: false, data: "未知插件" });
   }
 
   if (name === "storeImport") {
     if (act === "check") return storeImportCheckHandler(c);
+    if (act === "start") return storeImportStartHandler(c);
     if (act === "logGet") return storeImportLogGetHandler(c);
+    if (act === "fileHashSet") return storeImportFileHashSetHandler(c);
+    return c.json({ code: false, data: "未知插件" });
+  }
+
+  if (name === "webdav") {
+    if (act === "download") return webdavDownloadHandler(c);
+    if (act === "check") return webdavAuthEchoHandler(c);
     return c.json({ code: false, data: "未知插件" });
   }
 
