@@ -1989,6 +1989,8 @@ explorerApi.all("/list/path", async (c) => {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
+      // 内部临时目录(打包下载产物) 始终隐藏, 不受后台 pathHidden 配置影响
+      if (!hiddenPatterns.includes(".temp")) hiddenPatterns.push(".temp");
       if (hiddenPatterns.length > 0) {
         const isHidden = (name: string) =>
           hiddenPatterns.some((p) => (p.startsWith("*") ? name.endsWith(p.slice(1)) : name === p));
@@ -3661,6 +3663,40 @@ explorerApi.all("/index/unzipList", async (c) => {
 });
 
 // zipDownload - 多文件/文件夹压缩下载: 生成临时 zip, 前端随后经 share/fileDownloadRemove 下载
+/**
+ * 清理用户临时目录中过期的打包产物 (/.temp/archive_*.zip)。
+ * zipDownload 每次生成一个临时 zip 供前端二次下载, 无人删除会无限累积占用存储;
+ * 生成新文件前顺带清理, 保留最近 10 分钟的文件, 避免并发下载被误删。
+ */
+async function cleanTempArchive(c: AppContext, src: SourceRef, keepMs = 10 * 60 * 1000): Promise<void> {
+  const prefix = keyFromBase(src.baseKey, "/.temp/");
+  const cutoff = Date.now() - keepMs;
+  const isArchive = (key: string) => /^archive_[a-z0-9]+\.zip$/i.test(key.split("/").pop() || "");
+  const isExpired = (t: string | Date | null | undefined) => {
+    const ms = t ? Date.parse(String(t)) : NaN;
+    return !Number.isFinite(ms) || ms < cutoff;
+  };
+  const io = ioClientOf(src);
+  if (io) {
+    const listed = await io.list(prefix).catch(() => null);
+    if (!listed) return;
+    for (const f of listed.files) {
+      if (!isArchive(f.key)) continue;
+      const head = await io.head(f.key).catch(() => null);
+      if (!isExpired(head?.lastModified ?? null)) continue;
+      await io.delete(f.key).catch(() => undefined);
+    }
+    return;
+  }
+  const listed = await c.env.FILES.list({ prefix, limit: 100 }).catch(() => null);
+  if (!listed) return;
+  for (const obj of listed.objects) {
+    if (!isArchive(obj.key)) continue;
+    if (!isExpired(obj.uploaded)) continue;
+    await c.env.FILES.delete(obj.key).catch(() => undefined);
+  }
+}
+
 explorerApi.all("/index/zipDownload", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
@@ -3720,6 +3756,7 @@ explorerApi.all("/index/zipDownload", async (c) => {
     const blob = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
     const first = await resolveFileSource(c.env, user, items[0].path);
     if (!first.ok) return emit(false, first.error);
+    await cleanTempArchive(c, first.source).catch(() => undefined);
     const token = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const tempName = `archive_${token}.zip`;
     const okWrite = await writeObject(c, first.source, `/.temp/${tempName}`, blob, "application/zip");
