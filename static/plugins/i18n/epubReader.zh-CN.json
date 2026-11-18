@@ -1,0 +1,7 @@
+{
+	"epubReader.meta.name": "EPUB 阅读器",
+	"epubReader.meta.title": "EPUB 电子书在线阅读",
+	"epubReader.meta.desc": "在线解析并阅读 epub 电子书，支持目录、翻页与阅读进度",
+	"epubReader.tips.toc": "目录",
+	"epubReader.tips.loadError": "电子书加载失败，请确认文件格式为有效的 EPUB"
+}

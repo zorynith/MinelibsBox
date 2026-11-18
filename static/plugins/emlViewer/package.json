@@ -1,0 +1,38 @@
+{
+	"id":"emlViewer",
+	"name":"{{LNG['emlViewer.meta.name']}}",
+	"title":"{{LNG['emlViewer.meta.title']}}",
+	"version":"1.26",
+	"source":{
+		"className":"font-icon ri-mail-open-line bg-blue-7"
+	},
+	"category":"file",
+	"description":"{{LNG['emlViewer.meta.desc']}}",
+	"keywords":"eml,mail",
+	"auther":{
+		"copyright":"kodcloud.",
+		"homePage":"http://www.kodcloud.com"
+	},
+	"configItem":{
+		"pluginAuth":{
+			"type":"userSelect",
+			"value":{"all":1},
+			"display":"{{LNG['admin.plugin.auth']}}",
+			"desc":"{{LNG['admin.plugin.authDesc']}}",
+			"require":1
+		},
+		"step001":"<hr/>",
+		"fileSort":{
+			"type":"number",
+			"display":"{{LNG['admin.plugin.fileSort']}}",
+			"desc":"{{LNG['admin.plugin.fileSortDesc']}}",
+			"value":220
+		},
+		"fileExt":{
+			"type":"tags",
+			"display":"{{LNG['admin.plugin.fileExt']}}",
+			"desc":"{{LNG['admin.plugin.fileExtDesc']}}",
+			"value":"eml"
+		}
+	}
+}

@@ -1,0 +1,11 @@
+{
+	"emlViewer.meta.name": "EML Viewer",
+	"emlViewer.meta.title": "Preview EML mails",
+	"emlViewer.meta.desc": "Parse eml files and show subject, sender, recipients, body and attachments",
+	"emlViewer.tips.loading": "Parsing mail...",
+	"emlViewer.tips.loadError": "Failed to parse the mail, please make sure it is a valid EML file",
+	"emlViewer.tips.empty": "The mail body is empty",
+	"emlViewer.tips.from": "From",
+	"emlViewer.tips.to": "To",
+	"emlViewer.tips.date": "Date"
+}

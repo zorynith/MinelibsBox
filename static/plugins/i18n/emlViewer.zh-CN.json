@@ -1,0 +1,11 @@
+{
+	"emlViewer.meta.name": "EML 邮件阅读器",
+	"emlViewer.meta.title": "EML 邮件在线预览",
+	"emlViewer.meta.desc": "解析 eml 邮件文件，展示主题、收发件人、正文与附件下载",
+	"emlViewer.tips.loading": "正在解析邮件...",
+	"emlViewer.tips.loadError": "邮件解析失败，请确认文件格式为有效的 EML",
+	"emlViewer.tips.empty": "邮件正文为空",
+	"emlViewer.tips.from": "发件人",
+	"emlViewer.tips.to": "收件人",
+	"emlViewer.tips.date": "时间"
+}

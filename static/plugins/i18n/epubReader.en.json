@@ -1,0 +1,7 @@
+{
+	"epubReader.meta.name": "EPUB Reader",
+	"epubReader.meta.title": "Read EPUB e-books online",
+	"epubReader.meta.desc": "Parse and read epub e-books with table of contents, page turning and progress",
+	"epubReader.tips.toc": "Contents",
+	"epubReader.tips.loadError": "Failed to load the e-book, please make sure it is a valid EPUB file"
+}
