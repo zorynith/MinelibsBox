@@ -383,3 +383,13 @@ Entries discovered by the Agent during task execution should follow this format:
 - Context: 用户明确要求回复语言
 - Instructions:
   - 所有回复与思考过程一律使用中文。
+
+[Project Knowledge Summary]
+- Date: 2026-11-18
+- Context: Discovered by Agent while performing filter/userGroup 复刻与 admin group/member/role 接入
+- Category: Build Methods / Troubleshooting & Debugging
+- Instructions:
+  - `app/lib/user-group-filter.ts` 为 filter/userGroup 全套实现（groupMerge/parentInGroup/groupShowRoot/userGroupAdmin|At|RootShow/allowViewGroup|User/allowChangeGroupArray/userAuthEditCheck/filterGroupList/filterUserList）；001 核心模型 Group/SystemRole/Auth 缺失，语义按调用契约实现：groupMerge 用 parent_level 剔除已被祖先覆盖的 id；groupShowRoot 在 groupCompany=0 时返回 `["1"]`，开启时返回最上层非根祖先；findAuthMinDefault=auths 中 auth 位最小项（本库为 id2 只读）；findRoleDefault=administrator=0 且 sort 最小的角色（id3）。
+  - admin 路由接入方式：每个 handler 开头 `userGroupFilter(c, "admin.xxx.yyy", await allParams(c))`，用返回的 `filtered.params` 替代原 query（filter 会按 001 语义裁剪/改写 roleID、groupInfo）；`filtered.deny` 为 show_json 等价负载（列表类返回空 list+info:"empty"）。action 名与 001 一致用小写，如 `admin.member.addgroup`、`admin.group.switchgroup`。
+  - adminGroup::get 的 parentID 解析顺序与 001 一致（requestFromType=admin→userGroupAdmin；否则→userGroupAt；rootOuter→userGroupRootShow；isRoot 强制 ["1"]），rootParam 含 appendShareHistory 时追加 `rootOuter`(对外授权) 与 `-`(最近使用，读 user_option type=shareTarget key=saveData) 节点。
+  - 目录 `dist/dev`、`dist/orig` 仍禁改；本仓库 `git config` 由 CNB 令牌自动生成（user.name=cnb.xxx），提交必须用该身份否则 cnb-gpgsign 报 403 invalid signature author；origin 为 cnb.cool，github remote 需单独凭据（.git/.git-credentials 仅有 cnb.cool）。
