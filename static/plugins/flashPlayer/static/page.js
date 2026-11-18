@@ -17,13 +17,14 @@ define(function(require, exports){
 		dom.onerror = function(){ dom.parentNode && dom.parentNode.removeChild(dom); fail(); };
 		document.head.appendChild(dom);
 	};
-	var ensureRuffle = function(cdn,callback){
+	var ensureRuffle = function(localBase,cdn,callback){
 		if(ruffleReady()){ return callback(null); }
 		var list = [], add = function(url){
 			url = (url || '').replace(/\/+$/,'') + '/';
 			if(url && list.indexOf(url) < 0){ list.push(url); }
 		};
-		add(cdn);
+		add(localBase);   // 优先使用插件内置的 ruffle
+		add(cdn);         // 后台指定的外部地址(可选)
 		for(var i = 0; i < CDN_FALLBACK.length; i++){ add(CDN_FALLBACK[i]); }
 		
 		var index = 0;
@@ -53,7 +54,7 @@ define(function(require, exports){
 		return dialog.DOM.wrap.find('.flashPlayer-box');
 	};
 	
-	var playStart = function(fileInfo){
+	var playStart = function(fileInfo,localBase){
 		var $box   = createDialog(fileInfo.name);
 		var $mask  = $('<div style="position:absolute;left:0;top:0;right:0;bottom:0;'
 			+'color:#fff;display:flex;align-items:center;justify-content:center;">'
@@ -67,7 +68,7 @@ define(function(require, exports){
 			tips(LNG['flashPlayer.tips.loadError'] || 'Ruffle 加载失败, 请检查网络或后台配置的 CDN 地址');
 		};
 		
-		ensureRuffle(fileInfo.cdn,function(err){
+		ensureRuffle(localBase,fileInfo.cdn,function(err){
 			if(err){ return errorTips(); }
 			var player;
 			try{
@@ -93,7 +94,7 @@ define(function(require, exports){
 	};
 	
 	var playReady = function(appStatic,fileInfo){
-		playStart(fileInfo);
+		playStart(fileInfo,appStatic + 'ruffle/');
 	};
 	return playReady;
 });

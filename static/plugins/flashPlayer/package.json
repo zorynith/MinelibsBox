@@ -44,7 +44,7 @@
 			"type":"text",
 			"display":"{{LNG['flashPlayer.meta.cdn']}}",
 			"desc":"{{LNG['flashPlayer.meta.cdnDesc']}}",
-			"value":"https://unpkg.com/@ruffle-rs/ruffle@0.7.1/"
+			"value":""
 		}
 	}
 }

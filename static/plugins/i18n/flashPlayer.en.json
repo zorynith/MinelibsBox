@@ -5,6 +5,6 @@
 	"flashPlayer.meta.autoplay": "Autoplay",
 	"flashPlayer.meta.autoplayDesc": "Start playing automatically after opening a .swf file",
 	"flashPlayer.meta.cdn": "Ruffle asset base",
-	"flashPlayer.meta.cdnDesc": "Base directory of the Ruffle player script; falls back to the public CDN when unreachable",
+	"flashPlayer.meta.cdnDesc": "Leave empty to use the bundled Ruffle (wasm included, works fully offline); set a directory URL ending with / to use an external mirror instead",
 	"flashPlayer.tips.loadError": "Failed to load Ruffle, please check the network or the CDN address in plugin settings"
 }
