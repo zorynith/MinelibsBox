@@ -398,6 +398,19 @@ Entries discovered by the Agent during task execution should follow this format:
 
 [Project Knowledge Summary]
 - Date: 2026-11-18
+- Context: 补齐“仍存差异”：API 签名体系、admin/log 历史动作、myShare 分组语义
+- Category: Implementation Details / Security
+- Instructions:
+  - `app/lib/api-sign.ts` 已接入请求链：`hashEncode/hashDecode`(base64 → _a/_b/_c，UTF-8 安全)、`appKeySecret`(空 appKey=md5(systemPassword)，否则读 settings.appKeySecret JSON)、`signQuery` 核心、`apiSignMake(c,...)`、`apiSignUrl(db,...)`(无 Context 场景)、`apiSignCheck(c)`、`apiSignParse(db,...)`、`makeAccessToken/checkAccessToken`(001 accessToken)。
+  - 中间件顺序（api.ts）：apiSignCheck 必须在 csrfCheck 之前；签名成功时 `c.set("apiSignSigned")` + `c.set("currentUser")` + `Access-Control-Allow-Origin: *`；`authRequired/authOptional` 开头判断 currentUser 已存在则直接 next；`csrfCheck` 对 apiSignSigned 直接放行。
+  - 性能要点：apiSignCheck 仅当 query 含 actionToken/actionKey 才解析 body（POST 且 content-length ≤ 200000），否则立即返回，避免上传大文件被 clone().formData() 拖垮。
+  - `share/linkSafe` 已改为 apiSignMake 生成签名链接（001 explorer/share::linkSafe 语义），无 Cookie 可直接访问 fileOut；`linkOut` 仍用 accessToken（001 本身也如此）。
+  - admin/log 新增 `userLog`（userID + 文件类 action 过滤，返回 list+pageInfo）、`userLogLogin`（type+userID 必填）、`loginLog`（写 user.index.loginSubmit 审计）；`log/get` 抽出 `auditLogQuery(c,q)` 复用。
+  - myShare 的 `groupParentLevel`：001 由 Source 模型按“是否部门空间源”填充；Worker 无部门空间存储 → 恒 null（归 selfData），groupData 分组仅在有该字段时出现。
+  - 验证方式：`/tmp/sign.mjs` 用 node crypto 按 001 算法生成签名 URL（appSecret=md5(systemPassword)），可验证 GET/POST 免 Cookie、篡改返回 `explorer.systemError.[apiSignCheck]`。
+
+[Project Knowledge Summary]
+- Date: 2026-11-18
 - Context: Discovered by Agent while performing filter/userGroup 复刻与 admin group/member/role 接入
 - Category: Build Methods / Troubleshooting & Debugging
 - Instructions:
