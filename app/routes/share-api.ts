@@ -1765,6 +1765,136 @@ shareApi.all("/userShare/shareExit", async (c) => {
   return c.json({ code: ok, data: ok ? L.success : errors.join(",") });
 });
 
+/** 001 shareTargetMake: 协作成员/部门 (按部门在前, 用户在后)。 */
+async function shareTargetMake(env: Env, shareID: number): Promise<Record<string, unknown>[]> {
+  const targets = await getShareToList(env.DB, shareID);
+  const groupArr: Record<string, unknown>[] = [];
+  const userArr: Record<string, unknown>[] = [];
+  for (const tt of targets) {
+    const auth = { authID: String(tt.authID), authDefine: tt.authDefine };
+    if (Number(tt.targetType) === 2) {
+      const g = await env.DB.prepare("SELECT id, name FROM groups WHERE id = ?")
+        .bind(tt.targetID)
+        .first<{ id: number; name: string }>()
+        .catch(() => null);
+      if (!g) continue;
+      groupArr.push({ groupID: g.id, name: g.name, auth });
+    } else {
+      const u = await env.DB.prepare("SELECT id, name, nickname, avatar FROM users WHERE id = ?")
+        .bind(tt.targetID)
+        .first<{ id: number; name: string; nickname: string; avatar: string }>()
+        .catch(() => null);
+      if (!u) continue;
+      userArr.push({ userID: u.id, name: u.name, nickName: u.nickname, avatar: u.avatar, auth });
+    }
+  }
+  return [...groupArr, ...userArr];
+}
+
+/**
+ * 我的分享列表 (001 explorer/userShare::myShare)
+ * type: 空=全部, link=外链分享, to=协作分享
+ * 返回 fileList/folderList + pageInfo, 超过 3 项且有多个分组时返回 groupShow。
+ */
+async function myShareList(env: Env, user: AuthUser, type: string): Promise<Record<string, unknown>> {
+  let shares = await listUserShares(env.DB, user.id, type === "link");
+  if (type === "to") shares = shares.filter((s) => s.isShareTo === 1);
+  else if (type === "") shares = shares.filter((s) => s.isLink === 1 || s.isShareTo === 1);
+
+  const folderList: Record<string, unknown>[] = [];
+  const fileList: Record<string, unknown>[] = [];
+  let sourceCountGroup = 0;
+  let sourceCountIO = 0;
+
+  for (const share of shares) {
+    const source = await resolveShareSource(env, user, share);
+    if (!source) continue; // 源不存在/无权限 -> 001 notExist, 跳过
+    const isFolder = source.type === "folder";
+    const item: Record<string, unknown> = {
+      shareID: share.shareID,
+      title: share.title,
+      isLink: share.isLink,
+      isShareTo: share.isShareTo,
+      password: share.password,
+      timeTo: share.timeTo,
+      numView: share.numView,
+      numDownload: share.numDownload,
+      options: shareOptions(share),
+      userID: share.userID,
+      sourceID: share.sourceID,
+      sourcePath: share.sourcePath,
+      url: share.url,
+      createTime: toUnix(share.createTime),
+      modifyTime: toUnix(share.modifyTime),
+
+      name: source.name,
+      path: share.sourcePath,
+      pathDisplay: share.title || source.name,
+      type: source.type,
+      isFolder,
+      ext: isFolder ? "folder" : source.name.includes(".") ? source.name.split(".").pop()!.toLowerCase() : "",
+      size: 0,
+      isReadable: true,
+      isWriteable: true,
+      // 个人空间来源; 部门来源在 001 中带 groupParentLevel (此处无法判定, 置空)
+      groupParentLevel: null,
+
+      sharePath: `{shareItem:${share.shareID}}` + (isFolder ? "/" : ""),
+      shareInfo: { ...share, options: shareOptions(share) },
+      shareUser: shareUserInfo(user),
+      shareFromShow: true,
+      sourceInfo: { shareIsRoot: true },
+      shareTarget: await shareTargetMake(env, share.shareID),
+    };
+    (isFolder ? folderList : fileList).push(item);
+    if (!share.sourceID || String(share.sourceID) === "0") sourceCountIO++;
+    if (item.groupParentLevel) sourceCountGroup++;
+  }
+
+  const result: Record<string, unknown> = {
+    fileList,
+    folderList,
+    pageInfo: {
+      totalNum: folderList.length + fileList.length,
+      pageNum: 5000,
+      page: 1,
+      pageTotal: 1,
+    },
+  };
+
+  const groupShow: Record<string, unknown>[] = [
+    {
+      type: "selfData",
+      title: t("explorer.pathGroup.shareSelf"),
+      filter: { groupParentLevel: "_null_", sourceID: "" },
+    },
+    {
+      type: "groupData",
+      title: t("explorer.pathGroup.shareGroup"),
+      filter: { groupParentLevel: "", sourceID: "" },
+    },
+    {
+      type: "ioData",
+      title: t("admin.storage.localStore") + "/IO",
+      filter: { sourceID: "_null_" },
+    },
+  ];
+  const length = folderList.length + fileList.length;
+  const show = groupShow.filter((g) => g.type !== "groupData" || sourceCountGroup > 0)
+    .filter((g) => g.type !== "ioData" || sourceCountIO > 0);
+  if (length > 3 && show.length > 1) result.groupShow = show;
+  return result;
+}
+
+// myShare - 我的分享列表 (001 explorer/userShare::myShare)
+shareApi.all("/userShare/myShare", async (c) => {
+  const user = c.get("currentUser")!;
+  const params = await reqParams(c);
+  const type = typeof params.type === "string" ? params.type : "";
+  const listType = type === "link" || type === "to" ? type : "";
+  return c.json({ code: true, data: await myShareList(c.env, user, listType) });
+});
+
 // shareToMe - 与我协作内容（list / group / user 三种展示方式，001 explorer/userShare::shareToMe）
 shareApi.all("/userShare/shareToMe", async (c) => {
   const user = c.get("currentUser")!;

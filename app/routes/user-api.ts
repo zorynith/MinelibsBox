@@ -7,6 +7,7 @@ import { getUserByUsername, createSession, deleteSession, getUserById, getSettin
 import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, authRequired } from "../lib/auth";
 import { parseKodPassword } from "../lib/mcrypt";
 import { DEV_KOD, devLicenseHashes } from "../lib/license";
+import { t } from "../lib/i18n";
 import { detectLang, loadLangPack, normalizeLang } from "../lib/i18n-lang";
 import { renderPluginsJs, mergePluginLang } from "../lib/plugins";
 import { taskResultGet } from "../lib/task-result-cache";
@@ -165,6 +166,43 @@ userApi.get("/index/logout", async (c) => {
   clearSessionCookie(c);
   c.header("Set-Cookie", "accessToken=; Path=/; Max-Age=0; SameSite=Lax", { append: true });
   return c.json({ code: true, data: "ok" });
+});
+
+// accessToken - 001 user/index/accessToken: 输出当前会话 token (纯文本)
+// Worker 中 accessToken 即会话 id (与 kod_session cookie 等价, 见 sso-api)。
+userApi.all("/index/accessToken", async (c) => {
+  const sessionId = getSessionId(c);
+  const session = sessionId ? await getSession(c.env.DB, sessionId) : null;
+  if (!sessionId || !session) {
+    return c.json({ code: false, data: t("user.loginFirst") });
+  }
+  return c.body(sessionId);
+});
+
+// autoLogin - 001 user/index/autoLogin: 登录校验并自动跳转
+// 已登录(且非登录错误标记)则跳转 link, 可附带 kodTokenApi; 未登录跳转登录页并携带 link。
+userApi.all("/index/autoLogin", async (c) => {
+  const query = c.req.query();
+  const link = query.link || "";
+  if (!link) return c.body(null);
+
+  const errorTips = (query.msg || "") === "[API LOGIN]" ? "" : query.msg || "";
+  const sessionId = getSessionId(c);
+  const session = sessionId ? await getSession(c.env.DB, sessionId) : null;
+  if (session && !errorTips) {
+    let target = link;
+    if (query.callbackToken === "1") {
+      const param = "kodTokenApi=" + encodeURIComponent(sessionId || "");
+      target += target.includes("?") ? "&" + param : "?" + param;
+    }
+    return c.redirect(target, 302);
+  }
+
+  let hash = "#user/login&link=" + encodeURIComponent(link);
+  if (query.msg !== undefined) hash += "&msg=" + query.msg;
+  if (query.callbackToken !== undefined) hash += "&callbackToken=1";
+  const origin = new URL(c.req.url).origin;
+  return c.redirect(origin + "/" + hash, 302);
 });
 
 // loginCheck - returns current user info or null
