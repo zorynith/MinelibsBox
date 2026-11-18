@@ -2293,13 +2293,10 @@ adminApi.all("/plugin/install", async (c) => {
   return c.json({ code: false, data: "内置插件已安装, 在线安装/更新商店功能暂不支持" });
 });
 
+// 插件资源随 Worker 一起分发(static/plugins 打进 ASSETS), 没有独立目录可删除,
+// 卸载在架构上不成立, 故该接口只返回提示, 不再改动插件状态; 停用请走 changeStatus。
 adminApi.all("/plugin/unInstall", async (c) => {
-  const body = await allParams(c);
-  const app = body.app;
-  if (!app) return c.json(fail("explorer.dataNotFull"));
-  await setPluginStatus(c.env.DB, app, 0);
-  const data = await buildPluginAppList(c.env.ASSETS, c.env.DB, detectLang(c), getStaticHost(c));
-  return c.json({ code: true, data });
+  return c.json(fail("内置插件随程序分发, 不支持卸载; 如需停用请使用「禁用」"));
 });
 
 // ============ admin/notice 公告管理 ============

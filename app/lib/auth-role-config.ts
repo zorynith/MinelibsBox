@@ -67,7 +67,7 @@ export const AUTH_ROLE_ACTION: Record<string, Record<string, string>> = {
 
   "admin.plugin.list": { "admin.plugin": "appList" },
   "admin.plugin.edit": {
-    "admin.plugin": "getConfig,setConfig,changeStatus,install,unInstall",
+    "admin.plugin": "getConfig,setConfig,changeStatus,install",
     "explorer.lightApp": "add,edit,del",
   },
 
