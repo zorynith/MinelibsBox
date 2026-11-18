@@ -3662,7 +3662,6 @@ explorerApi.all("/index/unzipList", async (c) => {
   }
 });
 
-// zipDownload - 多文件/文件夹压缩下载: 生成临时 zip, 前端随后经 share/fileDownloadRemove 下载
 /**
  * 清理用户临时目录中过期的打包产物 (/.temp/archive_*.zip)。
  * zipDownload 每次生成一个临时 zip 供前端二次下载, 无人删除会无限累积占用存储;
@@ -3697,6 +3696,7 @@ async function cleanTempArchive(c: AppContext, src: SourceRef, keepMs = 10 * 60 
   }
 }
 
+// zipDownload - 多文件/文件夹压缩下载: 生成临时 zip, 前端随后经 share/fileDownloadRemove 下载
 explorerApi.all("/index/zipDownload", async (c) => {
   const user = c.get("currentUser");
   const params = await reqParams(c);
