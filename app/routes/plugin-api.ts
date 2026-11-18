@@ -1568,8 +1568,45 @@ async function msgWarningNoticeHandler(c: any): Promise<Response> {
   return c.json({ code: true, data: [] });
 }
 
+/** 001 msgWarningSysTask::getTask/addTask: 通知中心的计划任务 (event 固定) */
+const MSG_WARNING_TASK_EVENT = "msgWarningPlugin.autoTask";
+const MSG_WARNING_TASK_TIME = '{"type":"minute","month":"1","week":"1","day":"08:00","minute":"1"}';
+
+/**
+ * 001 msgWarning/app::taskInfo: 返回通知中心对应的 system_task 行。
+ * 前端 checkTask 依赖 data.enable / data.id: 任务不存在时若返回 null,
+ * 确认框会用 id=0 调 admin/autoTask/enable, 得到「无效的参数」。
+ * 001 在插件启用时由 msgWarningSysTask::updateTask 建任务, 这里按需补建。
+ */
 async function msgWarningTaskInfoHandler(c: any): Promise<Response> {
-  return c.json({ code: true, data: null });
+  const db = c.env.DB;
+  const findTask = async () =>
+    (await db
+      .prepare("SELECT * FROM system_task WHERE event = ? ORDER BY id ASC")
+      .bind(MSG_WARNING_TASK_EVENT)
+      .first()) as any;
+
+  let task = await findTask().catch(() => null);
+  if (!task) {
+    const lng = await loadPluginLang(c.env.ASSETS, "msgWarning", detectLang(c)).catch(
+      () => ({}) as Record<string, string>
+    );
+    const name = lng["msgWarning.meta.name"] || "通知中心";
+    const desc = lng["msgWarning.main.taskDesc"] || "系统消息通知，任务来源于【通知中心】";
+    const maxRow = (await db
+      .prepare("SELECT COALESCE(MAX(sort), 0) + 1 AS nextSort FROM system_task")
+      .first()
+      .catch(() => null)) as { nextSort?: number } | null;
+    await db
+      .prepare(
+        "INSERT INTO system_task (name, type, event, time, desc, enable, system, sort, last_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)"
+      )
+      .bind(name, "method", MSG_WARNING_TASK_EVENT, MSG_WARNING_TASK_TIME, desc, 0, 1, maxRow?.nextSort ?? 1)
+      .run()
+      .catch(() => null);
+    task = await findTask().catch(() => null);
+  }
+  return c.json({ code: true, data: task || null });
 }
 
 // ---------- storeImport 存储导入 (复刻 001 plugins/storeImport) ----------

@@ -435,6 +435,22 @@ export async function initDatabase(db: D1Database): Promise<void> {
       expire_at INTEGER NOT NULL DEFAULT 0
     )`,
 
+    // 系统计划任务 (镜像 001 SystemTask; admin/autoTask/* 与 001 插件自带任务共用)
+    // enable: 0/1; type: method(内部处理器, event 为处理器名) / url(定时请求, event 为地址)
+    `CREATE TABLE IF NOT EXISTS system_task (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'method',
+      event TEXT NOT NULL DEFAULT '',
+      time TEXT NOT NULL DEFAULT '',
+      desc TEXT NOT NULL DEFAULT '',
+      enable INTEGER NOT NULL DEFAULT 0,
+      system INTEGER NOT NULL DEFAULT 0,
+      sort INTEGER NOT NULL DEFAULT 0,
+      last_time INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_system_task_event ON system_task(event)`,
+
     // 插件运行时缓存 (镜像 001 pluginCacheFileSet/Cache::set):
     // 供 yzOffice 等需要跨请求保存任务状态的插件使用, 跨 isolate 共享
     `CREATE TABLE IF NOT EXISTS plugin_cache (

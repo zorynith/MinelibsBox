@@ -35,6 +35,19 @@ function fail(data: any) {
 
 async function parseBody(c: any): Promise<Record<string, string>> {
   const body: Record<string, string> = {};
+  // 前端 kodApi.requestSend 可能以 JSON 提交 (如插件传 {id, enable:1}), 需与 form 一并兼容,
+  // 否则参数读不到会退化成 id=0 -> 「无效的参数」。
+  const ct = (c.req.header("content-type") || "").toLowerCase();
+  if (ct.includes("application/json")) {
+    const json = await c.req.json().catch(() => null);
+    if (json && typeof json === "object") {
+      for (const [k, v] of Object.entries(json as Record<string, unknown>)) {
+        if (v === null || v === undefined) continue;
+        body[k] = typeof v === "string" ? v : String(v);
+      }
+    }
+    return body;
+  }
   const rawBody = await c.req.parseBody().catch(() => ({}));
   for (const [k, v] of Object.entries(rawBody)) body[k] = typeof v === "string" ? v : "";
   return body;
