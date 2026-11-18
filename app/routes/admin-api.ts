@@ -2250,7 +2250,14 @@ adminApi.all("/plugin/getConfig", async (c) => {
     }
     return v;
   };
-  return c.json({ code: true, data: replacePathVars(formData) });
+  const data = replacePathVars(formData);
+  // 配置页 loadFile 指向的插件脚本(config.js / check.js)同样受 /static/* 的 immutable
+  // 长缓存影响, 追加插件版本号, 否则插件升级后前端仍执行旧脚本。
+  const loadFile = (data as any)?.formStyle?.loadFile;
+  if (typeof loadFile === "string" && loadFile && !loadFile.includes("?")) {
+    (data as any).formStyle.loadFile = `${loadFile}?v=${encodeURIComponent(String(pkg.version || "0"))}`;
+  }
+  return c.json({ code: true, data });
 });
 
 adminApi.all("/plugin/setConfig", async (c) => {

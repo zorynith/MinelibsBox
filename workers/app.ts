@@ -116,7 +116,13 @@ app.get("/static/*", async (c) => {
       const res = await fetch(new URL(rel, staticHost));
       if (res.ok) {
         const headers = new Headers(res.headers);
-        headers.set("Cache-Control", "public, max-age=31536000, immutable");
+        // 插件目录不设 immutable: 插件升级/回退只换文件内容, 其内部资源(pdfjs/officeViewer
+        // 等的 js/css)引用路径不带版本号, 1 年强缓存会让旧文件长期驻留浏览器与边缘节点。
+        const isPlugin = rel.startsWith("plugins/");
+        headers.set(
+          "Cache-Control",
+          isPlugin ? "public, max-age=3600, stale-while-revalidate=86400" : "public, max-age=31536000, immutable"
+        );
         return new Response(res.body, { headers });
       }
       return c.notFound();

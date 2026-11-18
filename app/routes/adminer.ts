@@ -10,8 +10,10 @@
  */
 import type { AuthUser } from "../lib/auth";
 import { getPluginMeta } from "../lib/db";
+import { loadPluginPackage } from "../lib/plugins";
 
-const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8" };
+// no-store: 页面里的资源版本号随插件版本变化, HTML 若被浏览器缓存会导致仍引用旧版本资源
+const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" };
 
 function adminerIsAdmin(user: AuthUser | undefined): boolean {
   return !!user && (user.role === "admin" || user.role === "root");
@@ -1041,6 +1043,9 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
   const pluginHost = `${staticPath}plugins/adminer/`;
   const apiBase = `${appHost}index.php?plugin/adminer/`;
   const debug = await adminerDebugOn(c);
+  // 缓存版本号取插件版本: /static/* 响应是 immutable + 1 年缓存, 固定写死的 ?v=18 会让
+  // 升级/回退后的 adminer.css 永远命中旧缓存(浏览器与边缘节点都不会重新拉取)。
+  const adminerVer = (await loadPluginPackage(c.env.ASSETS, "adminer").catch(() => null))?.version || "0";
 
   const html = `<!doctype html>
 <html lang="en">
@@ -1048,7 +1053,7 @@ async function renderAdminer(c: any, appHost: string, staticPath: string): Promi
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adminer</title>
-<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=18">
+<link rel="stylesheet" href="${pluginHost}adminer/adminer.css?v=${adminerVer}">
 <link rel="stylesheet" href="${staticPath}style/lib/font-icon/style.css">
 <link rel="stylesheet" href="${staticPath}style/dist/loading.css?v=1">
 <style>
