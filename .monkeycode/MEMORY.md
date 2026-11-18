@@ -386,6 +386,18 @@ Entries discovered by the Agent during task execution should follow this format:
 
 [Project Knowledge Summary]
 - Date: 2026-11-18
+- Context: Batch6 全量接口审计（001 public action 565 vs Worker 路由 378）与补齐
+- Category: Implementation Details / Architecture
+- Instructions:
+  - 审计结论：001 共 565 个 public function；前端 `static/app/dist/dev/api.js` 声明 260 个 endpoint（真正的对外契约）。**前端调用的 001 action 已 100% 实现**，230 个未命中项均为内部 helper（`Action()/ActionCall()` 调用，如 explorer/auth 权限位、explorer/list* 组装、explorer/authUser/canShare、admin/log/loginLog、install/index 内部初始化步骤、filter/* 全为钩子），其行为已由 `app/lib/*` 与中间件等价实现，不需要补路由。
+  - 本轮新增：`explorer/userShare/myShare`（share-api.ts `myShareList`，type 空/link/to；条目含 sharePath `{shareItem:id}`、shareInfo、shareTarget 部门在前用户在后；groupShow 按 001 规则 `length>3 && 分组数>1` 才返回）；`user/index/autoLogin`（302：已登录跳 link 可附 kodTokenApi，否则跳 `/#user/login&link=`）；`user/index/accessToken`（纯文本输出会话 id）。
+  - myShare 已知差异：无法判定“部门来源”的 `groupParentLevel`，个人来源置 null（对应 selfData 分组）；ioData 依据 `sourceID=="0"` 计数，故通常只剩 selfData → 与 001 一致地不输出 groupShow。
+  - `explorer/userShare/shareToMe` 的分组展示已由 `shareToMeDispatch` + userShareGroup/userShareUser 覆盖。
+  - 仍未复刻的差异项（属框架/客户端能力，非 UI 接口）：API 签名体系（apiSignMake/apiSignCheck/appKeySecret）、install/index 内部初始化 16 步（Worker 由 install-api 一次性实现）、admin/log 的历史日志动作（loginLog/userLog/userLogLogin，等价行为在 loginSubmit 的 addAuditLog 与 log/get）。
+  - 回归脚本要点：`pathRename` 用 `newName`；`userShare/del`、`index/pathDelete` 用 `dataArr` JSON；`mkfile` 需传含文件名的完整 `path`；二进制上传用 `-H Content-Type:application/octet-stream` 且 CSRF_TOKEN 放 query。
+
+[Project Knowledge Summary]
+- Date: 2026-11-18
 - Context: Discovered by Agent while performing filter/userGroup 复刻与 admin group/member/role 接入
 - Category: Build Methods / Troubleshooting & Debugging
 - Instructions:
