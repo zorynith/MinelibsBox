@@ -47,7 +47,10 @@ app.use("*", async (c, next) => {
   const path = url.pathname;
 
   // Handle /index.php?MOD/ST/ACT&params
-  if (path === "/index.php" && url.search) {
+  // 001 的 index.php 按查询串首段解析路由, 与 URL 路径无关 (Apache rewrite 后 "/" 也是 index.php),
+  // 因此站点根 "/" 必须同样处理: 轻应用里的相对地址 (如时钟 "./?plugin/simpleClock") 会请求
+  // "/?plugin/simpleClock", 只认 "/index.php" 时该请求会落到 SPA, iframe 里便又渲染出一个桌面。
+  if ((path === "/" || path === "/index.php") && url.search) {
     const query = url.search.slice(1); // e.g., "user/view/options&key=val"
     const parts = query.split("&");
     const routePart = parts[0]; // e.g., "user/view/options"
@@ -56,7 +59,8 @@ app.use("*", async (c, next) => {
     const segments = routePart.split("/");
     const restParams = parts.slice(1).join("&");
 
-    if (segments.length >= 2) {
+    // 首段含 "=" 说明是普通页面查询参数 (?foo=bar), 不是 MOD/ST/ACT 路由, 保持 SPA 渲染。
+    if (!routePart.includes("=") && segments.length >= 2) {
       // 001 控制器目录为 explorer/seo 与 explorer/shareOut, 但 Worker 用独立前缀
       // (/seo, /shareOut) 避开 explorer 前缀下的鉴权中间件, 此处还原 001 原始 URL。
       let targetSegs = segments;
