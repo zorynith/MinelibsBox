@@ -445,3 +445,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - 正确地址：`(G.system.settings.kodApiServer || "") + "wallpage/index&lang=" + G.lang + "&callback=?"`；实测 `curl "https://api.kodcloud.com/?wallpage/index&lang=zh-CN&callback=cb"` 返回 `cb("https://wallpaper.../1513.jpg")`，回调参数直接是壁纸 URL 字符串，交给 `changeBackground(url)`。
   - 修复要点：`randomImage` 返回 jqXHR；点击处理器加 moveCircle 重入保护、回调内先解除动画再 changeBackground（仅当值是字符串）、`.fail` 用 `Tips.tips(LNG["user.wall.random"]+" "+LNG["common.fail"],"warning")` 提示、10s 兜底定时器强制解除动画。
   - 改动范围：仅 `static/app/dist/main.js`；`dist/dev`、`dist/orig` 保持只读对照（dev 内同样留有错误 URL，仅作反混淆参考）。
+
+[Project Knowledge Summary]
+- Date: 2026-11-18
+- Context: 定位“改了代码但线上无变化”的真因：只推了 cnb，没推部署源仓库
+- Category: Operations & Deployment
+- Instructions:
+  - 两个 remote：`origin` = cnb.cool/Zephriel/MinelibsBox（代码托管）；`github` = github.com/zorynith/MinelibsBox（**实际部署源**）。仓库内无 `.cnb.yml`，CI 仅有 `.github/workflows/deploy.yml`（Cloudflare Workers）与 `deploy-pages.yml`（把 `./static` 发布到 GitHub Pages，供 `STATIC_HOST` 使用），触发条件均为 **GitHub 端 main 的 push**。
+  - 因此 `git push origin main` 线上不会有任何变化；必须 `git push github main`（建议两处都推）才会触发构建部署。
+  - 更正旧结论：`.git/.git-credentials` 现已包含 github.com 凭据，`git push github main` 可直接成功，无需额外配置。
+  - 部署链路：wrangler.jsonc 的 `assets.directory=./static`，CI 中 `npm run build`（vite，publicDir=static）后 deploy；`dist/` 不入库，改 `static/**` 后 push 即由 CI 打包。
+  - 校验方式：提交后 `git ls-remote github refs/heads/main` 确认远端 commit 已更新；若 GitHub Actions 未跑或失败，线上仍旧版。
