@@ -71,6 +71,11 @@ export function registerMethodTask(event: string, handler: (c: any) => Promise<b
   METHOD_HANDLERS[event] = handler;
 }
 
+// 通知中心计划任务 (plugin/msgWarning/taskInfo 建的任务, event 固定为 msgWarningPlugin.autoTask)。
+// 001 由 msgWarningSysTask::autoTask 分发通知; worker 侧没有预警数据源,
+// 与 plugin/msgWarning/notice 返回空列表保持一致: 执行即视为完成, 避免「立即执行」报 method not exists。
+registerMethodTask("msgWarningPlugin.autoTask", async () => true);
+
 interface TaskRow {
   id: number;
   name: string;

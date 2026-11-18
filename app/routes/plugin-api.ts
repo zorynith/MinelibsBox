@@ -1597,11 +1597,17 @@ async function msgWarningTaskInfoHandler(c: any): Promise<Response> {
       .prepare("SELECT COALESCE(MAX(sort), 0) + 1 AS nextSort FROM system_task")
       .first()
       .catch(() => null)) as { nextSort?: number } | null;
+    // WHERE NOT EXISTS: 并发打开两次不会建出重复任务
     await db
       .prepare(
-        "INSERT INTO system_task (name, type, event, time, desc, enable, system, sort, last_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)"
+        `INSERT INTO system_task (name, type, event, time, desc, enable, system, sort, last_time)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, 0
+         WHERE NOT EXISTS (SELECT 1 FROM system_task WHERE event = ?)`
       )
-      .bind(name, "method", MSG_WARNING_TASK_EVENT, MSG_WARNING_TASK_TIME, desc, 0, 1, maxRow?.nextSort ?? 1)
+      .bind(
+        name, "method", MSG_WARNING_TASK_EVENT, MSG_WARNING_TASK_TIME, desc, 0, 1,
+        maxRow?.nextSort ?? 1, MSG_WARNING_TASK_EVENT
+      )
       .run()
       .catch(() => null);
     task = await findTask().catch(() => null);
