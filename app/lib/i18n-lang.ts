@@ -87,15 +87,41 @@ export function detectLang(c: { req: { query: (k: string) => string | undefined;
   return DEFAULT_LANG;
 }
 
-/** Load the full language pack JSON from static assets. Returns null on failure. */
-export async function loadLangPack(assets: Fetcher, lang: string): Promise<Record<string, string> | null> {
+async function readLangFile(assets: Fetcher, lang: string): Promise<Record<string, string> | null> {
   try {
     const req = new Request(`https://assets.local/config/i18n/${lang}/index.json`);
     const res = await assets.fetch(req);
     if (!res.ok) return null;
     const data = await res.json<Record<string, string>>();
-    return data;
+    return data || null;
   } catch {
     return null;
   }
+}
+
+/** 已加载语言包缓存(60s): view/lang 等接口每次请求都要读语言包, 避免重复 ASSETS fetch。 */
+const langPackCache = new Map<string, { at: number; pack: Record<string, string> | null }>();
+const LANG_PACK_TTL = 60_000;
+
+/**
+ * Load the full language pack JSON from static assets. Returns null on failure.
+ *
+ * 部分语言包缺少后加的文案 key(如 ar/ja 缺 explorer.pathDesc.*, bn/de/hi/th 等缺
+ * admin.member.import*), 直接下发会让前端显示原始 key; 这里用 en 包补齐缺失项,
+ * 已有译文保持不变。返回对象为共享缓存, 调用方只读。
+ */
+export async function loadLangPack(assets: Fetcher, lang: string): Promise<Record<string, string> | null> {
+  const cached = langPackCache.get(lang);
+  if (cached && Date.now() - cached.at < LANG_PACK_TTL) return cached.pack;
+  const pack = await readLangFile(assets, lang);
+  if (pack && lang !== "en") {
+    const en = await readLangFile(assets, "en");
+    if (en) {
+      for (const [k, v] of Object.entries(en)) {
+        if (!(k in pack)) pack[k] = v;
+      }
+    }
+  }
+  langPackCache.set(lang, { at: Date.now(), pack });
+  return pack;
 }
