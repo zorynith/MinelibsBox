@@ -14,6 +14,7 @@
  */
 import { getPluginMeta, setPluginConfig, getSetting, setSetting, getUserById } from "./db";
 import { loadPluginLang } from "./plugins";
+import { isAdmin } from "./auth";
 import { detectLang, loadLangPack } from "./i18n-lang";
 import { t } from "./i18n";
 
@@ -482,8 +483,33 @@ async function collectFindings(
   return [];
 }
 
+/**
+ * 巡检节流: notice 每 60s 轮询一次, 同一 isolate 内多个用户/标签页会重复触发。
+ * 55s 内复用上次结果即可(事件本身还有 timeFreq 约束)。
+ */
+let lastRunAt = 0;
+let lastSummary: { events: number; messages: number } | null = null;
+let running: Promise<{ events: number; messages: number }> | null = null;
+let lastCleanupAt = 0;
+
 /** 按各事件的开关/频率/时段/日上限执行巡检, 写日志与待推送消息 (供 notice、autoTask 调用) */
 export async function runMsgWarningTasks(c: any): Promise<{ events: number; messages: number }> {
+  const nowMs = Date.now();
+  if (lastSummary && nowMs - lastRunAt < 55_000) return lastSummary;
+  if (running) return running;
+  running = runMsgWarningTasksInner(c)
+    .then((summary) => {
+      lastSummary = summary;
+      lastRunAt = Date.now();
+      return summary;
+    })
+    .finally(() => {
+      running = null;
+    });
+  return running;
+}
+
+async function runMsgWarningTasksInner(c: any): Promise<{ events: number; messages: number }> {
   const db = c.env.DB;
   const lng = await pluginLng(c);
   const L = translator(lng);
@@ -579,6 +605,16 @@ export async function runMsgWarningTasks(c: any): Promise<{ events: number; mess
     config[EVNT_KEY] = savedList;
     await saveConfig(c, config);
   }
+
+  // 已推送消息保留 7 天, 每小时清理一次 (避免表无限增长)
+  if (Date.now() - lastCleanupAt > 3600_000) {
+    lastCleanupAt = Date.now();
+    await db
+      .prepare("DELETE FROM plugin_msgwarning_notice WHERE status = 1 AND createTime < ?")
+      .bind(nowSec - 7 * 86400)
+      .run()
+      .catch(() => null);
+  }
   return { events, messages };
 }
 
@@ -586,6 +622,9 @@ export async function runMsgWarningTasks(c: any): Promise<{ events: number; mess
 
 /** plugin/msgWarning/table */
 export async function msgWarningTableHandler(c: any): Promise<Response> {
+  // 事件/网关/日志只在后台管理页使用, 非管理员不下发(日志含其它用户信息)
+  const curUser: any = c.get("currentUser");
+  if (!curUser || !isAdmin(curUser)) return c.json({ code: false, data: t("explorer.noPermissionAction") });
   const params = await readParams(c);
   const tab = String(params.tab || "");
   const lng = await pluginLng(c);
@@ -641,6 +680,9 @@ export async function msgWarningTableHandler(c: any): Promise<Response> {
 
 /** plugin/msgWarning/action */
 export async function msgWarningActionHandler(c: any): Promise<Response> {
+  // 事件规则/邮件网关配置属于管理操作
+  const curUser: any = c.get("currentUser");
+  if (!curUser || !isAdmin(curUser)) return c.json({ code: false, data: t("explorer.noPermissionAction") });
   const params = await readParams(c);
   const tab = String(params.tab || "");
   const action = String(params.action || "");
