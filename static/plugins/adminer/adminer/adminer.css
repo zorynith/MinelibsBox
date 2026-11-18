@@ -19,33 +19,19 @@ https://raw.github.com/vrana/adminer/master/designs/ng9/adminer.css
     background-clip:padding-box;border:1px solid rgba(180,180,180,0.4);min-height: 28px;}
 ::-webkit-scrollbar-thumb:hover{background-color:rgba(180,180,180,0.4);border:1px solid rgba(180,180,180,0.7);}
 
-body #menu #dbs{color:#fff;padding: 10px 0px 10px 10px;}
+body #menu #dbs{padding: 10px 0px 10px 10px;}
 body #menu #dbs select{position: relative;max-width: 190px;left: 0;}
 body #menu #tables{margin: 0 0 !important;padding: 5px 0;left: 10px;right: 10px;top: 150px;}
 body #menu #tables a{padding: 5px 10px;line-height: 16px;}
-body #menu #tables a.select{right:0;}
-body #menu #dbs select{max-width: 175px; padding-right: 20px;}
 
-body.adminer .toggle-menu{left:272px;top:55px;}
-body.adminer.menu-hide #menu{display: none;}
-body.adminer.menu-hide .toggle-menu{left:0;}
-body.adminer .toggle-menu:after {border-radius: 0 5px 5px 0;}
-body.adminer #menu h1 {padding: 16px 0px 4px 28px;}
-
-body #table thead{position: sticky;top: 50px;}
-body .table-desc{font-size:0.8em;opacity:0.2;padding:0 2px;font-style: normal;font-weight: normal;}
-body .logout{color:#ffffffa0;}
-body #edit-fields button.icon.icon-move{cursor: move;}
-
-body .field-value-show.field-time{font-style: normal;line-height:1.2em;}
-body .field-value-desc.field-time{font-size:0.8em;opacity:0.6;font-style: normal;font-weight:normal;line-height: 1.2em;}
+body .toggle-menu{left:272px;}
+body.js.menu-hide .toggle-menu{left:0;opacity:1;}
 @media (max-width: 800px){
 	body #menu .links{width:279px;}
 	body #breadcrumb{left: 0px !important;}
-	body.adminer .foot{display: block;}
-	body.adminer .toggle-menu{left:300px;}
-	body.adminer.menu-hide .logout{display:none;}
-	body.adminer .logout{
+	body.js .foot{display: block;}
+	body.js.menu-hide .logout{display:none;}
+	body.js .logout{
 		top: inherit;right: 0;bottom: 0;margin: 0;background: #fafafa;
 		width: 100%;padding: 10px;box-sizing: border-box;text-align: right;
 	}
@@ -423,6 +409,7 @@ table:after
 
 #menu p, #logins, #tables {border-bottom: 1px solid rgba(255, 255, 255, 0.04);}
 #lang {
+    position: absolute;
     top: 0;
     left: 170px;
     z-index: 10;
@@ -434,7 +421,7 @@ table:after
     position: absolute;
     left: 0px;
     right: 0px;
-    top: 13px;
+    top: 19px;
     color: #677d8e;
     width: 100%;
     background: #4e6175;
@@ -444,20 +431,27 @@ table:after
 }
 
 #menu {
-    top:-23px;padding:0;    
+    top:0;padding:0;
     bottom: 0;
     width: 272px;
     border-right:none;
 }
 #menu h1{
-    padding: 16px 0px 6px 28px;
+    height: 62px;
+    gap: 6px;
+    flex: none;
+    padding: 0 0 0 28px;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    line-height: 1;
     border-bottom: 1px solid #465a6f;
     background: #3f576f;
     border: none;
 }
 #menu h1:before {
     content: "Adminer ";
-    line-height: 40px;
+    line-height: 1;
     color: #fff;
     font-style: italic;
 }
@@ -468,7 +462,7 @@ table:after
     font-size:24px;
 }
 .version {color: #677d8e;font-size:14px;}
-#breadcrumb {left: 290px;padding-left: 20px;}
+#breadcrumb {left: 272px;right: 0;width: auto;padding-left: 20px;}
 #breadcrumb a {
     color: #ecf0f1;
     font-size: 15px;
@@ -517,7 +511,7 @@ p#dbs {padding-left: 21px;}
     background: #527290;
     color: #3c5165;
 }
-/* #menu #dbs span{display:none;} */
+#menu #dbs span{display:none;}
 #menu #dbs input[type=submit] {display: none;}
 #menu select{
     background-color: #456079;
@@ -558,8 +552,11 @@ p#dbs {padding-left: 21px;}
 #menu .links a:hover{background: #507394;}
 #menu .links a:active{background: #5f83a5;}
 
+#menu #tables li{margin:0 8px;}
 #menu #tables{
     margin: 0 -15px !important;
+    padding: 0;
+    list-style: none;
     position: absolute;
     left: 15px;
     right: 15px;
@@ -590,6 +587,11 @@ a,input,button{transition:all .168s;}
 #ajaxstatus + .links{
     /*border-bottom:1px solid #ccc;*/
 }
+#tabs{
+    margin: 10px 0 14px;
+}
+.row-actions{white-space:nowrap;}
+.row-actions a{display:block;white-space:nowrap;line-height:1.9;}
 #ajaxstatus + .links a {
     border: 1px solid #ccc;
     display: inline-block;
@@ -845,40 +847,50 @@ textarea{padding:5px;}
 
 
 .toggle-menu{
-	position: fixed;
-    left: 260px;top:52px;
-    cursor: pointer;
-    z-index: 10;
+    position: fixed;
+    left: 272px;top:50%;bottom:auto;margin-top:0;
+    transform: translateY(-50%);
+    width:30px;height:42px;line-height:42px;
+    text-align:center;
+    color:#fff;
+    background:rgba(63,87,111,0.6);
+    border-radius:0 5px 5px 0;
+    box-shadow:2px 0 8px rgba(0,0,0,0.1);
+    backdrop-filter:blur(5px);
+    -webkit-backdrop-filter:blur(5px);
+    cursor:pointer;
+    z-index:100;
+    opacity:0;
+    transition:left .2s,opacity .2s,background .2s;
 }
-.toggle-menu:after{
-	content:'↔';
-	width: 24px;height: 24px; line-height: 22px;
-    border-radius: 15px;
-    background: #1890ff;color: #fff;
-	font-size: 16px;font-weight: 800;
-	text-align: center;
-	display: block;
-    opacity: 0.8;
+.toggle-menu:hover,.toggle-menu.toggle-visible{opacity:1;background:rgba(75,106,135,0.85);}
+.toggle-menu:before{
+    content:"\ea64";
+    font-family:"remixicon";
+    font-style:normal;
+    font-size:15px;
+    line-height:42px;
+    color:#fff;
+}
+.menu-hide .toggle-menu:before{content:"\ea6e";}
+@media (max-width: 800px){
+    body #menu{z-index:200;}
+    body #menu h1{height:62px;}
+    body .toggle-menu{opacity:1;}
 }
 pre, textarea{display: inline-block;}
 
-/*#menu{transition: all 0.2s;left:0;}*/
-/*#content{transition: all 0.2s;}*/
-/*#breadcrumb{transition: all 0.2s;}*/
+#menu{-webkit-transition:left .2s;transition:left .2s;}
+#content{-webkit-transition:margin-left .2s;transition:margin-left .2s;}
+#breadcrumb{-webkit-transition:left .2s;transition:left .2s;}
 
 .menu-hide .toggle-menu{left:0;}
-.menu-hide .toggle-menu:after{border-radius:0 5px 5px 0;}
 
 .menu-hide #menu{left: -272px;}
 .menu-hide #content{margin-left:10px;}
 .menu-hide #breadcrumb{left: 0;}
-.menu-hide #lang{display:none;}
+
 .menu-hide .jush{width: 90% !important;}
 
 input[type=submit]{color:#fff;background-color: #1890ff;}
 input[type=submit]:hover{color:#fff;background-color: #2070e5;}
-
-input[name=db]{width: 170px;background-color: #456079;color: #fff;border: none;height: 23px;line-height: 23px;}
-input[name=db]:hover,
-input[name=db]:focus,
-input[name=db]:active{background-color: #31475f;border: none !important;box-shadow: none;}
