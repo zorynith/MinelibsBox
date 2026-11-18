@@ -41,3 +41,7 @@
 .kui-notify .kui-notify-box .kui-notify-item .kui-notify-icon .notify-icon-warning.ntc-level-4:before {
     color: #ff4d4f;
 }
+
+.dark-mode .artDialog.msgWarning-kwarn-dialog .kwarn-content {
+    background: #2e2e2e;
+}

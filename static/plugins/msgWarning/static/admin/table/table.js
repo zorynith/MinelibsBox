@@ -111,7 +111,7 @@ ClassBase.define({
             } },
             { field: 'status', title: LNG['common.status'], formatter: function (value, idx, data) {
                 var checked = value == '1' ? 'checked="checked"' : '';
-                var disable = !_.includes(['weixin', 'dding'], data[idx].type) ? 'switch-not-allowed' : '';   // 仅企业微信和钉钉支持开启/关闭，其他默认开启
+                var disable = !_.includes(['weixin', 'dding', 'feishu'], data[idx].type) ? 'switch-not-allowed' : '';   // 仅企业微信、钉钉、飞书支持开启/关闭，其他默认开启
                 return '<label class="disable-ripple '+disable+'">\
                             <input type="checkbox" class="kui-checkbox-ios size-small" name="status" '+checked+' /><em></em>\
                         </label>';

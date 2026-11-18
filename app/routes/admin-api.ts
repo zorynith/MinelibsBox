@@ -2230,7 +2230,27 @@ adminApi.all("/plugin/getConfig", async (c) => {
     }
     formData[key] = copy;
   }
-  return c.json({ code: true, data: formData });
+  // configItem 里可能带 {{pluginHost}} / {{staticPath}} 占位符 (如 formStyle.loadFile 指向
+  // 插件自带的配置页脚本 config.js / check.js)。001 在 echoFile 阶段替换, 这里等价处理,
+  // 否则前端会拿到字面占位符去加载脚本而 404。
+  const staticPath = getStaticHost(c);
+  const pluginHost = `${staticPath}plugins/${app}/`;
+  const replacePathVars = (v: any): any => {
+    if (typeof v === "string") {
+      return v
+        .split("{{pluginHost}}").join(pluginHost)
+        .split("{{pluginPath}}").join(`plugins/${app}/`)
+        .split("{{staticPath}}").join(staticPath);
+    }
+    if (Array.isArray(v)) return v.map(replacePathVars);
+    if (v && typeof v === "object") {
+      const o: Record<string, any> = {};
+      for (const [k, val] of Object.entries(v)) o[k] = replacePathVars(val);
+      return o;
+    }
+    return v;
+  };
+  return c.json({ code: true, data: replacePathVars(formData) });
 });
 
 adminApi.all("/plugin/setConfig", async (c) => {

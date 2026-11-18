@@ -41,6 +41,7 @@ ClassBase.define({
 			sms: 	LNG['common.sms'],
 			weixin: LNG['msgWarning.type.weixin'],
 			dding: 	LNG['msgWarning.type.dding'],
+			feishu: LNG['msgWarning.type.feishu'],
 		};
 		var formData = this.typeConfigGet(type);
 		this[type+'Form'] = new kodApi.formMaker({parent:this,formData:formData});
@@ -54,7 +55,7 @@ ClassBase.define({
 		},function(data){
 			if (type == 'sms') return true;	// 无需保存
 			if (type == 'email') {
-				if (!data.type == '1' && !data.tested) {
+				if (data.type == '1' && !data.tested) {
 					Tips.tips(LNG['msgWarning.type.emailTestFirst'], false);
 					return false;
 				}
@@ -82,7 +83,7 @@ ClassBase.define({
 	// 通知方式form赋值
 	typeConfigSet: function(type){
 		var self = this;
-		if (_.includes(['sms','weixin','dding'], type)) {
+		if (_.includes(['sms','weixin','dding','feishu'], type)) {
 			var typeInfo = this.getTypeInfo(type);
 			var key = 'status';
 			var val = typeInfo.status;
@@ -143,9 +144,9 @@ ClassBase.define({
 				var msg = htmlEncode(_.get(result,'data','')) + '! '+LNG['admin.setting.emailGoToTips']
 					+' ['+htmlEncode(data.email)+'] '+LNG['admin.setting.emailCheckTips'];
 				Tips.tips(msg, true, 3000);
+        		self.emailForm.setValue('tested', 1);
 			}else{
 				Tips.close(result);
-				self.emailForm.setValue('tested', 1);
 			}
 		});
 	},

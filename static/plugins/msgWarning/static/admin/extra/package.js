@@ -96,6 +96,15 @@ define(function(require, exports) {
 					"require":1
 				},
 			},
+			feishu: {
+				"status": {
+					"type":"switch",
+					"value":0,
+					"display":LNG['msgWarning.main.openSvr'],
+					"desc":LNG['msgWarning.type.feishuDesc']+" <a href='./#admin/plugin&tab=buy' target='_blank'>"+LNG['msgWarning.main.goSet']+"</a>",
+					"require":1
+				},
+			},
         },
 
 
@@ -110,7 +119,7 @@ define(function(require, exports) {
                     info:"event,title,desc,class,level,status",
                     policy:"polTitle",
                     notice:"ntcTarget,ntcMethod,ntcMore,ntcCntMax,ntcCntMaxDay,ntcTimeFreq,ntcTimeFrom,ntcTimeTo",
-                    eg:"egType,egTypeKtips,egTypeKwarn,egTypeEmail,egTypeSms,egTypeWeixin,egTypeDding",
+                    eg:"egType,egTypeKtips,egTypeKwarn,egTypeEmail,egTypeSms,egTypeWeixin,egTypeDding,egTypeFeishu",
                 },	
                 tabsName:{
                     info:	LNG['msgWarning.evnt.basic'],
@@ -247,6 +256,7 @@ define(function(require, exports) {
 					// sms:	LNG['msgWarning.type.sms'],	// TODO 暂不支持
 					weixin:	LNG['msgWarning.type.weixin'],
 					dding:	LNG['msgWarning.type.dding'],
+					feishu:	LNG['msgWarning.type.feishu'],
 				},
 				switchItem:{
 					ktips: 	'egTypeKtips',
@@ -255,6 +265,7 @@ define(function(require, exports) {
 					// sms: 	'egTypeSms',
 					weixin: 'egTypeWeixin',
 					dding: 	'egTypeDding',
+					feishu: 'egTypeFeishu',
 				}
 			},
 			egTypeKtips:{
@@ -286,6 +297,11 @@ define(function(require, exports) {
 				type: "html",
 				value: "",
 				display:LNG['msgWarning.type.ntcDding'],
+			},
+			egTypeFeishu:{
+				type: "html",
+				value: "",
+				display:LNG['msgWarning.type.ntcFeishu'],
 			},
         },
     };

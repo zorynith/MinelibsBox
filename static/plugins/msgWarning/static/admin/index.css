@@ -273,9 +273,10 @@ span.select2-container .select2-results__option .ntc-lvl {
     position: absolute;
     bottom: 20px;
 }
-/* weixin/dding */
+/* weixin/dding/feishu */
 .dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeWeixin .setting-content .eg-box, 
-.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeDding .setting-content .eg-box {
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeDding .setting-content .eg-box, 
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeFeishu .setting-content .eg-box {
     background: #f4f5f8;
     width: 300px;
     display: flex;
@@ -283,12 +284,17 @@ span.select2-container .select2-results__option .ntc-lvl {
     height: 150px;
 }
 .dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeWeixin .setting-content .eg-box .path-ico, 
-.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeDding .setting-content .eg-box .path-ico {
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeDding .setting-content .eg-box .path-ico, 
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeFeishu .setting-content .eg-box .path-ico {
     width: 24px;
     height: 24px;
 }
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeFeishu .setting-content .eg-box .path-ico img {
+    border-radius: 50%;
+}
 .dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeWeixin .setting-content .eg-box .content>div:last-child, 
-.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeDding .setting-content .eg-box .content>div:last-child {
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeDding .setting-content .eg-box .content>div:last-child, 
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeFeishu .setting-content .eg-box .content>div:last-child {
     padding: 6px 12px;
     background: #fff;
     border-radius: 4px;
@@ -299,8 +305,12 @@ span.select2-container .select2-results__option .ntc-lvl {
 .dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeWeixin .setting-content .eg-box .content>div:last-child {
     border-left: 3px solid #2292e1;
 }
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeFeishu .setting-content .eg-box .content>div:last-child {
+    border: 1px solid #ddd;
+}
 .dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeWeixin .setting-content .eg-box .content>div:last-child .title, 
-.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeDding .setting-content .eg-box .content>div:last-child .title {
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeDding .setting-content .eg-box .content>div:last-child .title, 
+.dialog-form.ntc-evnt-set-dg .form-box .tab-content.eg .item-egTypeFeishu .setting-content .eg-box .content>div:last-child .title {
     color: #444;
     font-weight: 600;
 }

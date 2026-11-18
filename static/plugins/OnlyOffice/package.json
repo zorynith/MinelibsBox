@@ -2,22 +2,35 @@
 	"id":"OnlyOffice",
 	"name":"{{LNG['OnlyOffice.meta.name']}}",
 	"title":"{{LNG['OnlyOffice.meta.title']}}",
-	"version":"2.2",
-	"category":"file",
+	"version":"2.50",
+	"category":"file,tools",
 	"source":{
 		"icon":"{{pluginHost}}static/images/icon.png",
 		"screenshoot":[
-			"{{pluginHost}}static/images/document-short.jpg",
-			"{{pluginHost}}static/images/presentation-short.jpg",
-			"{{pluginHost}}static/images/spreadsheet-short.jpg"
+			"{{pluginHost}}static/images/file-open-pptx.png",
+			"{{pluginHost}}static/images/word.jpg",
+			"{{pluginHost}}static/images/excle.png",
+			"{{pluginHost}}static/images/ppt.jpg",
+			"{{pluginHost}}static/images/office.jpg"
 		]
 	},
 	"description":"{{LNG['OnlyOffice.meta.desc']}}",
 	"auther":{
-		"copyright":"017, zhtengw",
-		"homePage":"https://github.com/zhtengw/kodexplorer-plugins"
+		"copyright":"kodcloud",
+		"homePage":"http://kodcloud.com"
 	},
 	"configItem":{
+		"formStyle":{
+			"className":"form-box-title-left",
+			"loadFile":"{{pluginHost}}static/config.js",
+			"tabs":{
+				"{{LNG['OnlyOffice.tab.itemServer']}}":"sep002,serverApi,jwtOpen,jwtSecret,jwtHeader,sep003,serverPortOpen,serverPort,serverPathOpen,serverPath,apiPath,test,sep1091",
+				"{{LNG['admin.setting.base']}}":"sep001,pluginAuth,openWith,fileSort,fileExt",
+				"{{LNG['OnlyOffice.tab.office']}}":"sep004,wapViewMode,mobileEdit,sep1010,canAutosave,canCopy,canCoAuthoring,sep1001,chat,comments,history,plugins,sep1002",
+			}
+		},
+		"pluginSaveKeepOpen":{"className":"hidden","type":"input","value":"0"},
+		"sep001":"<h4>{{LNG['admin.setting.base']}}</h4>",
 		"pluginAuth":{
 			"type":"userSelect",
 			"value":{"all":1},
@@ -25,10 +38,15 @@
 			"desc":"{{LNG['admin.plugin.authDesc']}}",
 			"require":1
 		},
-		"sep001":"<hr/>",
+		// "test":{
+		// 	"type":"input",
+		// 	"display":"测试",
+		// 	"require":"email,endWith:edu.com,length:0-15",
+		// 	"requireTips":"必须是邮箱|以edu.com结尾|长度小于15",
+		// },
 		"openWith":{
 			"type":"radio",
-			"value":"dialog",
+			"value":"window",
 			"display":"{{LNG['admin.plugin.openWith']}}",
 			"info":{
 				"dialog":"{{LNG['admin.plugin.openWithDilog']}}",
@@ -39,45 +57,180 @@
 			"type":"tags",
 			"display":"{{LNG['admin.plugin.fileExt']}}",
 			"desc":"{{LNG['admin.plugin.fileExtDesc']}}",
-			"value":"doc,docm,docx,dot,dotm,dotx,epub,fodt,htm,html,mht,odt,pdf,rtf,txt,djvu,xps,fodp,odp,pot,potm,potx,pps,ppsm,ppsx,ppt,pptm,pptx,csv,fods,ods,xls,xlsm,xlsx,xlt,xltm,xltx"
+			"value":
+			"docx,doc,odt,rtf,mht,djvu,fb2,xps,docm,dotm,dot,dotx,wps,wpt,xls,xlsb,xlsx,ods,csv,xlt,xltx,xlsm,et,ett,pps,ppsx,ppt,pptx,odp,pot,potx,pptm,ppsm,potm,dps,dpt", 
 		},
 		"fileSort":{
 			"type":"number",
 			"display":"{{LNG['admin.plugin.fileSort']}}",
 			"desc":"{{LNG['admin.plugin.fileSortDesc']}}",
-			"value":10
+			"value":500
 		},
-		"apiServer-http":{
-			"type":"input",
-			"value":"onlyoffice.dzz.cc",
-			"display":"http://",
-			"desc":"<span class='grey-8'>/web-apps/apps/api/documents/api.js</span>"
-        },
-        "apiServer-https":{
+
+		"sep002":"<h4>{{LNG['OnlyOffice.tab.itemServer']}}</h4>",
+		"serverApi":{
 			"type":"input",
 			"value":"",
-			"display":"https://",
-			"desc":"<span class='grey-8'>/web-apps/apps/api/documents/api.js</span>{{LNG['OnlyOffice.Config.apiServerDesc']}}"
-        },
-		"previewMode":{
+			"display":"{{LNG['OnlyOffice.config.serverApi']}}",
+			"desc":"{{LNG['OnlyOffice.config.serverApiDesc']}}"
+		},
+		"jwtOpen":{
 			"type":"switch",
-			"value":0,
-			"display":"{{LNG['OnlyOffice.Config.previewMode']}}"
-        },
-        "editorOpt":{
-            "type":"checkbox",
-            "value":"chat,comments,help",
-            "display":"{{LNG['OnlyOffice.Config.editorOpt']}}",
-            "info":{
-                "chat":"{{LNG['OnlyOffice.Config.chat']}}",
-                "comments":"{{LNG['OnlyOffice.Config.comments']}}",
-                "help":"{{LNG['OnlyOffice.Config.help']}}"
-            }
-        },
+			"value":"0",
+			"display":"{{LNG['OnlyOffice.config.jwtOpen']}}",
+			"switchItem":{"1":"jwtSecret,jwtHeader"}
+		},
+		"jwtSecret":{
+			"type":"input",
+			"className":"input-password",
+			"value":"",
+			"display":"{{LNG['OnlyOffice.config.jwtSecret']}}",
+			"desc":"<br/>{{LNG['OnlyOffice.config.jwtSecretDesc']}}"
+		},
+		"jwtHeader":{
+			"type":"input",
+			"value":"Authorization",
+			"display":"{{LNG['OnlyOffice.config.jwtHeader']}}",
+			"desc":"<br/>{{LNG['OnlyOffice.config.jwtHeaderDesc']}}"
+		},
+		"sep003":"<hr/>",
+		"serverPortOpen":{
+			"type":"switch",
+			"value":"0",
+			"display":"{{LNG['OnlyOffice.config.serverPortOpen']}}",
+			"desc":"{{LNG['OnlyOffice.config.serverPortOpenDesc']}}",
+			"switchItem":{"1":"serverPort"}
+		},
+		"serverPort":{
+			"type":"number",
+			"value":8001,
+			"display":"{{LNG['OnlyOffice.config.serverPort']}}",
+			"desc":"{{LNG['OnlyOffice.config.serverPortDesc']}}"
+		},
+		"serverPathOpen":{
+			"type":"switch",
+			"value":"0",
+			"display":"{{LNG['OnlyOffice.config.serverPathOpen']}}",
+			"desc":"{{LNG['OnlyOffice.config.serverPathOpenDesc']}}",
+			"switchItem":{"1":"serverPath"}
+		},
+		"serverPath":{
+			"type":"input",
+			"value":"/office/",
+			"display":"{{LNG['OnlyOffice.config.serverPath']}}",
+			"desc":"{{LNG['OnlyOffice.config.serverPathDesc']}}"
+		},
+
+		"sep004":"<h4>{{LNG['OnlyOffice.tab.office']}}</h4>",
+		"wapViewMode":{
+			"type":"segment",
+			"value":"edit",
+			"display":"{{LNG['OnlyOffice.config.viewMode']}}",
+			"info":{
+				"edit":"{{LNG['OnlyOffice.config.viewModeEdit']}}",
+				"view":"{{LNG['OnlyOffice.config.viewModeView']}}"				
+			},
+			"switchItem":{"edit":"mobileEdit,canAutosave,canCoAuthoring,sep1001,chat,comments,history"}
+		},		
+		"mobileEdit":{
+			"type":"switch",
+			"value":"0",
+			"display":"{{LNG['OnlyOffice.config.mobileEdit']}}",
+			"desc":"{{LNG['OnlyOffice.config.mobileEditDesc']}}"
+		},
+		
+		"sep1010":"<hr/>",
+		"canAutosave":{
+			"type":"switch",
+			"value":"1",
+			"className":"",
+			"display":"{{LNG['OnlyOffice.config.canAutosave']}}",
+			"desc":"{{LNG['OnlyOffice.config.canAutosaveDesc']}}"
+		},
+		"canCoAuthoring":{
+			"type":"switch",
+			"value":"1",
+			"className":"",
+			"display":"{{LNG['OnlyOffice.config.canCoAuthoring']}}",
+			"desc":"{{LNG['OnlyOffice.config.canCoAuthoringDesc']}}"
+		},
+		"canCopy":{
+			"type":"switch",
+			"value":"1",
+			"className":"",
+			"display":"{{LNG['OnlyOffice.config.canCopy']}}",
+			"desc":"{{LNG['OnlyOffice.config.canCopyDesc']}}"
+		},
+		"sep1001":"<hr/>",
+		"chat":{
+			"type":"switch",
+			"value":"1",
+			"className":"",
+			"display":"{{LNG['OnlyOffice.config.chat']}}",
+			"desc":"{{LNG['OnlyOffice.config.chatDesc']}}"
+		},
+		"comments":{
+			"type":"switch",
+			"value":"1",
+			"className":"",
+			"display":"{{LNG['OnlyOffice.config.comments']}}",
+			"desc":"{{LNG['OnlyOffice.config.commentsDesc']}}"
+		},
 		"history":{
 			"type":"switch",
-			"value":0,
-			"display":"{{LNG['OnlyOffice.Config.history']}}"
-        }
+			"value":"1",
+			"className":"hidden",
+			"display":"{{LNG['explorer.panel.historyName']}}",
+			"desc":"(only {{LNG['OnlyOffice.config.viewModeEdit']}})"
+		},
+		"sep1002":"<hr/>",
+		"plugins":{
+			"type":"switch",
+			"value":"0",
+			"className":"",
+			"display":"{{LNG['OnlyOffice.config.plugin']}}",
+			"desc":"{{LNG['OnlyOffice.config.pluginDesc']}}"
+		},
+
+		"sep1003":"<h4>{{LNG['admin.setting.others']}}</h4>",
+		"cdnPath":{
+			"type":"input",
+			"value":"",
+			"display":"{{LNG['OnlyOffice.config.cdnPath']}}",
+			"desc":"{{LNG['OnlyOffice.config.cdnPathDesc']}}"
+		},
+		"kodAppHost":{
+			"type":"input",
+			"value":"",
+			"display":"{{LNG['OnlyOffice.config.kodAppHost']}}",
+			"desc":"{{LNG['OnlyOffice.config.kodAppHostDesc']}}"
+		},
+		"docAppHost":{
+			"type":"input",
+			"value":"",
+			"display":"{{LNG['OnlyOffice.config.docAppHost']}}",
+			"desc":"{{LNG['OnlyOffice.config.docAppHostDesc']}}"
+		},
+		"interViewOpen":{
+			"type":"switch",
+			"value":"0",
+			"display":"{{LNG['OnlyOffice.config.interViewOpen']}}",
+			"desc":"{{LNG['OnlyOffice.config.interViewOpenDesc']}}"
+		},
+		"sep1004":"<hr/>",
+		"appVersion":{
+			"type":"number",
+			"value":"",
+			"display":"{{LNG['OnlyOffice.config.version']}}",
+			"desc":"{{LNG['OnlyOffice.config.versionDesc']}}"
+		},
+		"debug":{
+			"type":"switch",
+			"value":"0",
+			"className":"",
+			"display":"{{LNG['OnlyOffice.config.debug']}}",
+			"desc":"{{LNG['OnlyOffice.config.debugDesc']}}"
+		}
 	}
 }
+

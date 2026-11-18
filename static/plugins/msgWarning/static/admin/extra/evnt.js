@@ -228,7 +228,7 @@ ClassBase.define({
 					</div>\
 					</div>';
 		} else {
-			var hide = type == 'weixin' ? 'hidden' : '';
+			var hide = type == 'dding' ? '' : 'hidden';
 			// var hide = '';
 			var head = './static/images/icon/fav.png';
 			if (_.get(G, 'kod.channel', '')) head = './static/images/common/default-avata.png';

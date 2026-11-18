@@ -43,8 +43,6 @@ pluginApi.use("*", async (c, next) => {
   if (pname === "OnlyOffice" && (pact === "file" || pact === "save")) return next();
   // 通用匿名文件流端点(001 filePathLinkOut): 外部服务/前端无会话 cookie, 用 fileView apiKey 签名
   if (pact === "fileOut") return next();
-  // PDFTron 保存回调: WebViewer 在 static 域 iframe 内无会话 cookie, 用 fileView token 签名认证
-  if (pname === "PDFTron" && pact === "save" && c.req.query("token")) return next();
   // Photopea 只读模式(分享 guest)的 saveImg 探活回调: 无 cookie, 应放行让 handler 返回 Unwritable;
   // 可写模式: static 域 iframe 无会话 cookie, 用 fileView token 签名认证
   if (pname === "Photopea" && pact === "saveImg" && (c.req.query("unwritable") || c.req.query("token"))) return next();
@@ -101,7 +99,7 @@ function fileOutUrl(appHost: string, rawPath: string): string {
 /** 浏览器同源请求用的根相对文件流 URL。线上 preview 转发时 appHost(X-Forwarded-Host)
  *  可能与浏览器地址栏域名不一致, 绝对 URL 会跨源 fetch 丢失 cookie 导致 401;
  *  根相对路径跟随当前 origin, 天然同源带 cookie。仅限浏览器同源场景
- *  (PDFTron initialDoc / Photopea fileUrl / drawio 等), 外部服务抓取仍用 fileOutUrl。 */
+ *  (Photopea fileUrl / drawio / bisheng 等), 外部服务抓取仍用 fileOutUrl。 */
 function fileOutRel(rawPath: string): string {
   const m = rawPath.match(/\{shareItemLink:([-\w]+)\}/);
   if (m) {
@@ -379,14 +377,17 @@ function officeDocType(ext: string): string {
 
 /**
  * 读取 OnlyOffice 插件配置中的 Document Server 地址 (镜像 package.json 的 config)。
- * 001 zhtengw 原插件按站点协议选择: 站点 https 用 apiServer-https, http 用 apiServer-http。
+ * v2.50 起统一为 serverApi 单字段(可带协议); 旧版 2.2 为 apiServer-https / apiServer-http,
+ * 保留回退以兼容升级前已保存的配置。
  */
 async function onlyOfficeApiServer(env: Env, appHost: string): Promise<string> {
   const meta = await getPluginMeta(env.DB, "OnlyOffice");
   const config = meta?.config || {};
+  const serverApi = String(config.serverApi || "").trim();
   const http = String(config["apiServer-http"] || "").trim();
   const https = String(config["apiServer-https"] || "").trim();
-  const server = appHost.startsWith("https://") ? (https || http) : (http || https);
+  const legacy = appHost.startsWith("https://") ? (https || http) : (http || https);
+  const server = serverApi || legacy;
   if (!server) return "";
   return server.indexOf("://") >= 0 ? server : (appHost.startsWith("https://") ? "https://" : "http://") + server;
 }
@@ -399,8 +400,15 @@ function officeFileTypeAlias(ext: string): string {
   return ext;
 }
 
-/** 001 editorOpt: chat/comments/help 逗号分隔开关; config 未配置时对齐 package.json 默认全开。 */
+/**
+ * 编辑器按钮开关。旧版 2.2 用 editorOpt 逗号串(chat,comments,help);
+ * v2.50 拆成 chat / comments 两个独立 switch, help(帮助按钮) 仍由模板默认开。
+ */
 function officeEditorOpt(config: Record<string, any>): { chat: boolean; comments: boolean; help: boolean } {
+  if (config.editorOpt === undefined && (config.chat !== undefined || config.comments !== undefined)) {
+    const on = (k: string) => (config[k] === undefined ? true : String(config[k]) === "1");
+    return { chat: on("chat"), comments: on("comments"), help: true };
+  }
   if (config.editorOpt === undefined) return { chat: true, comments: true, help: true };
   const opt = String(config.editorOpt).split(",").map((x) => x.trim()).filter(Boolean);
   return { chat: opt.includes("chat"), comments: opt.includes("comments"), help: opt.includes("help") };
@@ -543,10 +551,10 @@ async function fileViewLinkOut(c: any, rawPath: string, user: AuthUser, name?: s
   return url;
 }
 
-/** PDFTron 保存回调匿名 URL: 与 fileOut 相同签名(token=sha256(path+timeTo+apiKey)),
+/** 插件匿名保存 URL: 与 fileOut 相同签名(token=sha256(path+timeTo+apiKey)),
  *  save handler 会独立校验用户写权限, token 只证明请求来自有效文件链接。
- *  解决 WebViewer 在 static 域 iframe 内无会话 cookie 导致的保存 401。
- *  传入 act 可生成其他插件(如 Photopea saveImg)的匿名保存 URL。 */
+ *  解决插件页面在 static 域 iframe 内无会话 cookie 导致的保存 401。
+ *  传入 act 可生成不同插件(如 Photopea saveImg)的匿名保存 URL。 */
 async function fileViewSaveUrl(c: any, rawPath: string, user: AuthUser, act = "save"): Promise<string> {
   const apiKey = await ensureFileViewApiKey(c.env);
   const timeTo = Math.floor(Date.now() / 1000) + 7 * 86400;
@@ -727,32 +735,6 @@ async function readFileText(c: any, rawPath: string): Promise<string | null> {
 }
 
 // ---------- route ----------
-
-/** 001 CADViewer: 302 重定向到 sharecad.org 在线查看 CAD/3D 文件。 */
-async function renderCADViewer(c: any, params: { rawPath: string; fileName: string; appHost: string; lang: string }) {
-  const { rawPath, fileName, appHost, lang } = params;
-  const title = "CADViewer";
-  const isShare = rawPath.indexOf("{shareItemLink:") === 0;
-  const user = c.get("currentUser") as AuthUser | undefined;
-  if (!isShare && !user) return c.body(errorPage(title, "未登录"), 200, HTML_HEADERS);
-
-  const key = await resolveFileKey(c, rawPath);
-  const obj = key ? await c.env.FILES.head(key).catch(() => null) : null;
-  if (!obj) {
-    const global = await loadLangPack(c.env.ASSETS, lang);
-    const msg = (global && global["common.pathNotExists"]) || "文件不存在";
-    return c.body(errorPage(title, msg), 200, HTML_HEADERS);
-  }
-
-  const fileUrl = isShare
-    ? fileOutUrl(appHost, rawPath)
-    : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
-  // sharecad 的 load 页在顶层窗口会跳转 /Viewer(丢失 url), 仅在 iframe 中才渲染查看器;
-  // 故返回承载 iframe 的页面, 让 sharecad 始终运行于子框架内。
-  const target = "https://iframe.sharecad.org/cadframe/load?url=" + encodeURIComponent(fileUrl);
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>html,body{margin:0;padding:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style></head><body><iframe src="${target}" allowfullscreen></iframe></body></html>`;
-  return c.body(html, 200, HTML_HEADERS);
-}
 
 /**
  * autoViewer (kodbox 官方 3D/CAD Smart Viewer, v1.11): 纯前端 libredwg(WASM) 解析 DWG/DXF,
@@ -1133,123 +1115,6 @@ async function bishengSaveHandler(c: any): Promise<Response> {
     await s3.put(key, content, getFileMimeType(rawPath)).catch(() => {});
   } else {
     await c.env.FILES.put(key, content).catch(() => {});
-  }
-  return c.text('{"error":0}', 200, { "Content-Type": "application/json" });
-}
-
-/** 001 PDFTron: 本地 WebViewer 渲染 PDF, 可写用户可批注并保存回原文件。 */
-async function renderPdfTron(c: any, params: { rawPath: string; fileName: string; appHost: string; staticPath: string; lang: string }) {
-  const { rawPath, fileName, appHost, staticPath, lang } = params;
-  const lng = await loadPluginLang(c.env.ASSETS, "PDFTron", lang);
-  const title = lng["PDFTron.meta.title"] || "PDFTron WebViewer";
-  const isShare = rawPath.indexOf("{shareItemLink:") === 0;
-  const user = c.get("currentUser") as AuthUser | undefined;
-  if (!isShare && !user) return c.body(errorPage(title, "未登录"), 200, HTML_HEADERS);
-
-  const key = await resolveFileKey(c, rawPath);
-  const obj = key ? await c.env.FILES.head(key).catch(() => null) : null;
-  if (!obj) {
-    const global = await loadLangPack(c.env.ASSETS, lang);
-    const msg = (global && global["common.pathNotExists"]) || "文件不存在";
-    return c.body(errorPage(title, msg), 200, HTML_HEADERS);
-  }
-
-  const meta = await getPluginMeta(c.env.DB, "PDFTron");
-  const config = meta?.config || {};
-  const licenseKey = config.licenseKey ?? null;
-  const darktheme = parseInt(String(config.darktheme ?? "0"), 10) === 1;
-  const savetofile = parseInt(String(config.savetofile ?? "0"), 10) === 1;
-
-  // WebViewer UI 位于 GitHub Pages(static 域) iframe, 无会话 cookie, 数据请求必须用带签名 token 的匿名 URL:
-  // 分享场景走公开 share/fileOut, 登录场景走 fileView apiKey 签名(跨域可用)。
-  const fileUrl = isShare
-    ? fileOutUrl(appHost, rawPath)
-    : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
-
-  // 001: guest 只读; 登录用户按源权限位
-  let canRead = true;
-  let canWrite = false;
-  if (!isShare) {
-    const src = await resolveFileSource(c.env, user as AuthUser, rawPath);
-    if (src.ok) {
-      const auth = await sourceAuthOf(c.env, user as AuthUser, src.source);
-      canRead = hasAuth(auth, AUTH_VIEW);
-      canWrite = hasAuth(auth, AUTH_EDIT);
-    }
-  }
-  const isViewOnly = !canRead;
-  const userName = isShare ? "guest" : ((user as AuthUser).username || "guest");
-  const viewerLang = lang.replace("-", "_").toLowerCase();
-  const enc = encodeURIComponent;
-  const saveUrl = canWrite && !isShare
-    ? await fileViewSaveUrl(c, rawPath, user as AuthUser)
-    : "";
-
-  const global = await loadLangPack(c.env.ASSETS, lang);
-  const lngSave = (global && global["common.save"]) || "保存";
-  const lngSaveSuccess = (global && global["explorer.saveSuccess"]) || "保存成功!";
-  const lngError = (global && global["explorer.error"]) || "操作失败！";
-
-  const pluginHost = `${staticPath}plugins/PDFTron/`;
-  const tpl = await loadTemplate(c.env.ASSETS, "plugins/PDFTron/static/template.html");
-  if (!tpl) return c.json({ code: false, data: "PDFTron template not found" });
-
-  const html = replaceAll(tpl, [
-    ["@@pluginHost@@", pluginHost],
-    ["@@configUrl@@", `${pluginHost}config.js`],
-    ["@@licenseKeyJs@@", JSON.stringify(licenseKey)],
-    ["@@fileUrl@@", jsEscape(fileUrl)],
-    ["@@isReadOnlyJs@@", canWrite ? "false" : "true"],
-    ["@@enableMeasurementJs@@", canWrite ? "true" : "false"],
-    ["@@enableRedactionJs@@", canWrite ? "true" : "false"],
-    ["@@annotationUserJs@@", JSON.stringify(userName)],
-    ["@@lang@@", jsEscape(viewerLang)],
-    ["@@darkthemeJs@@", darktheme ? "true" : "false"],
-    ["@@isViewOnlyJs@@", isViewOnly ? "true" : "false"],
-    ["@@canWriteJs@@", canWrite ? "true" : "false"],
-    ["@@savetofileJs@@", savetofile ? "true" : "false"],
-    ["@@saveUrl@@", jsEscape(saveUrl)],
-    ["@@lngSave@@", jsEscape(lngSave)],
-    ["@@lngSaveSuccess@@", jsEscape(lngSaveSuccess)],
-    ["@@lngError@@", jsEscape(lngError)],
-  ]);
-  return c.body(html, 200, HTML_HEADERS);
-}
-
-/** PDFTron 保存回调: POST body 为二进制 PDF (含批注), 校验写权限后写回 R2/S3。
- *  认证优先取 token(WebViewer 无会话 cookie), 无 token 时回退会话 cookie。 */
-async function pdfTronSaveHandler(c: any): Promise<Response> {
-  const rawPath = c.req.query("path") || "";
-  let user = c.get("currentUser") as AuthUser | undefined;
-  const uid = String(c.req.query("uid") || "");
-  const token = String(c.req.query("token") || "");
-  const timeTo = parseInt(String(c.req.query("timeTo") || ""), 10) || 0;
-  if (!user && uid && token) {
-    const apiKey = await ensureFileViewApiKey(c.env);
-    const expect = (await sha256Hex(rawPath + String(timeTo) + apiKey)).slice(0, 32);
-    if (expect === token && (!timeTo || timeTo > Math.floor(Date.now() / 1000))) {
-      const u = await authUserById(c.env, uid);
-      if (u) user = u;
-    }
-  }
-  if (!user || !rawPath) return c.text('{"error":0}', 200, { "Content-Type": "application/json" });
-
-  const src = await resolveFileSource(c.env, user, rawPath);
-  if (!src.ok) return c.text('{"error":0}', 200, { "Content-Type": "application/json" });
-  if (!hasAuth(await sourceAuthOf(c.env, user, src.source), AUTH_EDIT)) {
-    return c.text('{"error":0}', 200, { "Content-Type": "application/json" });
-  }
-
-  const pdfStream = await c.req.arrayBuffer();
-  if (!pdfStream || pdfStream.byteLength === 0) {
-    return c.text('{"error":0}', 200, { "Content-Type": "application/json" });
-  }
-  const key = keyFromBase(src.source.baseKey, src.relPath);
-  const s3 = s3ConfigOf(src.source);
-  if (s3) {
-    await s3.put(key, pdfStream, getFileMimeType(rawPath)).catch(() => {});
-  } else {
-    await c.env.FILES.put(key, pdfStream).catch(() => {});
   }
   return c.text('{"error":0}', 200, { "Content-Type": "application/json" });
 }
@@ -1648,10 +1513,6 @@ async function pluginHandler(c: any) {
     return renderOnlyOffice(c, { rawPath, fileName, ext, appHost, staticPath, lang });
   }
 
-  if (name === "CADViewer") {
-    return renderCADViewer(c, { rawPath, fileName, appHost, lang });
-  }
-
   if (name === "autoViewer") {
     return renderAutoViewer(c, { rawPath, fileName, ext, appHost, staticPath, lang });
   }
@@ -1670,11 +1531,6 @@ async function pluginHandler(c: any) {
     if (act === "save") return bishengSaveHandler(c);
     if (act === "filePost") return bishengFilePostHandler(c);
     return renderBisheng(c, { rawPath, fileName, ext, appHost, staticPath, lang });
-  }
-
-  if (name === "PDFTron") {
-    if (act === "save") return pdfTronSaveHandler(c);
-    return renderPdfTron(c, { rawPath, fileName, appHost, staticPath, lang });
   }
 
   if (name === "officeLive") {
