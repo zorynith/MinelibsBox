@@ -456,3 +456,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - 更正旧结论：`.git/.git-credentials` 现已包含 github.com 凭据，`git push github main` 可直接成功，无需额外配置。
   - 部署链路：wrangler.jsonc 的 `assets.directory=./static`，CI 中 `npm run build`（vite，publicDir=static）后 deploy；`dist/` 不入库，改 `static/**` 后 push 即由 CI 打包。
   - 校验方式：提交后 `git ls-remote github refs/heads/main` 确认远端 commit 已更新；若 GitHub Actions 未跑或失败，线上仍旧版。
+
+[Project Knowledge Summary]
+- Date: 2026-11-18
+- Context: 全量复核 001 与 Worker 的剩余差异（脚本化 action 对账 + 子代理逐条归类）
+- Category: Architecture / Implementation Details
+- Instructions:
+  - 对账方法：`/tmp/audit2.js` 解析 `app/routes/*.ts` 的 `.all/get/post("/path")` 并按 `X.route(prefix,Y)` 递归还原挂载前缀（注意 `userApi.route("/", accountApi)` 这类嵌套挂载），得 Worker 370 条路由；001 侧按 `001/app/controller/{mod}/{st}.class.php` 的 `public function` 生成 567 个 action。
+  - 关键结论：567 − 370 的 225 条“缺失 action”全部未被前端按路径引用（对 dev/main.js+api.js 做 `"path"` 精确匹配命中 0），均为内部 helper / filter 钩子 / 死代码；分模块：explorer 112、filter 43、admin 24、user 29、install 16、comment 1。前端 apiConfig 声明的 264 个端点里，唯一真实错配是 `user/license/index`（Worker 只有 `/user/license`），其余 27 条（admin/setting/*、storage/*、tools/*、member/*、setting/*）是客户端页面路由而非 API。
+  - 真实功能缺口（按影响排序）：① 文档密级 SourceSecret —— 前端有完整 UI（sourceSecret/sourceSecretList/sourceSecretSetUser 等），Worker 仅在 user-api 默认 options 里 seed 值，`explorer-api.ts:2443` 直接 `delete meta["user_sourceSecret"]`，无 SourceSecret 模型与校验；② `001/plugins/client`(v1.47 客户端下载) 未随包分发，且不在 ALL_PLUGINS；③ 修复工具 9 个动作是空实现（resetSourceFile/resetFileHash/resetFileLink/updateSourceLevel/resetSourceLevel/resetSourceEmpty/clearSameFile/errData2Recycle，另 clearSource/resetSizeById 降级），admin UI 只调 `admin/repair/autoReset` 故无可见影响；④ 平台限制：FTP/SFTP 驱动、SMTP 自定义发信、redis/memcached 缓存、主程序在线升级、插件商店在线安装/更新、服务器 CPU/内存/磁盘监控(占位)、D1 切换、分享服务端打包(仅 zipClient=1 客户端打包)。
+  - 字段级小缺口（子代理核实，无 404）：列表项分享角标 `userShare::shareAppendItem`、列表项历史版本数 `list::fileInfoAddHistory`、外链存储路径信息补全 `listDriver::parsePathIO/parsePathChildren`。
+  - 属“等价实现而非缺失”的命名差异：`explorer/historyLocal/*` → Worker 统一在 `/explorer/history/*`；`explorer/seo/*` → `/seo/*`；`explorer/shareOut/*` → `/shareOut/*`；`explorer/index/fileThumb` → `/plugin/fileThumb/cover`。
