@@ -28,7 +28,9 @@ export interface PluginContext {
 }
 
 /** All plugins shipped with the worker (served from ASSETS static/plugins). */
-export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "drawio", "Photopea", "bisheng", "PDFTron", "officeLive", "yzOffice", "adminer", "client", "fileThumb", "msgWarning", "oauth", "storeImport", "webdav", "autoViewer"];
+export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "drawio", "Photopea", "bisheng", "PDFTron", "officeLive", "yzOffice", "adminer", "fileThumb", "msgWarning", "oauth", "storeImport", "webdav", "autoViewer"];
+// 已移除: "client" (客户端·系统增强) — 扫码登录/TFA/客户端同步等功能依赖 App 与
+// 外部短信/邮件 API, 本项目不使用, 故不注册该插件 (服务端 handler 一并删除)。
 
 // {{{ helpers mirroring 001 array_get_value/_get }}}
 function arrayGet(obj: any, key: string): any {

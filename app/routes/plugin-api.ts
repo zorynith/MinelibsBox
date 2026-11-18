@@ -10,7 +10,7 @@
  * file URL, file name and the correct static asset base paths.
  */
 import { Hono } from "hono";
-import { authRequired, getSessionId, verifyPassword } from "../lib/auth";
+import { authRequired } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
 import { getAppHost, getStaticHost } from "../lib/user-system";
 import { detectLang, loadLangPack } from "../lib/i18n-lang";
@@ -18,9 +18,9 @@ import { t } from "../lib/i18n";
 import { loadPluginLang } from "../lib/plugins";
 import { getFileMimeType, getUserFileKey, keyFromBase } from "../lib/r2";
 import { getShareByHash } from "../lib/share";
-import { getPluginMeta, getUserById, setPluginConfig, getUserByUsername } from "../lib/db";
+import { getPluginMeta, getUserById, setPluginConfig } from "../lib/db";
 import { AUTO_VIEWER_CAD_FONTS } from "../lib/autoviewer-fonts";
-import { md5, hmacMd5, mcryptEncode, mcryptDecode } from "../lib/mcrypt";
+import { md5, hmacMd5 } from "../lib/mcrypt";
 import { resolveFileSource } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { AUTH_DOWNLOAD, AUTH_EDIT, AUTH_VIEW, getGroupAuthValue, getPersonalAuthValue, hasAuth } from "../lib/source-auth";
@@ -1556,83 +1556,6 @@ async function fileThumbVideoSmallHandler(c: any): Promise<Response> {
 // ---------- adminer 数据库管理 (复刻 001 plugins/adminer) ----------
 // 实现见 ./adminer.ts (后端 handlers + Adminer 主题页面)。
 
-// ---------- client 客户端/扫码登录 (复刻 001 plugins/client) ----------
-
-async function clientAllParams(c: any): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(c.req.query() as Record<string, string>)) out[k] = v;
-  try {
-    const body = await c.req.parseBody();
-    for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
-      if (typeof v === "string") out[k] = v;
-    }
-  } catch {
-    /* no body */
-  }
-  return out;
-}
-
-/** 001 clientPlugin::qrcodeToken: 生成二维码 token (POST), 返回 currentKey+token。 */
-async function clientQrcodeTokenHandler(c: any): Promise<Response> {
-  const user = c.get("currentUser") as AuthUser | undefined;
-  if (!user) return c.json({ code: false, data: "user.loginFirst" });
-  const currentKey = Math.random().toString(36).slice(2, 10).padEnd(8, "0");
-  const sessionId = getSessionId(c) || "";
-  await pluginCacheSet(c.env.DB, `clientQrcode:${currentKey}`, {
-    count: 0,
-    time: Math.floor(Date.now() / 1000),
-    sessionId,
-  }, 600);
-  const token = mcryptEncode(sessionId, currentKey);
-  return c.json({ code: true, data: currentKey + token });
-}
-
-/** 001 clientPlugin::checkPass: 校验登录密码 (POST sign/pass), pass 为 authCrypt.encode(明文, sign)。 */
-async function clientCheckPassHandler(c: any): Promise<Response> {
-  const user = c.get("currentUser") as AuthUser | undefined;
-  if (!user) return c.json({ code: false, data: "user.loginFirst" });
-  const p = await clientAllParams(c);
-  const sign = p.sign || "";
-  const pass = p.pass || "";
-  const password = mcryptDecode(pass, sign);
-  if (!password) return c.json({ code: false, data: "ERROR_USER_PASSWORD_ERROR" });
-  const row = await getUserByUsername(c.env.DB, user.username);
-  if (!row || !(await verifyPassword(password, (row as any).password_hash))) {
-    return c.json({ code: false, data: "ERROR_USER_PASSWORD_ERROR" });
-  }
-  return c.json({ code: true, data: t("explorer.success") });
-}
-
-/** 001 clientPlugin::check: 检查扫码登录状态 (GET)。 */
-async function clientCheckHandler(c: any): Promise<Response> {
-  const user = c.get("currentUser") as AuthUser | undefined;
-  if (user) return c.json({ code: true, data: t("explorer.success") });
-  return c.json({ code: false, data: null });
-}
-
-/** 001 clientPlugin::loginWeb / loginApp: 扫码登录确认 (POST token)。 */
-async function clientLoginAppHandler(c: any): Promise<Response> {
-  const p = await clientAllParams(c);
-  const token = p.token || "";
-  const currentKey = token.slice(0, 8);
-  const raw = token.slice(8);
-  if (!currentKey || !raw) return c.json({ code: false, data: "client.app.scanError" });
-  const state = await pluginCacheGet(c.env.DB, `clientQrcode:${currentKey}`);
-  if (!state || !state.sessionId) return c.json({ code: false, data: "client.app.scanError(disable)" });
-  if (Math.floor(Date.now() / 1000) - Number(state.time || 0) > 300) {
-    return c.json({ code: false, data: "client.app.scanError(timeout)" });
-  }
-  const sessionId = mcryptDecode(raw, currentKey);
-  if (!sessionId || sessionId !== state.sessionId) {
-    return c.json({ code: false, data: "client.app.scanError(sign)" });
-  }
-  // 已登录用户信息回传, 供 web 端 session 确认
-  const user = c.get("currentUser") as AuthUser | undefined;
-  if (!user) return c.json({ code: false, data: "user.loginFirst" });
-  await pluginCacheSet(c.env.DB, `clientQrcode:${currentKey}`, { ...state, loginUser: { id: user.id, username: user.username } }, 600);
-  return c.json({ code: true, data: t("explorer.success") });
-}
-
 // ---------- oauth 第三方登录回调页 (复刻 001 plugins/oauth callback) ----------
 
 async function oauthCallbackHandler(c: any): Promise<Response> {
@@ -1773,14 +1696,6 @@ async function pluginHandler(c: any) {
 
   if (name === "adminer") {
     return handleAdminer(c, act, appHost, staticPath);
-  }
-
-  if (name === "client") {
-    if (act === "qrcodeToken") return clientQrcodeTokenHandler(c);
-    if (act === "checkPass") return clientCheckPassHandler(c);
-    if (act === "check") return clientCheckHandler(c);
-    if (act === "loginWeb" || act === "loginApp") return clientLoginAppHandler(c);
-    return c.json({ code: false, data: "未知插件" });
   }
 
   if (name === "oauth") {
