@@ -160,17 +160,41 @@ export async function loadPluginPackage(assets: Fetcher, name: string): Promise<
   }
 }
 
-/** Load plugin language pack for a given lang. Returns {} on failure. */
-export async function loadPluginLang(assets: Fetcher, name: string, lang: string): Promise<Record<string, string>> {
-  const entry = (await loadPluginBundle(assets)).plugins?.[name];
-  if (entry?.langs && entry.langs[lang]) return entry.langs[lang];
+/**
+ * 插件语言包兜底顺序: 目标语言 -> en -> zh-CN。
+ * 全局支持 21 种语言(static/config/i18n), 而插件语言包基本只有 zh-CN/en;
+ * 缺目标语言时不兜底会让 {{LNG['xxx']}} 原样残留, 后台插件列表与文件打开菜单
+ * 直接显示占位符。仅用聚合包(构建期快照)内的语言做合并, 不额外发子请求。
+ */
+const PLUGIN_LANG_FALLBACK = ["en", "zh-CN"];
+
+async function fetchPluginLangFile(assets: Fetcher, name: string, lang: string): Promise<Record<string, string> | null> {
   try {
     const res = await assets.fetch(new Request(`https://assets.local/plugins/i18n/${name}.${lang}.json`));
-    if (!res.ok) return {};
-    return (await res.json<Record<string, string>>()) || {};
+    if (!res.ok) return null;
+    return (await res.json<Record<string, string>>()) || null;
   } catch {
-    return {};
+    return null;
   }
+}
+
+/** Load plugin language pack for a given lang (falls back to en / zh-CN). Returns {} on failure. */
+export async function loadPluginLang(assets: Fetcher, name: string, lang: string): Promise<Record<string, string>> {
+  const entry = (await loadPluginBundle(assets)).plugins?.[name];
+  const bundled = entry?.langs || {};
+  // 聚合包无该插件(本地未执行构建脚本): 退回旧行为, 只取目标语言, 避免放大多语言子请求
+  if (!Object.keys(bundled).length) {
+    return (await fetchPluginLangFile(assets, name, lang)) || {};
+  }
+  const out: Record<string, string> = {};
+  for (const l of [lang, ...PLUGIN_LANG_FALLBACK.filter((x) => x !== lang)]) {
+    const pack = bundled[l];
+    if (!pack) continue;
+    for (const [k, v] of Object.entries(pack)) {
+      if (typeof v === "string" && !(k in out)) out[k] = v;
+    }
+  }
+  return out;
 }
 
 /**
