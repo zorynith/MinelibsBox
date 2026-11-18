@@ -433,3 +433,15 @@ Entries discovered by the Agent during task execution should follow this format:
   - 无授权时的复刻落地：资源放 `static/plugins/<id>/`（至少 package.json + static/main.js），注册进 `app/lib/plugins.ts` 的 ALL_PLUGINS（未配置过的插件 getPluginMeta 默认 status=1，即默认启用），语言包放 `static/plugins/i18n/<id>.<lang>.json`；main.js 在 `explorer.kodApp.before` 中 push {name,title,ext,sort,icon,callback}，callback 内用 `requireAsync(pluginHost+'page.js?v=版本')` 载入预览页。
   - `static/plugins/__assets__.json` 被 .gitignore 忽略、由 `npm run build` 生成；CI 必须跑 build，否则运行时退化为逐插件 fetch，接近 Workers 子请求上限。
   - `/tmp` 会被环境清理（本轮 pluginlist.json 与解压包均丢失），抓到列表或插件包后需立即转存到仓库或工作目录。
+
+[Project Knowledge Summary]
+- Date: 2026-11-18
+- Context: 修复桌面右下角“风车”点击后一直旋转、壁纸不变
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - 元素定位：`.random-wallpaper`（CSS `bottom:30px;right:25px`）内的 `<img class="flower animated-1000" src=".../images/common/desktop/fengche.png">`；点击处理器在 `static/app/dist/main.js` 桌面模块 `bindEvent`（`this.$(".random-wallpaper .flower")`）。
+  - “一直转”的机制：点击时加 `moveCircle`（`animation: moveCircleLoop 1.4s infinite linear`），仅在该请求的 success 回调里 removeClass；回调不执行就永久旋转。
+  - 根因：pathModel 的 `randomImage` 把 URL 拼成 `"&lang=" + G.lang + "&callback=?"`，漏掉 `G.system.settings.kodApiServer + "wallpage/index"`，`$.getJSON` 变成对当前页的相对 JSONP → parsererror，success 回调永不触发。
+  - 正确地址：`(G.system.settings.kodApiServer || "") + "wallpage/index&lang=" + G.lang + "&callback=?"`；实测 `curl "https://api.kodcloud.com/?wallpage/index&lang=zh-CN&callback=cb"` 返回 `cb("https://wallpaper.../1513.jpg")`，回调参数直接是壁纸 URL 字符串，交给 `changeBackground(url)`。
+  - 修复要点：`randomImage` 返回 jqXHR；点击处理器加 moveCircle 重入保护、回调内先解除动画再 changeBackground（仅当值是字符串）、`.fail` 用 `Tips.tips(LNG["user.wall.random"]+" "+LNG["common.fail"],"warning")` 提示、10s 兜底定时器强制解除动画。
+  - 改动范围：仅 `static/app/dist/main.js`；`dist/dev`、`dist/orig` 保持只读对照（dev 内同样留有错误 URL，仅作反混淆参考）。

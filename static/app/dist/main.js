@@ -10243,8 +10243,8 @@
     e["uVgbG"] = "&lang=";
     e["HedAZ"] = "&callback=?";
     var n = e;
-    var e = n["fGplM"](n["fGplM"](n["uVgbG"], G["lang"]), n["HedAZ"]);
-    $["getJSON"](e, function (e) {
+    var e = (G["system"]["settings"]["kodApiServer"] || "") + "wallpage/index" + n["uVgbG"] + G["lang"] + n["HedAZ"];
+    return $["getJSON"](e, function (e) {
       var t = {};
       t["xDFOo"] = n["gEPVA"];
       t["ZcoBn"] = function (e) {
@@ -104548,13 +104548,33 @@
       var t = this.$(".random-wallpaper .flower");
       var i = this;
       t.bind("click", function () {
+        if (t.hasClass("moveCircle")) {
+          return;
+        }
         t.addClass("moveCircle");
-        i.pathModel.randomImage(function (e) {
-          i.changeBackground(e);
+        var n = false;
+        var a = function () {
+          if (n) {
+            return;
+          }
+          n = true;
           i._delay(function () {
             t.removeClass("moveCircle");
           }, 500);
+        };
+        var o = i.pathModel.randomImage(function (e) {
+          a();
+          if (typeof e === "string" && e) {
+            i.changeBackground(e);
+          }
         });
+        if (o && o.fail) {
+          o.fail(function () {
+            a();
+            Tips.tips(LNG["user.wall.random"] + " " + LNG["common.fail"], "warning");
+          });
+        }
+        setTimeout(a, 10000);
       });
     },
     onRemove: function g() {
