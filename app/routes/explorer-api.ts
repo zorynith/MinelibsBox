@@ -73,7 +73,7 @@ type AppContext = any;
 
 /** 001 explorer/share::link - 生成加密外链 (mcrypt path -> /share/file?hash=)。 */
 async function fileHashLink(c: AppContext, path: string, downFilename = ""): Promise<string> {
-  const pass = (await getSetting(c.env.DB, "systemPassword")) || "";
+  const pass = (await getSetting(c.env.DB, "systemPassword", true)) || "";
   const hash = mcryptEncode(path, pass);
   const name = path.split("/").filter(Boolean).pop() || "";
   const addParam = downFilename
@@ -2581,7 +2581,7 @@ explorerApi.all("/index/pathCrypt", async (c) => {
   const params = await reqParams(c);
   const path = String(params.path ?? "");
   const en = String(params.en ?? "1") !== "0";
-  const pass = ((await getSetting(c.env.DB, "systemPassword")) ?? "") + "encode";
+  const pass = ((await getSetting(c.env.DB, "systemPassword", true)) ?? "") + "encode";
   if (!path) return c.json({ code: true, data: "" });
   return c.json({ code: true, data: en ? mcryptEncode(path, pass) : mcryptDecode(path, pass) });
 });

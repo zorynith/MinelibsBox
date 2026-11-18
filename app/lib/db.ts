@@ -965,9 +965,16 @@ async function loadAllSettings(db: D1Database): Promise<Map<string, string> | nu
   }
 }
 
-export async function getSetting(db: D1Database, key: string): Promise<string | null> {
-  const map = await loadAllSettings(db);
-  if (map && map.size > 0) return map.get(key) ?? null;
+/**
+ * 读取设置项。
+ * fresh=true 时跳过 30s 缓存直接查库, 供安装状态、CSRF 开关、签名密钥等
+ * "改动后需要立即生效"的场景使用。
+ */
+export async function getSetting(db: D1Database, key: string, fresh = false): Promise<string | null> {
+  if (!fresh) {
+    const map = await loadAllSettings(db);
+    if (map && map.size > 0) return map.get(key) ?? null;
+  }
   const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
   return row?.value ?? null;
 }

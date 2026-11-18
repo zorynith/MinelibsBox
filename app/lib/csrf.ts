@@ -152,7 +152,7 @@ export async function csrfCheck(c: Context): Promise<"error" | null> {
   // 合法的 apiSignCheck 签名请求免 CSRF (001 中签名链接均为 GET 白名单/客户端 UA 豁免)
   if ((c.get as any)("apiSignSigned")) return null;
 
-  const csrfOn = String((await getSetting(c.env.DB, "csrfProtect")) ?? "1");
+  const csrfOn = String((await getSetting(c.env.DB, "csrfProtect", true)) ?? "1");
   if (csrfOn !== "1") return null;
 
   const ua = (c.req.header("user-agent") || "").toLowerCase();

@@ -61,10 +61,10 @@ function phpBase64(str: string): string {
  */
 export async function appKeySecret(db: D1Database, appKey = ""): Promise<string> {
   if (!appKey) {
-    const systemPassword = String((await getSetting(db, "systemPassword")) ?? "");
+    const systemPassword = String((await getSetting(db, "systemPassword", true)) ?? "");
     return md5(systemPassword);
   }
-  const raw = await getSetting(db, "appKeySecret");
+  const raw = await getSetting(db, "appKeySecret", true);
   if (!raw) return "";
   try {
     const list = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -89,7 +89,7 @@ export function httpBuildQuery(args: Record<string, unknown>): string {
 
 /** 001 user/index::accessToken — 用 systemPassword 派生密钥加密会话签名。 */
 export async function makeAccessToken(db: D1Database, sessionSign: string): Promise<string> {
-  const systemPassword = (await getSetting(db, "systemPassword")) ?? "";
+  const systemPassword = (await getSetting(db, "systemPassword", true)) ?? "";
   const pass = md5("kodbox_" + systemPassword).substring(0, 15);
   return mcryptEncode(sessionSign, pass, 3600 * 24 * 30);
 }
@@ -97,7 +97,7 @@ export async function makeAccessToken(db: D1Database, sessionSign: string): Prom
 /** 001 user/index::accessTokenCheck — 校验 accessToken 是否对应当前会话签名。 */
 export async function checkAccessToken(db: D1Database, token: string, sessionSign: string): Promise<boolean> {
   if (!token || token.length > 500) return false;
-  const systemPassword = (await getSetting(db, "systemPassword")) ?? "";
+  const systemPassword = (await getSetting(db, "systemPassword", true)) ?? "";
   const pass = md5("kodbox_" + systemPassword).substring(0, 15);
   const decoded = mcryptDecode(token, pass);
   return !!decoded && decoded === sessionSign;

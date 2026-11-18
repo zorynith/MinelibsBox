@@ -30,7 +30,7 @@ export async function parseUserViewUrl(db: D1Database, link: string, appHost: st
     if ((base.pathname || "/") !== (u.pathname || "/")) return link;
     const hash = u.searchParams.get("hash");
     if (!hash) return link;
-    const systemPassword = (await getSetting(db, "systemPassword")) || "";
+    const systemPassword = (await getSetting(db, "systemPassword", true)) || "";
     const pathTrue = await mcryptDecode(hash, systemPassword);
     if (!pathTrue) return link;
     const linkPort = u.port && u.port !== "80" ? ":" + u.port : "";

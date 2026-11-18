@@ -750,7 +750,7 @@ shareApi.all("/share/file", async (c) => {
   const params = await reqParams(c);
   const hash = typeof params.hash === "string" ? params.hash : "";
   if (!hash || hash.length > 5000) return c.json({ code: false, data: L.pathNotExists });
-  const pass = (await getSetting(c.env.DB, "systemPassword")) || "";
+  const pass = (await getSetting(c.env.DB, "systemPassword", true)) || "";
   const path = hash ? mcryptDecode(hash, pass) : "";
   if (!path) return c.json({ code: false, data: "common.pathNotExists" });
   const isDownload = String(params.download ?? "") === "1";
@@ -2587,7 +2587,7 @@ export async function shareToMeDispatch(
 
 /** 001 explorer/share::link - 通用加密外链（Mcrypt 编码 path）。 */
 export async function link(env: Env, appHost: string, path: string, downFilename = ""): Promise<string> {
-  const pass = (await getSetting(env.DB, "systemPassword")) || "";
+  const pass = (await getSetting(env.DB, "systemPassword", true)) || "";
   const hash = mcryptEncode(path, pass);
   const name = path.split("/").filter(Boolean).pop() || "";
   const addParam = downFilename
@@ -2598,7 +2598,7 @@ export async function link(env: Env, appHost: string, path: string, downFilename
 
 /** 001 explorer/share::linkFile - 固定哈希（浏览器可缓存）的文件外链。 */
 export async function linkFile(env: Env, appHost: string, file: string, addParam = ""): Promise<string> {
-  const pass = (await getSetting(env.DB, "systemPassword")) || "";
+  const pass = (await getSetting(env.DB, "systemPassword", true)) || "";
   const hash = mcryptEncode(file, pass);
   return appHost + "index.php?explorer/share/file&hash=" + encodeURIComponent(hash) + (addParam ? "&" + addParam : "");
 }

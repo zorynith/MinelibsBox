@@ -33,15 +33,15 @@ const LOCK_KEY = "install_lock";
 
 /** 001 initCheck(): 0=未安装, 1=待重置管理员, 2=已安装 */
 export async function installInitCheck(db: D1Database): Promise<0 | 1 | 2> {
-  const conf = await getSetting(db, DB_CONF_KEY).catch(() => null);
+  const conf = await getSetting(db, DB_CONF_KEY, true).catch(() => null);
   if (!conf) return 0;
-  const lock = await getSetting(db, LOCK_KEY).catch(() => null);
+  const lock = await getSetting(db, LOCK_KEY, true).catch(() => null);
   return lock === "1" ? 2 : 1;
 }
 
 /** 记录安装配置并标记已安装 (等价 001 setUserSetting + touch install.lock) */
 export async function markInstalled(db: D1Database): Promise<void> {
-  const conf = await getSetting(db, DB_CONF_KEY).catch(() => null);
+  const conf = await getSetting(db, DB_CONF_KEY, true).catch(() => null);
   if (!conf) {
     await setSetting(db, DB_CONF_KEY, JSON.stringify({ dbType: "d1", cacheType: "none" })).catch(() => {});
   }
@@ -152,7 +152,7 @@ function envList(lng: (k: string) => string) {
 
 /** 001 defDbConfig(true): 读取已保存的数据库配置 */
 async function defDbConfig(db: D1Database): Promise<Record<string, string>> {
-  const raw = await getSetting(db, DB_CONF_KEY).catch(() => null);
+  const raw = await getSetting(db, DB_CONF_KEY, true).catch(() => null);
   if (!raw) return {};
   try {
     const obj = JSON.parse(raw);

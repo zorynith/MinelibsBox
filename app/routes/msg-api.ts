@@ -57,7 +57,7 @@ function makeSign(post: Record<string, string>, secret: string): Promise<string>
 
 /** 平台 secret: settings.systemSecret; 无 secret 时仅 secret 类型可用 kodid 兜底。 */
 async function apiSecret(c: any, kodid: string, type: string): Promise<{ secret: string; err?: string }> {
-  const secret = (await getSetting(c.env.DB, "systemSecret")) || "";
+  const secret = (await getSetting(c.env.DB, "systemSecret", true)) || "";
   if (secret) return { secret };
   if (type === "secret") return { secret: kodid };
   return { secret: "", err: "Api secret error. 站点未配置 systemSecret" };
@@ -68,7 +68,7 @@ async function apiSecret(c: any, kodid: string, type: string): Promise<{ secret:
  * 站点未配置 systemPassword / kodApiServer 时返回明确错误。
  */
 async function platformRequest(c: any, type: string, payload: Record<string, unknown>): Promise<{ code: boolean; data: string }> {
-  const pass = (await getSetting(c.env.DB, "systemPassword")) || "";
+  const pass = (await getSetting(c.env.DB, "systemPassword", true)) || "";
   if (!pass) return { code: false, data: t("user.sendFail") + ": 平台未配置(systemPassword)" };
   const server = (await getSetting(c.env.DB, "kodApiServer")) || "";
   if (!server) return { code: false, data: t("user.sendFail") + ": 平台未配置(kodApiServer)" };

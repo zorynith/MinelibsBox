@@ -21,7 +21,7 @@ export interface SourceSecretRow {
 
 /** 001 systemOption.sourceSecret == '1' 才启用密级。 */
 export async function sourceSecretEnabled(db: D1Database): Promise<boolean> {
-  const v = await getSetting(db, "sourceSecret");
+  const v = await getSetting(db, "sourceSecret", true);
   return String(v ?? "0") === "1";
 }
 
@@ -29,7 +29,7 @@ export async function sourceSecretEnabled(db: D1Database): Promise<boolean> {
 export async function sourceSecretAllowSet(db: D1Database, user: AuthUser): Promise<boolean> {
   if (!(await sourceSecretEnabled(db))) return false;
   if (isAdminUser(user)) return true;
-  const allow = String((await getSetting(db, "sourceSecretSetUser")) || "")
+  const allow = String((await getSetting(db, "sourceSecretSetUser", true)) || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
