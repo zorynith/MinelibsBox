@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "Transcoding",
   "fileThumb.video.STATUS_LIMIT": "The task in progress exceeds the limit. Please try again later",
   "fileThumb.config.debug": "Debug Mode",
-  "fileThumb.config.debugDesc": "Will write the log. <button class='btn btn-sm btn-default ml-20 view-log'>view log</button>"
+  "fileThumb.config.debugDesc": "Will write the log. <button class='btn btn-sm btn-default ml-20 view-log'>view log</button>",
+  "fileThumb.config.igryConc": "Handling concurrency",
+  "fileThumb.config.igryConcDesc": "Concurrent requests (- currency)",
+  "fileThumb.video.retry": "Re-encoding"
 }

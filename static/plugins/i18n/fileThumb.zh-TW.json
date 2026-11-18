@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "正在轉碼",
   "fileThumb.video.STATUS_LIMIT": "進行中的任務超出限制,請稍後再試",
   "fileThumb.config.debug": "偵錯模式",
-  "fileThumb.config.debugDesc": "產生相關日誌.<button class='btn btn-sm btn-default ml-20 view-log'>查看日誌</button>"
+  "fileThumb.config.debugDesc": "產生相關日誌.<button class='btn btn-sm btn-default ml-20 view-log'>查看日誌</button>",
+  "fileThumb.config.igryConc": "處理併發數",
+  "fileThumb.config.igryConcDesc": "請求併發數（-concurrency）",
+  "fileThumb.video.retry": "重新轉碼"
 }

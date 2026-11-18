@@ -2,7 +2,7 @@
 	"id":"fileThumb",
 	"name":"{{LNG['fileThumb.meta.name']}}",
 	"title":"{{LNG['fileThumb.meta.title']}}",
-	"version":"2.23",
+	"version":"2.27",
 	"category":"file,media",
 	"source":{
 		"icon":"{{pluginHost}}static/icon.png"
@@ -17,7 +17,7 @@
 		"formStyle":{
 			"loadFile":"{{pluginHost}}static/check.js",
 			"tabs":{
-				"{{LNG['admin.setting.base']}}":"pluginAuth,pluginSaveKeepOpen,coverType,imagickBin,ffmpegBin,imgnryDesc,imgnryHost,imgnryMore,imgnryApiKey,imgnryUrlKey,imgnryOpen,imgnryDesc2",
+				"{{LNG['admin.setting.base']}}":"pluginAuth,pluginSaveKeepOpen,coverType,imagickBin,ffmpegBin,imgnryDesc,imgnryHost,imgnryMore,imgnryApiKey,imgnryUrlKey,imgnryConc,imgnryOpen,imgnryDesc2",
 				"{{LNG['fileThumb.video.title']}}":"videoConvertDesc,videoConvert,videoConvertLimit,videoConvertLimitTo,videoConvertTask,videoConvertType,sep003,videoPlayType",
 				"{{LNG['admin.setting.others']}}":",sep001,thumbSizeLimit,fileSort,fileExt,fileThumb,sep002,debug"
 			}
@@ -41,7 +41,7 @@
 			},
 			"switchItem":{
 				"imgick":"imagickBin,ffmpegBin",
-				"imgnry":"imgnryDesc,imgnryHost,imgnryMore,imgnryApiKey,imgnryUrlKey,imgnryOpen,imgnryDesc2"
+				"imgnry":"imgnryDesc,imgnryHost,imgnryMore,imgnryApiKey,imgnryUrlKey,imgnryConc,imgnryOpen,imgnryDesc2"
 			}
 		},
 
@@ -90,7 +90,7 @@
                 }
             },
             "switchItem":{
-                "more":"imgnryApiKey,imgnryUrlKey"
+                "more":"imgnryApiKey,imgnryUrlKey,imgnryConc"
             },
         },
 		"imgnryApiKey":{
@@ -106,6 +106,12 @@
 			"display":"{{LNG['fileThumb.config.igryUrlKey']}}",
 			"desc":"{{LNG['fileThumb.config.igryUrlKeyDesc']}}",
 			"attr":{"placeholder":"{{LNG['fileThumb.config.igryNotMust']}}"}
+		},
+		"imgnryConc":{
+			"type":"input",
+			"value":10,
+			"display":"{{LNG['fileThumb.config.igryConc']}}",
+			"desc":"{{LNG['fileThumb.config.igryConcDesc']}}",
 		},
 		"imgnryDesc2":{
 			"type":"html",

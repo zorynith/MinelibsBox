@@ -2,7 +2,7 @@
 	"id":"DPlayer",
 	"name":"{{LNG['DPlayer.meta.name']}}",
 	"title":"{{LNG['DPlayer.meta.title']}}",
-	"version":"1.43",//23.05.30
+	"version":"1.44",//23.05.30
 	"source":{
 		"icon":"{{pluginHost}}static/images/icon.png",
 	},
@@ -10,8 +10,8 @@
 	"description":"DPlayer mediafile player;",
 	"keywords":"",
 	"auther":{
-		"copyright":"Minelibs.",
-		"homePage":"http://www.Minelibs.com",
+		"copyright":"kodcloud.",
+		"homePage":"http://www.kodcloud.com",
 	},
 	"configItem":{
 		"pluginAuth":{

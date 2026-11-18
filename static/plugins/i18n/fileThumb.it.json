@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "Transcodifica",
   "fileThumb.video.STATUS_LIMIT": "Il numero di attività in corso ha superato il limite. Riprova più tardi.",
   "fileThumb.config.debug": "Modalità di debug",
-  "fileThumb.config.debugDesc": "Genera log pertinenti. <button class='btn btn-sm btn-default ml-20 view-log'>Visualizza i log</button>"
+  "fileThumb.config.debugDesc": "Genera log pertinenti. <button class='btn btn-sm btn-default ml-20 view-log'>Visualizza i log</button>",
+  "fileThumb.config.igryConc": "Trattamento del numero simultaneo",
+  "fileThumb.config.igryConcDesc": "Concurrenza delle richieste (-concurrency)",
+  "fileThumb.video.retry": "Ricodifica"
 }

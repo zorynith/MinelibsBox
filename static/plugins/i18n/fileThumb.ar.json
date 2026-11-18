@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "الترميز",
   "fileThumb.video.STATUS_LIMIT": "تجاوز عدد المهام الجارية الحد الأقصى. يُرجى المحاولة لاحقًا.",
   "fileThumb.config.debug": "وضع التصحيح",
-  "fileThumb.config.debugDesc": "إنشاء سجلات ذات صلة. <button class='btn btn-sm btn-default ml-20 view-log'>عرض السجلات</button>"
+  "fileThumb.config.debugDesc": "إنشاء سجلات ذات صلة. <button class='btn btn-sm btn-default ml-20 view-log'>عرض السجلات</button>",
+  "fileThumb.config.igryConc": "تجهيز عدد المتزامنة",
+  "fileThumb.config.igryConcDesc": "عدد الطلبات المتزامنة",
+  "fileThumb.video.retry": "إعادة الترميز"
 }

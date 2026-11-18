@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "トランスコーディング",
   "fileThumb.video.STATUS_LIMIT": "進行中のタスクの数が制限を超えました。しばらくしてからもう一度お試しください。",
   "fileThumb.config.debug": "デバッグモード",
-  "fileThumb.config.debugDesc": "関連するログを生成します。<button class='btn btn-sm btn-default ml-20 view-log'>ログを表示します。</button>"
+  "fileThumb.config.debugDesc": "関連するログを生成します。<button class='btn btn-sm btn-default ml-20 view-log'>ログを表示します。</button>",
+  "fileThumb.config.igryConc": "同時処理数",
+  "fileThumb.config.igryConcDesc": "要求コンカレント数（-concurrency）",
+  "fileThumb.video.retry": "再エンコード"
 }

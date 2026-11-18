@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "Transkodowanie",
   "fileThumb.video.STATUS_LIMIT": "Liczba bieżących zadań przekroczyła limit. Spróbuj ponownie później.",
   "fileThumb.config.debug": "Tryb debugowania",
-  "fileThumb.config.debugDesc": "Wygeneruj odpowiednie logi. <button class='btn btn-sm btn-default ml-20 view-log'>Wyświetl logi.</button>"
+  "fileThumb.config.debugDesc": "Wygeneruj odpowiednie logi. <button class='btn btn-sm btn-default ml-20 view-log'>Wyświetl logi.</button>",
+  "fileThumb.config.igryConc": "Przetwarzanie liczby równoległych",
+  "fileThumb.config.igryConcDesc": "Liczba jednoczesnych żądań (-concurrency)",
+  "fileThumb.video.retry": "Ponowne kodowanie"
 }

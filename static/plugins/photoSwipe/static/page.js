@@ -56,8 +56,8 @@ define(function(require, exports) {
 			closeOnScroll:false,
 			shareEl: false,
 			showHideOpacity:false,
-			showAnimationDuration: 300,
-			hideAnimationDuration: 500,
+			showAnimationDuration: 350,
+			hideAnimationDuration: 350,
 			fullscreenEl : true,
 			history:false,
 			preload:[1,5],
@@ -70,21 +70,26 @@ define(function(require, exports) {
 				if(!item || !item.$dom || item.$dom.length == 0){//目录切换后没有原图
 					return rectCenter;
 				}
-				var pageYScroll = window.pageYOffset || document.documentElement.scrollTop; 
-				var rect = $(item.$dom).get(0).getBoundingClientRect();
+				var $img = $(item.$dom),img = $img.get(0);
+				var pageYScroll = window.pageYOffset || document.documentElement.scrollTop;
+				var rect = $img.get(0).getBoundingClientRect();
+				
+				rect = $.extend(true,{},rect);
+				var width  = parseInt($img.attr('img-width')  || img.naturalWidth  || $img.width());
+				var height = parseInt($img.attr('img-height') || img.naturalHeight || $img.height());
+				var w = rect.width,h = rect.height,top = rect.top,left = rect.left;
 				
 				// 图片没有完全显示时(相册模式,高宽固定,定宽定高,超出从中间截取)
-				if(rect.width == rect.height){
-					var width  = parseInt(item.$dom.attr('img-width')  || item.$dom.width());
-					var height = parseInt(item.$dom.attr('img-height') || item.$dom.height());
-					var boxSize = rect.width;
-					if(height > width){
-						rect.height = (rect.width * height) / width; //重新计算高度; 保持比例不变;
-						rect.top  = rect.top - (rect.height - boxSize) / 2; //图片取中间后上面偏移;
+				if($img.css('object-fit') == 'cover'){
+					//重新计算高度; 保持比例不变;
+					if((height / width) > (h / w) ){
+						rect.height = (height / width) * w;
+						rect.top    = rect.top - (rect.height - h) / 2;
 					}else{
-						rect.width = (rect.height * width) / height; //重新计算高度; 保持比例不变;
-						rect.left  = rect.left - (rect.width - boxSize) / 2; //图片取中间后左侧偏移;
+						rect.width  = (width / height) * h;
+						rect.left   = rect.left - (rect.width - w) / 2;
 					}
+					// console.log(102,index,item,{w,h,top,left},{width,height},rect);
 				}
 				// 全未获取到情况,从中间打开(隐藏等情况)
 				if(!rect.left && !rect.top && !rect.width && !rect.height){
@@ -139,10 +144,16 @@ define(function(require, exports) {
 		});
 		var imageCount = imageList.items.length;
 		gallery.listen('close', function(){
-			if(imageCount>=3){$('.pswp__item').not('.current').find('img').remove();}
+			var $main = $('.pswp'),fadeTime = options.hideAnimationDuration * 0.6;
+			$main.attr('data-state','is-closing');
+			
+			if(imageCount>=3){
+				$('.pswp__item').not('.current').find('img').remove();
+			}
 			setTimeout(function(){
-				$(gallery.container).find('.pswp__zoom-wrap').fadeOut(200);
-			},300);
+				$main.find('.pswp__zoom-wrap').fadeOut(fadeTime);
+				setTimeout(function(){$main.attr('data-state','');},fadeTime);
+			},options.hideAnimationDuration + 20);
 		});
 		
 		$('.pswp__container').addClass('init-first');
@@ -152,7 +163,13 @@ define(function(require, exports) {
 				var htmlCurrent = $('.pswp .pswp__item.current .pswp__zoom-wrap').html();
 				$(gallery.currItem.container).html(htmlCurrent);
 			}
-		},800);
+		},options.showAnimationDuration + 500);
+		
+		gallery.listen('afterInit',function(){
+			var $wrap = $('.pswp').find('.pswp__zoom-wrap'),fadeTime = options.showAnimationDuration * 0.6;
+			$wrap.css({opacity:0.01}).animate({opacity:1},fadeTime);
+			setTimeout(function(){$wrap.css({opacity:''});},fadeTime);
+		});
 		
 		gallery.init();
 		gallery.listen('bindEvents',imageRotateAuto);
@@ -178,7 +195,7 @@ define(function(require, exports) {
 					gallery.currItem.container = $('.pswp__img--placeholder').parent().get(0);
 				},100);
 				gallery.updateSize(); // 关闭时,没有动画切换回到原图
-			},350);
+			},options.showAnimationDuration + 1);
 		}
 		
 		// 两张图片时,打开最后一个加载完成异常情况处理;
@@ -186,7 +203,7 @@ define(function(require, exports) {
 			setTimeout(function(){
 				var $img = $('.pswp__container .pswp__item:eq(2) .pswp__img:not(.pswp__img--placeholder)');
 				if($img.length){$img.appendTo('.pswp__container .pswp__item:eq(0) .pswp__zoom-wrap');}
-			},500);
+			},options.showAnimationDuration + 1);
 		}
 		
 		// 删除;

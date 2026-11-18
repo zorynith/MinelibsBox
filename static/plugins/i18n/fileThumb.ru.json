@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "Выполняется перекодирование...",
   "fileThumb.video.STATUS_LIMIT": "Превышен лимит одновременных задач. Повторите попытку позже.",
   "fileThumb.config.debug": "Режим отладки",
-  "fileThumb.config.debugDesc": "Включить запись журналов. <button class='btn btn-sm btn-default ml-20 view-log'>Открыть журнал</button>"
+  "fileThumb.config.debugDesc": "Включить запись журналов. <button class='btn btn-sm btn-default ml-20 view-log'>Открыть журнал</button>",
+  "fileThumb.config.igryConc": "Обработка параллельных чисел",
+  "fileThumb.config.igryConcDesc": "Количество параллельных запросов (- concurrency)",
+  "fileThumb.video.retry": "Перекодирование"
 }

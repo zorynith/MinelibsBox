@@ -109,6 +109,9 @@
   -webkit-transition: -webkit-transform 333ms cubic-bezier(0.4, 0, 0.22, 1);
           transition: transform 333ms cubic-bezier(0.4, 0, 0.22, 1); }
 
+.pswp[data-state='is-closing'],
+.pswp[data-state='is-closing'] .pswp__item.current .pswp__zoom-wrap{display:block !important;}
+
 .pswp__bg {
   will-change: opacity;
   /* for open/close transition */

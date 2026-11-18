@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "Transcodificação",
   "fileThumb.video.STATUS_LIMIT": "O número de tarefas em andamento excedeu o limite. Tente novamente mais tarde.",
   "fileThumb.config.debug": "Modo de depuração",
-  "fileThumb.config.debugDesc": "Gere logs relevantes. <button class='btn btn-sm btn-default ml-20 view-log'>Visualize os logs</button>"
+  "fileThumb.config.debugDesc": "Gere logs relevantes. <button class='btn btn-sm btn-default ml-20 view-log'>Visualize os logs</button>",
+  "fileThumb.config.igryConc": "Processar números simultâneos",
+  "fileThumb.config.igryConcDesc": "Concurrência (-concurrency)",
+  "fileThumb.video.retry": "Recodificação"
 }

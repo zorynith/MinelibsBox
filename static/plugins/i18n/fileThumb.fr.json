@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "Transcodage",
   "fileThumb.video.STATUS_LIMIT": "Le nombre de tâches en cours a dépassé la limite. Veuillez réessayer ultérieurement.",
   "fileThumb.config.debug": "Mode débogage",
-  "fileThumb.config.debugDesc": "Générer des journaux pertinents. <button class='btn btn-sm btn-default ml-20 view-log'>Consulter les journaux.</button>"
+  "fileThumb.config.debugDesc": "Générer des journaux pertinents. <button class='btn btn-sm btn-default ml-20 view-log'>Consulter les journaux.</button>",
+  "fileThumb.config.igryConc": "Traiter le nombre de concurrences",
+  "fileThumb.config.igryConcDesc": "Nombre de demandes simultanées (- Concurrency)",
+  "fileThumb.video.retry": "Réencodage"
 }

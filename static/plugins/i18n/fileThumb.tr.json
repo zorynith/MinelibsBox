@@ -52,5 +52,8 @@
   "fileThumb.video.STATUS_RUNNING": "Kod dönüştürme",
   "fileThumb.video.STATUS_LIMIT": "Devam eden görev sayısı sınırı aştı. Lütfen daha sonra tekrar deneyin.",
   "fileThumb.config.debug": "Hata Ayıklama Modu",
-  "fileThumb.config.debugDesc": "İlgili günlükleri oluşturun. <button class='btn btn-sm btn-default ml-20 view-log'>Günlükleri görüntüleyin</button>"
+  "fileThumb.config.debugDesc": "İlgili günlükleri oluşturun. <button class='btn btn-sm btn-default ml-20 view-log'>Günlükleri görüntüleyin</button>",
+  "fileThumb.config.igryConc": "Eşzamanlı sayıları işlemek",
+  "fileThumb.config.igryConcDesc": "Eşzamanlık İsteği (-concurrency)",
+  "fileThumb.video.retry": "Yeniden kodlama"
 }

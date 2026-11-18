@@ -2,7 +2,7 @@
 	"id":"photoSwipe",
 	"name":"{{LNG['photoSwipe.meta.name']}}",
 	"title":"{{LNG['photoSwipe.meta.title']}}",
-	"version":"1.69",
+	"version":"1.70",
 	"source":{
 		"className":"x-item-icon x-gif",
 		"screenshoot":[
@@ -14,8 +14,8 @@
 	"description":"{{LNG['photoSwipe.meta.desc']}}",
 	"keywords":"",
 	"auther":{
-		"copyright":"Minelibs.",
-		"homePage":"http://www.Minelibs.com",
+		"copyright":"kodcloud.",
+		"homePage":"http://www.kodcloud.com",
 	},
 	"configItem":{
 		"pluginAuth":{
