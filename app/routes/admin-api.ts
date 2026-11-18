@@ -1977,8 +1977,7 @@ adminApi.all("/log/typeList", async (c) => {
  * 参数: page, pageNum, type, userID, path, ip, timeFrom, timeTo
  * 返回 {code:true, data:list, info:pageInfo}
  */
-adminApi.all("/log/get", async (c) => {
-  const q = await allParams(c);
+async function auditLogQuery(c: any, q: Record<string, string>) {
   const page = Math.max(1, parseInt(q.page || "1", 10) || 1);
   const pageNum = Math.max(1, parseInt(q.pageNum || "20", 10) || 20);
   const offset = (page - 1) * pageNum;
@@ -1998,8 +1997,8 @@ adminApi.all("/log/get", async (c) => {
   }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
-  const totalRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM audit_logs ${whereSql}`)
-    .bind(...args).first<{ total: number }>();
+  const totalRow: any = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM audit_logs ${whereSql}`)
+    .bind(...args).first();
   const total = totalRow?.total ?? 0;
 
   const rows = await c.env.DB.prepare(
@@ -2037,11 +2036,105 @@ adminApi.all("/log/get", async (c) => {
     };
   });
 
+  return {
+    code: true,
+    data: list,
+    info: { page, pageNum, total, pageTotal: Math.max(1, Math.ceil(total / pageNum)) },
+  };
+}
+
+/** 操作日志列表 - admin/log/get (001 admin/log::get) */
+adminApi.all("/log/get", async (c) => c.json(await auditLogQuery(c, await allParams(c))));
+
+/**
+ * 个人中心-用户文档日志 (001 admin/log::userLog)
+ * 参数: userID, page, pageNum
+ * 返回 {list, pageInfo}, 条目为 {type, createTime, title, address, ...desc}
+ */
+adminApi.all("/log/userLog", async (c) => {
+  const q = await allParams(c);
+  const userID = parseInt(q.userID || "0", 10) || 0;
+  const page = Math.max(1, parseInt(q.page || "1", 10) || 1);
+  const pageNum = Math.max(1, parseInt(q.pageNum || "20", 10) || 20);
+  const offset = (page - 1) * pageNum;
+
+  // 文件操作类型: 001 取 typeListAll 中 file.* + 下载/收藏
+  const fileActions = Object.entries(LOG_ACTION_MAP)
+    .filter(([, m]) => m.type.startsWith("explorer."))
+    .map(([a]) => a);
+  const args: any[] = [userID];
+  let where = "user_id = ?";
+  if (fileActions.length) {
+    where += ` AND action IN (${fileActions.map(() => "?").join(",")})`;
+    args.push(...fileActions);
+  }
+
+  const totalRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM audit_logs WHERE ${where}`)
+    .bind(...args).first<{ total: number }>();
+  const total = totalRow?.total ?? 0;
+  const rows = await c.env.DB.prepare(
+    `SELECT action, path, ip, user_agent, detail, created_at FROM audit_logs WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`
+  ).bind(...args, pageNum, offset).all();
+
+  const list = (rows.results as any[]).map((r) => {
+    const m = LOG_ACTION_MAP[r.action] || { type: r.action, title: r.action };
+    let desc: Record<string, any> = {};
+    try {
+      const parsed = JSON.parse(r.detail || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) desc = parsed;
+    } catch {
+      desc = {};
+    }
+    return {
+      type: m.type,
+      createTime: isoToUnix(r.created_at),
+      title: m.title,
+      address: r.ip || "",
+      ...desc,
+    };
+  });
+
   return c.json({
     code: true,
     data: list,
     info: { page, pageNum, total, pageTotal: Math.max(1, Math.ceil(total / pageNum)) },
   });
+});
+
+/**
+ * 个人中心-用户登录日志 (001 admin/log::userLogLogin)
+ * 参数: type, userID (均必填)
+ */
+adminApi.all("/log/userLogLogin", async (c) => {
+  const q = await allParams(c);
+  const type = (q.type || "").trim();
+  const userID = parseInt(q.userID || "0", 10) || 0;
+  if (!type || !userID) return c.json(fail("common.invalidParam"));
+  return c.json(await auditLogQuery(c, { ...q, userID: String(userID), type }));
+});
+
+/**
+ * 登录日志写入 (001 admin/log::loginLog)
+ * 仅在登录成功(已登录)时写入, 同一次请求内由调用方保证只执行一次。
+ */
+adminApi.all("/log/loginLog", async (c) => {
+  const user = c.get("currentUser");
+  if (!user) return c.json(ok(true));
+  const body = await allParams(c);
+  const ip = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || "";
+  const ua = c.req.header("user-agent") || "";
+  const platform = body.HTTP_X_PLATFORM || c.req.header("HTTP_X_PLATFORM") || "";
+  const isWap = platform ? true : /mobile|android|iphone|ipad|ipod|wap/i.test(ua);
+  await addAuditLog(
+    c.env.DB,
+    "user.index.loginSubmit",
+    user.id,
+    null,
+    ip,
+    ua,
+    JSON.stringify({ is_wap: isWap, ua, ...(platform ? { HTTP_X_PLATFORM: platform } : {}) }),
+  ).catch(() => {});
+  return c.json(ok(true));
 });
 
 // ============ admin/plugin (插件管理) ============

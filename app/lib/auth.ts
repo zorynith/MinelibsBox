@@ -50,6 +50,8 @@ export function getSessionId(c: Context): string | null {
  * Middleware: require authentication
  */
 export async function authRequired(c: AppContext, next: Next) {
+  // apiSignCheck 已按签名注入身份 (001: Session::set('kodUser')), 无需会话
+  if (c.get("currentUser")) return next();
   const sessionId = getSessionId(c);
   if (!sessionId) {
     return c.json({ success: false, code: "NOT_LOGIN", message: "Please login first" }, 401);
@@ -82,6 +84,7 @@ export async function authRequired(c: AppContext, next: Next) {
  * Middleware: optional auth
  */
 export async function authOptional(c: AppContext, next: Next) {
+  if (c.get("currentUser")) return next();
   const sessionId = getSessionId(c);
   if (sessionId) {
     const session = await getSession(c.env.DB, sessionId);

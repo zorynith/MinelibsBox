@@ -14,6 +14,7 @@ import { authOptional, authRequired, getSessionId } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
 import { getUserById, addAuditLog, getSetting, getUserOption, setUserOption } from "../lib/db";
 import { getAppHost } from "../lib/user-system";
+import { apiSignMake } from "../lib/api-sign";
 import { t } from "../lib/i18n";
 import { getUserFileKey, listDirectory, getFileMimeType, keyFromBase } from "../lib/r2";
 import { resolveFileSource, pathSourceID } from "../lib/source";
@@ -1836,7 +1837,8 @@ async function myShareList(env: Env, user: AuthUser, type: string): Promise<Reco
       size: 0,
       isReadable: true,
       isWriteable: true,
-      // 个人空间来源; 部门来源在 001 中带 groupParentLevel (此处无法判定, 置空)
+      // 001 中该字段由 Source 模型按“源是否属于部门空间”填充;
+      // Worker 未实现部门空间存储, 分享源均为个人/IO 源 -> 恒为 null (归入 selfData 分组)
       groupParentLevel: null,
 
       sharePath: `{shareItem:${share.shareID}}` + (isFolder ? "/" : ""),
@@ -2551,18 +2553,13 @@ export async function linkSafe(
   downFilename = ""
 ): Promise<string> {
   if (!user) return link(c.env, getAppHost(c), path, downFilename);
+  if (!path) return "";
   const name = path.split("/").filter(Boolean).pop() || "";
-  const addParam = downFilename
-    ? "&downFilename=" + encodeURIComponent(downFilename)
-    : "&name=/" + encodeURIComponent(name);
-  const token = getSessionId(c) || "";
-  return (
-    getAppHost(c) +
-    "index.php?explorer/index/fileOut&path=" +
-    encodeURIComponent(path) +
-    (token ? "&accessToken=" + encodeURIComponent(token) : "") +
-    addParam
-  );
+  // 001: apiSignMake('explorer/index/fileOut', array('path'=>$path))
+  let url = await apiSignMake(c, "explorer/index/fileOut", { path }, user.id);
+  url += "&name=/" + encodeURIComponent(name);
+  if (downFilename) url += "&downFilename=" + encodeURIComponent(downFilename);
+  return url;
 }
 
 /** 001 explorer/share::linkOut - 生成 fileOut 外链（可选附带 accessToken）。 */

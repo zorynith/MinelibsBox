@@ -28,6 +28,7 @@ import { authRequired, isAdmin } from "../lib/auth";
 import { csrfCheck, readCsrfCookie, setCsrfCookie, clearCsrfCookie, randomCsrfToken } from "../lib/csrf";
 import { t } from "../lib/i18n";
 import { loginIpAllowed } from "../lib/user-check";
+import { apiSignCheck } from "../lib/api-sign";
 import { requestRateLimited } from "../lib/request-rate";
 
 const apiRoutes = new Hono<{ Bindings: Env }>();
@@ -41,6 +42,21 @@ apiRoutes.use("*", async (c, next) => {
   if (!c.res.headers.has("Cache-Control") && ct.includes("application/json")) {
     c.res.headers.set("Cache-Control", "no-store");
   }
+});
+
+// API 签名 - 复刻 001 user/index::apiSignCheck (initSession 阶段, 先于 filters)。
+// 携带 actionToken/actionKey 的请求以签名用户身份执行, 不写 Cookie, 允许跨域。
+apiRoutes.use("*", async (c, next) => {
+  const result = await apiSignCheck(c);
+  if (result.signed) {
+    c.set("apiSignSigned" as never, true as never);
+    c.header("Access-Control-Allow-Origin", "*");
+  }
+  if (result.error !== undefined) {
+    return c.json({ code: false, data: t("explorer.systemError") + ".[apiSignCheck]" });
+  }
+  if (result.user) (c.set as any)("currentUser", result.user);
+  await next();
 });
 
 // CSRF 防护 - 复刻 001 filter/post.class.php::check, 在鉴权之前执行。
