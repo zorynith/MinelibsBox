@@ -388,6 +388,13 @@ async function serveIndex(c: Context<{ Bindings: Env }>) {
        使图片图标与字体图标保持一致（22x22，居中），字体图标类插件不受影响。 */
     .form-box.config-box .form-header .modal-title .path-ico:has(.picture.ico){height:22px}
     .form-box.config-box .form-header .modal-title .path-ico .picture.ico{position:relative;top:6px}
+
+    /* Flash(Ruffle) 播放窗口：flashPlayer 插件以 dialog-simple 弹出，simple 对话框重置了
+       .aui-outer 的 border-radius/overflow（见 style/dist/main.css），可见区域只剩整块黑色画面，
+       四角因此是直角。这里恢复与普通窗口一致的 4px 圆角并裁切内部播放器（canvas/object 自身
+       不会被父容器的圆角裁掉，需要 overflow:hidden），与 movie-player-dialog 的处理方式一致。 */
+    .artDialog.flashPlayer-dialog.dialog-simple .aui-outer{border-radius:4px;overflow:hidden;background:#000}
+    .artDialog.flashPlayer-dialog .aui-content{border-radius:4px;overflow:hidden}
   </style>
 
   <script type="text/javascript">
