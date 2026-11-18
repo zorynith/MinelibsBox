@@ -14,6 +14,8 @@
 const ZH: Record<string, string> = {
   "explorer.success": "操作成功",
   "common.version.authorizeSuccess": "恭喜您，在线升级授权成功！",
+  "user.userEnabled": "账号被禁用或尚未启用！请联系管理员",
+  "user.roleError": "用户角色错误，请联系管理员",
   "explorer.error": "操作失败",
   "explorer.repeatError": "名称重复",
   "explorer.settingSuccess": "修改已生效",
@@ -91,6 +93,8 @@ const ZH: Record<string, string> = {
 const EN: Record<string, string> = {
   "explorer.success": "Success",
   "common.version.authorizeSuccess": "Congratulations, the license has been activated successfully!",
+  "user.userEnabled": "Account disabled or not activated, please contact the administrator",
+  "user.roleError": "Invalid user role, please contact the administrator",
   "explorer.error": "Error",
   "explorer.repeatError": "Name already exists",
   "explorer.settingSuccess": "Saved",

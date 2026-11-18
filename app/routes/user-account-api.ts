@@ -115,19 +115,22 @@ accountApi.post("/view/sendCode", async (c) => {
   const code = randomNumCode(6);
   await storeMsgCode(c, type, code, source, input);
   await checkMsgFreq(c, type, input, source, true);
-  // 尝试真实发送(平台配置后可送达); 失败不阻塞, 本地仍返回 code 保证演示可用
+  // 001 user/bind::sendMsg 语义: 发送失败即返回失败; 验证码绝不能出现在响应里
+  // (否则任意人可用 findpwd 两步直接重置他人密码)
   try {
     const act = source + "_bind";
+    let sent: { code: boolean; data: string };
     if (type === "email") {
       const emailType = (await getSetting(c.env.DB, "emailType")) ?? "0";
-      await sendEmail(c, { type: "email", input, action: act, emailType, language: "zh-CN" });
+      sent = await sendEmail(c, { type: "email", input, action: act, emailType, language: "zh-CN" });
     } else {
-      await sendSms(c, { type: "sms", input, action: act, language: "zh-CN" });
+      sent = await sendSms(c, { type: "sms", input, action: act, language: "zh-CN" });
     }
+    if (!sent || !sent.code) return c.json(fail((sent && sent.data) || "common.error"));
   } catch {
-    /* ignore */
+    return c.json(fail("common.error"));
   }
-  return c.json(ok({ send: true, code }));
+  return c.json(ok({ send: true }));
 });
 
 // uploadBindaryCheck - returns [ok]/[error]
@@ -379,6 +382,8 @@ async function findPasswordHandler(c: any) {
   await c.env.DB.prepare("DELETE FROM verify_code WHERE code_key = ?").bind(`findpwd_${token}`).run();
   const newHash = await hashPassword(plainPassword);
   await userEdit(c.env.DB, resId as number, { password_hash: newHash });
+  // 001 userHash 机制等价实现: 密码变更后强制所有旧会话失效
+  await c.env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(resId).run().catch(() => undefined);
   await addAuditLog(c.env.DB, "user.findPassword", resId as number, null, null, null, "reset password");
   return c.json(ok("explorer.success"));
 }
@@ -588,15 +593,19 @@ accountApi.post("/regist/regist", async (c) => {
   if (dupBind) return c.json(fail("common." + type + "common.error"));
 
   const passwordHash = await hashPassword(plainPassword);
+  // 001 user/regist: 新用户角色取 regist.roleID (未配置时落到默认用户角色 3)
+  const registRoleID = parseInt(String(regist.roleID || ""), 10);
+  const roleID = Number.isFinite(registRoleID) && registRoleID > 0 ? registRoleID : 3;
   const result = await c.env.DB.prepare(
-    `INSERT INTO users (username, password_hash, nickname, email, phone, role, status, size_max)
-     VALUES (?, ?, ?, ?, ?, 'user', ?, ?)`
+    `INSERT INTO users (username, password_hash, nickname, email, phone, role, roleID, status, size_max)
+     VALUES (?, ?, ?, ?, ?, 'user', ?, ?, ?)`
   ).bind(
     name,
     passwordHash,
     nickName || name,
     type === "email" ? input : "",
     type === "phone" ? input : "",
+    roleID,
     regist.checkRegist === "1" ? 0 : 1,
     parseFloat(regist.sizeMax) || 0
   ).run();

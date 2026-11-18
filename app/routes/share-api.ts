@@ -20,7 +20,8 @@ import { getUserFileKey, listDirectory, getFileMimeType, keyFromBase } from "../
 import { resolveFileSource, pathSourceID } from "../lib/source";
 import type { SourceRef } from "../lib/source";
 import { ioClientOf } from "../lib/io";
-import { getGroupAuthValue } from "../lib/source-auth";
+import { getGroupAuthValue, hasAuth, sourceAuthValueOf, AUTH_SHARE } from "../lib/source-auth";
+import { roleAllowsAction } from "../lib/auth-role";
 import { sizeFormat, gbLimit } from "../lib/limit";
 import { md5, mcryptDecode, mcryptEncode } from "../lib/mcrypt";
 import JSZip from "jszip";
@@ -459,6 +460,14 @@ async function initShare(c: AppContext, params: Record<string, any>): Promise<In
 
   const owner = (await getUserById(c.env.DB, share.userID)) as AuthUser | null;
   if (!owner || (owner.status ?? 1) !== 1) return shareError(c, 30100, L.notExist);
+  // 001 share::initShare: 分享者已不具备"分享"角色权限时, 旧外链立即失效
+  if (!(await roleAllowsAction(c.env.DB, owner, "explorer.userShare", "add"))) {
+    return shareError(c, 30100, L.notExist);
+  }
+
+  // 001 share::authCheck: 系统关闭"外链允许编辑"后, 所有编辑类动作一律拒绝
+  (share as unknown as { __allowEditGlobal?: boolean }).__allowEditGlobal =
+    ((await getSetting(c.env.DB, "shareLinkAllowEdit")) ?? "1") !== "0";
 
   const storage = await resolveShareStorage(c.env, owner, share);
   if (!storage) return shareError(c, 30100, L.notExist);
@@ -536,6 +545,11 @@ function authCheck(c: AppContext, share: ShareRow, act: string, params: Record<s
   if (actionUpload.includes(act) && !canEdit) {
     if (!canUpload) return L.noPermissionWriteAll;
   }
+  // 001 authCheck: 系统级 shareLinkAllowEdit=0 时, 外链一律只读 (不看单条分享的 canEditSave)
+  const allowEditGlobal = (share as unknown as { __allowEditGlobal?: boolean }).__allowEditGlobal;
+  if (allowEditGlobal === false && outerAuth !== "write" && actionEdit.includes(act)) {
+    return L.noPermissionWriteAll;
+  }
   if (actionEdit.includes(act) && !actionUpload.includes(act)) {
     if (!canEdit) return L.noPermissionWriteAll;
   }
@@ -561,8 +575,12 @@ async function shareFileOutHandler(c: AppContext, disposition: "inline" | "attac
   const io = storage.source ? ioClientOf(storage.source) : null;
   const key = shareKeyOf(owner, storage.source, fullRel);
 
+  // 001 share::authCheck: 仅完整下载(非 HEAD、非 Range 续传)才计入下载次数,
+  // 否则一次多线程/断点下载就会把"限 N 次"的分享耗尽
   const isDownload = disposition === "attachment" || params.download === "1";
-  if (isDownload) await incNumDownload(c.env.DB, share.shareID);
+  const isPartial = !!c.req.header("range") || !!c.req.header("if-range");
+  const isHead = c.req.method === "HEAD";
+  if (isDownload && !isPartial && !isHead) await incNumDownload(c.env.DB, share.shareID);
 
   const fileName = fullRel.split("/").filter(Boolean).pop() || "file";
   let name = typeof params.name === "string" && params.name ? params.name.replace(/^\/+/, "") : fileName;
@@ -710,6 +728,16 @@ async function resolveShareSourceForUser(env: Env, user: AuthUser, path: string)
 // ============ 路由 ============
 
 const shareApi = new Hono<{ Bindings: Env; Variables: Vars }>();
+
+/** 001 auth.class.php::canCheckRole: 分享管理接口按角色权限点拦截 (外链落地页不拦)。 */
+shareApi.use("/userShare/*", async (c, next) => {
+  const user = c.get("currentUser");
+  if (!user) return next();
+  const act = new URL(c.req.url).pathname.split("/").filter(Boolean).pop() || "";
+  const allowed = await roleAllowsAction(c.env.DB, user, "explorer.userShare", act);
+  if (!allowed) return c.json({ code: false, data: L.noPermission });
+  return next();
+});
 shareApi.use("/share/*", authOptional);
 shareApi.use("/userShare/*", authRequired);
 shareApi.use("/userShareGroup/*", authRequired);
@@ -1144,12 +1172,32 @@ shareApi.all("/share/pathRename", async (c) => {
   const newName = typeof params.newName === "string" ? params.newName : "";
   if (rel === null || !rel || !newName || newName.includes("/")) return c.json({ code: false, data: "参数错误" });
 
+  // 001 explorerIndex::pathAllowCheck: 非法字符
+  const notAllow = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"];
+  const checkedName = [...newName].map((ch) => (notAllow.includes(ch) ? "_" : ch)).join("");
+  if (checkedName !== newName) {
+    return c.json({ code: false, data: t("explorer.charNoSupport") + notAllow.join(",") });
+  }
+
   const isFolder = rel.endsWith("/");
   const realPath = joinShareRealPath(share.sourcePath, rel, isFolder);
   const parent = realPath.substring(0, realPath.lastIndexOf("/") + 1);
   const newPath = parent + newName + (isFolder ? "/" : "");
   const oldKey = shareStorageKey(owner.username, realPath);
   const newKey = getUserFileKey(owner.username, newPath);
+
+  // 001 pathRename: 目标已存在则失败 (避免静默覆盖)
+  if (newKey !== oldKey) {
+    let exists = false;
+    if (isFolder) {
+      const prefix = newKey.endsWith("/") ? newKey : newKey + "/";
+      const listed = await c.env.FILES.list({ prefix, limit: 1 });
+      exists = listed.objects.length > 0 || (listed.delimitedPrefixes || []).length > 0;
+    } else {
+      exists = !!(await c.env.FILES.head(newKey).catch(() => null));
+    }
+    if (exists) return c.json({ code: false, data: "explorer.pathExists" });
+  }
 
   if (isFolder) {
     const prefix = oldKey.endsWith("/") ? oldKey : oldKey + "/";
@@ -1174,7 +1222,7 @@ shareApi.all("/share/pathRename", async (c) => {
       await c.env.FILES.delete(oldKey);
     }
   }
-  return c.json({ code: 1, data: "ok", info: shareLinkRoot(share.shareHash) + rel });
+  return c.json({ code: 1, data: "ok", info: shareLinkRoot(share.shareHash) + (newPath.startsWith("/") ? newPath.slice(1) : newPath) });
 });
 
 shareApi.all("/share/pathDelete", async (c) => {
@@ -1531,6 +1579,16 @@ shareApi.all("/userShare/add", async (c) => {
   if (!srcRes.ok) return c.json({ code: false, data: L.pathNotExists });
   const src = srcRes.source;
   const relPath = srcRes.relPath;
+
+  // 001 explorer/auth.class.php: 创建分享需角色权限点(explorer.share/shareLink) + 文档 share 位
+  if (!(await roleAllowsAction(c.env.DB, user as AuthUser, "explorer.userShare", "add"))) {
+    return c.json({ code: false, data: L.noPermission });
+  }
+  const shareAuthValue = await sourceAuthValueOf(c.env, user as AuthUser, src, pathSourceID(path), relPath);
+  if (!hasAuth(shareAuthValue, AUTH_SHARE)) {
+    return c.json({ code: false, data: L.noPermission });
+  }
+
   const srcIsFolder = relPath.endsWith("/");
   const existKey = keyFromBase(src.baseKey, relPath);
   const srcIo = src.type === "io" ? ioClientOf(src) : null;

@@ -4,7 +4,7 @@
  */
 import { Hono } from "hono";
 import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions, addAuditLog, parseSettingValue } from "../lib/db";
-import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, authRequired } from "../lib/auth";
+import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, authRequired, sessionTtlHours } from "../lib/auth";
 import { parseKodPassword } from "../lib/mcrypt";
 import { DEV_KOD, devLicenseHashes } from "../lib/license";
 import { t } from "../lib/i18n";
@@ -13,7 +13,7 @@ import { renderPluginsJs, mergePluginLang } from "../lib/plugins";
 import { taskResultGet } from "../lib/task-result-cache";
 import { accountApi } from "./user-account-api";
 import { taskListData } from "./admin-task-api";
-import { getAppHost, getStaticHost } from "../lib/user-system";
+import { getAppHost, getStaticHost, checkImgCode } from "../lib/user-system";
 import { clientIp, loginLockCheck, userLoginCheck, platformJsonOf } from "../lib/user-check";
 import { loginStateCheck } from "../lib/login-state";
 
@@ -67,10 +67,21 @@ userApi.post("/index/loginSubmit", async (c) => {
   const username = body.name || body.username || "";
   const password = body.password || "";
   const salt = body.salt || "";
-  const remember = body.remember === "1" || body.remember === "true";
+  // 前端登录表单字段名为 rememberPassword (001 同), 老客户端可能传 remember
+  const remember =
+    body.rememberPassword === "1" ||
+    body.rememberPassword === "true" ||
+    body.remember === "1" ||
+    body.remember === "true";
 
   if (!username || !password) {
     return c.json({ code: false, data: "用户名或密码错误!" });
+  }
+
+  // 001 helper::need_check_code: 系统开启 needCheckCode 时登录必须校验图形验证码
+  if (String((await getSetting(c.env.DB, "needCheckCode")) ?? "0") === "1") {
+    const cap = await checkImgCode(c as any, body.checkCode || "");
+    if (!cap.ok) return c.json({ code: false, data: cap.msg });
   }
 
   const plainPassword = parseKodPassword(password, salt);
@@ -81,6 +92,11 @@ userApi.post("/index/loginSubmit", async (c) => {
   const user = await getUserByUsername(c.env.DB, username);
   if (!user) {
     return c.json({ code: false, data: "用户名或密码错误!" });
+  }
+
+  // 001 userDataInit: status=0 (禁用/未启用) 不允许登录
+  if (Number(user.status ?? 1) === 0) {
+    return c.json({ code: false, data: t("user.userEnabled") });
   }
 
   const valid = await verifyPassword(plainPassword, user.password_hash as string);
@@ -99,8 +115,10 @@ userApi.post("/index/loginSubmit", async (c) => {
     return c.json({ code: false, data: loginError });
   }
 
-  const maxAge = remember ? 30 * 86400 : 86400;
-  const sessionId = await createSession(c.env.DB, user.id as number, remember ? 720 : 24);
+  // 001 SystemOption sessionTime: 普通会话按配置时长(默认 4h, 滑动续期), 勾选"保持登录"30 天
+  const ttlHours = await sessionTtlHours(c.env.DB);
+  const maxAge = remember ? 30 * 86400 : ttlHours * 3600;
+  const sessionId = await createSession(c.env.DB, user.id as number, remember ? 720 : ttlHours);
   // filter/userLoginState::checkLimit - 同账号并发登录限制 + 记录登录设备
   await loginStateCheck(c.env.DB, Number(user.id), sessionId, c.req.raw);
   setSessionCookie(c, sessionId, maxAge);
@@ -126,7 +144,7 @@ userApi.post("/index/loginSubmit", async (c) => {
 
   // Set accessToken cookie too (003 SPA checks this).
   // Must append, otherwise it overwrites the kod_session Set-Cookie above.
-  c.header("Set-Cookie", `accessToken=${sessionId}; Path=/; Max-Age=${maxAge}; SameSite=Lax`, { append: true });
+  c.header("Set-Cookie", `accessToken=${sessionId}; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax`, { append: true });
 
   // 登录日志 (001 admin/log::loginLog → model->addLog('user.index.loginSubmit', ...))
   const ip = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || "";
@@ -704,6 +722,46 @@ userApi.get("/view/options", async (c) => {
   // kodApiServer 等平台级配置在 system.settings 层, 同样允许后台覆盖(壁纸/插件/邮件等依赖)
   const sysSettings = (options as any).system.settings;
   if (settingsMap.kodApiServer !== undefined) sysSettings.kodApiServer = settingsMap.kodApiServer;
+
+  // 001 user/index::index: 把后台的传输配置回填到 client 实际读取的 system.settings.upload
+  // (此前这些值只进了 system.options, 前端读 settings.upload.* 永远是硬编码, 后台开关全部失效)
+  {
+    const up = sysSettings.upload;
+    const num = (k: string) => {
+      const n = parseInt(String(settingsMap[k] ?? ""), 10);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    };
+    const str = (k: string) => {
+      const v = settingsMap[k];
+      return typeof v === "string" ? v : null;
+    };
+    const chunkSize = num("chunkSize");
+    if (chunkSize && chunkSize > 0) up.chunkSize = chunkSize;
+    const threads = num("threads");
+    if (threads && threads > 0) up.threads = threads;
+    const chunkRetry = num("chunkRetry");
+    if (chunkRetry !== null) up.chunkRetry = chunkRetry;
+    const ignoreName = str("ignoreName");
+    if (ignoreName !== null) up.ignoreName = ignoreName;
+    const ignoreExt = str("ignoreExt");
+    if (ignoreExt !== null) up.ignoreExt = ignoreExt;
+    const allowExt = str("allowExt");
+    if (allowExt !== null) up.allowExt = allowExt;
+    const downloadSpeed = num("downloadSpeed");
+    if (downloadSpeed !== null) up.downloadSpeed = downloadSpeed;
+    const ignoreFileSize = num("ignoreFileSize");
+    if (ignoreFileSize !== null) up.ignoreFileSize = ignoreFileSize;
+    const httpSendFile = settingsMap.httpSendFile;
+    if (httpSendFile !== undefined) up.httpSendFile = String(httpSendFile) === "1" || httpSendFile === true;
+    const fileHistoryMax = num("fileHistoryMax");
+    if (fileHistoryMax !== null) sysSettings.fileHistoryMax = fileHistoryMax;
+    // 登录/注册相关: allowPhone / loginWith 由 regist 配置决定 (001 config.setting)
+    const loginConfig = (options as any).loginConfig;
+    if (loginConfig) {
+      const allowPhone = settingsMap["regist.allowPhone"] ?? settingsMap.allowPhone;
+      if (allowPhone !== undefined) loginConfig.allowPhone = String(allowPhone) === "1" || allowPhone === true ? "1" : "0";
+    }
+  }
 
   // options?full=1 also includes the complete language pack (mirrors 001 user/view/options)
   const full = c.req.query("full") === "1";

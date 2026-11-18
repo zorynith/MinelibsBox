@@ -19,7 +19,7 @@ import { hashPassword, verifyPassword } from "../lib/auth";
 import { keyFromBase, listDirectory, listAllFiles, deleteDirectory, getFileMimeType, cleanupStaleUploadTmp } from "../lib/r2";
 import { resolveFileSource, userSource, toRealPath, groupChainMeta, pathSourceID } from "../lib/source";
 import type { SourceRef } from "../lib/source";
-import { getGroupAuthValue, getPersonalAuthValue, hasAuth, AUTH_SHOW, AUTH_VIEW, AUTH_DOWNLOAD, AUTH_UPLOAD, AUTH_EDIT, AUTH_REMOVE, AUTH_SHARE, AUTH_ROOT } from "../lib/source-auth";
+import { getGroupAuthValue, getPersonalAuthValue, hasAuth, sourceAuthValueOf, AUTH_SHOW, AUTH_VIEW, AUTH_DOWNLOAD, AUTH_UPLOAD, AUTH_EDIT, AUTH_REMOVE, AUTH_SHARE, AUTH_ROOT } from "../lib/source-auth";
 import { sizeFormat, gbLimit } from "../lib/limit";
 import { addAuditLog, getFavorites, addFavorite, removeFavoriteByName, renameFavorite, favMoveTop, favMoveBottom, favResetSort, getUserOption, setUserOption, deleteUserOption, getUserTags, addTag, editTag, removeTag, tagMoveTop, tagMoveBottom, tagResetSort, getTagSources, tagAddSources, tagRemoveSources, getSetting, getLightApps, addLightApp, updateLightApp, removeLightApp, getDefaultIoSource, getIoSourceById, getIoSourceList, getPluginMeta, setVerifyCode, getVerifyCode, deleteVerifyCode, getSourceMeta, setSourceMeta, setSourceMetaBulk } from "../lib/db";
 import type { LightAppItem } from "../lib/db";
@@ -34,6 +34,7 @@ import { getStaticHost, getAppHost } from "../lib/user-system";
 import { applyPathInfoCover, applyPathInfoCoverBatch } from "../lib/user-view";
 import { applySourceSecret, applySourceSecretBatch, applySourceSecretItem } from "../lib/source-secret";
 import { applyShareInfoBatch, applyHistoryCountBatch } from "../lib/list-extra";
+import { isAdministrator, hasRolePermission, roleAllowsAction } from "../lib/auth-role";
 import { taskResultSet } from "../lib/task-result-cache";
 import { listViewSave, listViewApply } from "../lib/list-view";
 import { mcryptEncode, mcryptDecode } from "../lib/mcrypt";
@@ -47,6 +48,22 @@ export { nowSec, toUnix };
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const explorerApi = new Hono<{ Bindings: Env; Variables: Vars }>();
+
+/**
+ * 001 explorer/auth.class.php::autoCheck → Action('user.authRole')->canCheckRole($action):
+ * 角色权限点拦截。未登记在 AUTH_ROLE_ACTION 的动作不拦; 管理员直接放行。
+ */
+explorerApi.use("*", async (c, next) => {
+  const user = c.get("currentUser");
+  if (!user) return next();
+  const segs = new URL(c.req.url).pathname.split("/").filter(Boolean);
+  const act = segs[segs.length - 1] || "";
+  const st = segs[segs.length - 2] || "";
+  if (!act || !st) return next();
+  const allowed = await roleAllowsAction(c.env.DB, user, `explorer.${st}`, act);
+  if (!allowed) return c.json({ code: false, data: t("explorer.noPermissionAction") });
+  return next();
+});
 
 // All explorer routes require auth
 explorerApi.use("*", authRequired);
@@ -579,37 +596,8 @@ async function groupChain(env: Env, groupID: number): Promise<{ id: number; name
 
 // ============ 部门空间权限检测 (对齐 001 SourceAuth / auth.class.php autoCheck) ============
 
-/** 用户在指定 source 上的权限位掩码。个人空间=全权限; 部门空间=按 auths.auth 位掩码。 */
-async function sourceAuthValue(env: Env, user: Vars["currentUser"], source: SourceRef, sourceID?: number): Promise<number> {
-  if (source.type === "user") return getPersonalAuthValue();
-  // 外部存储挂载: 对所有登录用户可读写
-  if (source.type === "io") return getPersonalAuthValue();
-  // 私密保险箱: 本人全权限
-  if (source.type === "safe") return getPersonalAuthValue();
-  // 部门空间: 先查文档单独权限覆盖(001 SourceAuth), 再回退部门默认权限
-  if (sourceID) {
-    const override = await getUserSourceAuth(env, user, sourceID);
-    if (override !== null) return override;
-  }
-  return getGroupAuthValue(env, user, source.targetID);
-}
-
-/** 查询文档(sourceID)对当前用户(或用户所在部门)的单独权限覆盖; 无覆盖返回 null。 */
-async function getUserSourceAuth(env: Env, user: Vars["currentUser"], sourceID: number): Promise<number | null> {
-  const rows = await env.DB.prepare(
-    "SELECT authID, authDefine FROM source_auth WHERE sourceID = ? AND (targetType = 1 AND targetID = ? OR targetType = 2)"
-  ).bind(String(sourceID), user.id).all<{ authID: number; authDefine: number }>().catch(() => null);
-  if (!rows || rows.results.length === 0) return null;
-  let result = 0;
-  for (const row of rows.results) {
-    if (row.authID) {
-      const a = await env.DB.prepare("SELECT auth FROM auths WHERE id = ?").bind(row.authID).first<{ auth: number }>().catch(() => null);
-      if (a) result |= Number(a.auth) || 0;
-    }
-    if (row.authDefine) result |= Number(row.authDefine) || 0;
-  }
-  return result;
-}
+/** 权限位计算已抽到 lib/source-auth (share-api 也需要同一套语义) */
+const sourceAuthValue = sourceAuthValueOf;
 
 /** 检测操作是否被授权; 否则返回 {ok:false,error}, 可附带 msg 覆盖默认错误提示。 */
 async function requireSourceAuth(
@@ -619,8 +607,9 @@ async function requireSourceAuth(
   bit: number,
   error = "common.noPermission",
   sourceID?: number,
+  relPath?: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const authValue = await sourceAuthValue(env, user, source, sourceID);
+  const authValue = await sourceAuthValue(env, user, source, sourceID, relPath);
   if (!hasAuth(authValue, bit)) return { ok: false, error };
   return { ok: true };
 }
@@ -1994,6 +1983,24 @@ explorerApi.all("/list/path", async (c) => {
     }
 
     // 001 list::parseData 附加项: 分享角标(sourceInfo.shareInfo) 与 历史版本数(historyCount)
+    // 001 list::parseData: 按系统设置 pathHidden 隐藏文件 (默认 Thumb.db,.DS_Store,.git,...)
+    {
+      const hiddenPatterns = String((await getSetting(c.env.DB, "pathHidden")) || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (hiddenPatterns.length > 0) {
+        const isHidden = (name: string) =>
+          hiddenPatterns.some((p) => (p.startsWith("*") ? name.endsWith(p.slice(1)) : name === p));
+        for (let i = folderList.length - 1; i >= 0; i--) {
+          if (isHidden(String((folderList[i] as any)?.name || ""))) folderList.splice(i, 1);
+        }
+        for (let i = fileList.length - 1; i >= 0; i--) {
+          if (isHidden(String((fileList[i] as any)?.name || ""))) fileList.splice(i, 1);
+        }
+      }
+    }
+
     const allItems = [...folderList, ...fileList] as Record<string, any>[];
     await applyShareInfoBatch(c.env.DB, user.id, allItems);
     await applyHistoryCountBatch(c.env.DB, allItems);
@@ -2257,7 +2264,7 @@ explorerApi.all("/index/pathInfo", async (c) => {
       if (rootDisabledActions(src.source, src.relPath, "pathInfo")) {
         continue;
       }
-      const infoAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+      const infoAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, undefined, undefined, src.relPath);
       if (!infoAuth.ok) continue;
       result.push({
         name,
@@ -2283,7 +2290,7 @@ explorerApi.all("/index/pathInfo", async (c) => {
     } else {
       const src = await resolveFileSource(c.env, user, path);
       if (!src.ok) continue;
-      const infoAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+      const infoAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, undefined, undefined, src.relPath);
       if (!infoAuth.ok) continue;
       const key = keyFromBase(src.source.baseKey, src.relPath);
       const io = externalIoOf(src.source);
@@ -2591,7 +2598,7 @@ explorerApi.all("/index/mkdir", async (c) => {
   const fullPath = normDirPath(src.relPath);
 
   // 001 auth: 新建文件夹需 edit 权限
-  const mkAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  const mkAuth = await requireSourceAuth(c.env, user, src.source, AUTH_UPLOAD, undefined, undefined, src.relPath);
   if (!mkAuth.ok) return c.json({ code: false, data: mkAuth.error });
 
   try {
@@ -2623,7 +2630,7 @@ explorerApi.all("/index/mkfile", async (c) => {
   const fullPath = src.relPath;
 
   // 001 auth: 新建文件需 edit 权限
-  const mkAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  const mkAuth = await requireSourceAuth(c.env, user, src.source, AUTH_UPLOAD, undefined, undefined, src.relPath);
   if (!mkAuth.ok) return c.json({ code: false, data: mkAuth.error });
 
   try {
@@ -2661,6 +2668,14 @@ explorerApi.all("/index/pathRename", async (c) => {
   if (!path || !newName) return emit(false, "common.invalidParam");
   if (newName.includes("/")) return emit(false, "common.invalidParam");
 
+  // 001 explorerIndex::pathAllowCheck: 非法字符 + 名称长度上限
+  const nameError = pathAllowCheckName(newName);
+  if (nameError) return emit(false, nameError);
+  const nameMaxLength = parseInt(String((await getSetting(c.env.DB, "fileNameLengthMax")) ?? "0"), 10);
+  if (nameMaxLength > 0 && [...newName].length > nameMaxLength) {
+    return emit(false, t("common.lengthLimit") + ` (max=${nameMaxLength})`);
+  }
+
   const src = await resolveFileSource(c.env, user, path);
   if (!src.ok) return emit(false, src.error);
   const baseKey = src.source.baseKey;
@@ -2674,13 +2689,33 @@ explorerApi.all("/index/pathRename", async (c) => {
     return emit(false, "explorer.pathNotSupport");
   }
   // 001 auth: 重命名需 edit 权限
-  const renameAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  const renameAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, undefined, undefined, src.relPath);
   if (!renameAuth.ok) return emit(false, renameAuth.error);
 
   try {
     const oldKey = keyFromBase(baseKey, realPath);
     const newKey = keyFromBase(baseKey, newPath);
     const io = externalIoOf(src.source);
+
+    // 001 pathRename: 目标已存在则直接失败 (避免静默覆盖同名文件)
+    if (newKey !== oldKey) {
+      const destPrefix = newKey.endsWith("/") ? newKey : newKey + "/";
+      let exists = false;
+      if (isFolder) {
+        if (io) {
+          const listed = await io.list(destPrefix).catch(() => null);
+          exists = !!listed && (listed.folders.length > 0 || listed.files.length > 0);
+        } else {
+          const listed = await c.env.FILES.list({ prefix: destPrefix, limit: 1 });
+          exists = listed.objects.length > 0 || (listed.delimitedPrefixes || []).length > 0;
+        }
+      } else if (io) {
+        exists = !!(await io.head(newKey).catch(() => null));
+      } else {
+        exists = !!(await c.env.FILES.head(newKey).catch(() => null));
+      }
+      if (exists) return emit(false, "explorer.pathExists");
+    }
 
     if (io) {
       // 外部存储: io copy + delete (文件夹遍历前缀逐个迁移)
@@ -2768,7 +2803,7 @@ explorerApi.all("/index/pathDelete", async (c) => {
         return emit(false, "explorer.pathNotSupport");
       }
       // 001 auth: 删除需 remove 权限
-      const delAuth = await requireSourceAuth(c.env, user, src.source, AUTH_REMOVE);
+      const delAuth = await requireSourceAuth(c.env, user, src.source, AUTH_REMOVE, undefined, undefined, src.relPath);
       if (!delAuth.ok) return emit(false, delAuth.error);
 
       // 回收站内删除 / 硬删 / 外链存储: 直接删除
@@ -2871,7 +2906,7 @@ explorerApi.all("/index/recycleRestore", async (c) => {
       const osrc = await resolveFileSource(c.env, user, originalVPath);
       if (!rsrc.ok || !osrc.ok) continue;
       // 001 auth: 还原目标需 upload 权限
-      const tarAuth = await requireSourceAuth(c.env, user, osrc.source, AUTH_UPLOAD);
+      const tarAuth = await requireSourceAuth(c.env, user, osrc.source, AUTH_EDIT, undefined, undefined, osrc.relPath);
       if (!tarAuth.ok) return emit(false, tarAuth.error);
       // 原位置已存在同名时自动重命名
       const moved = await movePathSafe(c.env.FILES, rsrc.source.baseKey, rsrc.relPath, osrc.source.baseKey, relDirOf(osrc.relPath));
@@ -3041,7 +3076,7 @@ explorerApi.all("/index/pathPast", async (c) => {
   if (!targetSrc.ok) return emit(false, targetSrc.error);
   const target = normDirPath(targetSrc.relPath);
   // 001 auth: 粘贴目标需 upload 权限
-  const targetAuth = await requireSourceAuth(c.env, user, targetSrc.source, AUTH_UPLOAD);
+  const targetAuth = await requireSourceAuth(c.env, user, targetSrc.source, AUTH_EDIT, undefined, undefined, targetSrc.relPath);
   if (!targetAuth.ok) return emit(false, targetAuth.error);
   const raw = await getUserOption(c.env.DB, user.id, "pathCopy", "clipboard");
   const type = await getUserOption(c.env.DB, user.id, "pathCopyType", "clipboard");
@@ -3052,7 +3087,7 @@ explorerApi.all("/index/pathPast", async (c) => {
     if (rootDisabledActions(src.source, src.relPath, type === "cut" ? "pathCute" : "pathCopy")) {
       return emit(false, "explorer.pathNotSupport");
     }
-    const srcAuth = await requireSourceAuth(c.env, user, src.source, type === "cut" ? AUTH_REMOVE : AUTH_DOWNLOAD);
+    const srcAuth = await requireSourceAuth(c.env, user, src.source, type === "cut" ? AUTH_REMOVE : AUTH_DOWNLOAD, undefined, undefined, src.relPath);
     if (!srcAuth.ok) return emit(false, srcAuth.error);
     if (type === "cut") await moveRelCross(c, src.source, src.relPath, targetSrc.source, target);
     else await copyRelCross(c, src.source, src.relPath, targetSrc.source, target);
@@ -3091,7 +3126,7 @@ explorerApi.all("/index/pathCopyTo", async (c) => {
   if (!targetSrc.ok) return emit(false, targetSrc.error);
   const target = normDirPath(targetSrc.relPath);
   // 001 auth: 复制到目标需目标空间 upload 权限
-  const targetAuth = await requireSourceAuth(c.env, user, targetSrc.source, AUTH_UPLOAD);
+  const targetAuth = await requireSourceAuth(c.env, user, targetSrc.source, AUTH_EDIT, undefined, undefined, targetSrc.relPath);
   if (!targetAuth.ok) return emit(false, targetAuth.error);
   for (const it of items) {
     const src = await resolveFileSource(c.env, user, it.path);
@@ -3100,7 +3135,7 @@ explorerApi.all("/index/pathCopyTo", async (c) => {
       return emit(false, "explorer.pathNotSupport");
     }
     // 001 auth: 复制来源需 download 权限
-    const srcAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD);
+    const srcAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD, undefined, undefined, src.relPath);
     if (!srcAuth.ok) return emit(false, srcAuth.error);
     await copyRelCross(c, src.source, src.relPath, targetSrc.source, target);
     invalidateSpaceUsageByBase(src.source.baseKey);
@@ -3124,7 +3159,7 @@ explorerApi.all("/index/pathCuteTo", async (c) => {
   if (!targetSrc.ok) return emit(false, targetSrc.error);
   const target = normDirPath(targetSrc.relPath);
   // 001 auth: 移动目标需目标空间 upload 权限
-  const targetAuth = await requireSourceAuth(c.env, user, targetSrc.source, AUTH_UPLOAD);
+  const targetAuth = await requireSourceAuth(c.env, user, targetSrc.source, AUTH_EDIT, undefined, undefined, targetSrc.relPath);
   if (!targetAuth.ok) return emit(false, targetAuth.error);
   for (const it of items) {
     const src = await resolveFileSource(c.env, user, it.path);
@@ -3133,7 +3168,7 @@ explorerApi.all("/index/pathCuteTo", async (c) => {
       return emit(false, "explorer.pathNotSupport");
     }
     // 001 auth: 移动来源需 remove 权限
-    const srcAuth = await requireSourceAuth(c.env, user, src.source, AUTH_REMOVE);
+    const srcAuth = await requireSourceAuth(c.env, user, src.source, AUTH_REMOVE, undefined, undefined, src.relPath);
     if (!srcAuth.ok) return emit(false, srcAuth.error);
     await moveRelCross(c, src.source, src.relPath, targetSrc.source, target);
     invalidateSpaceUsageByBase(src.source.baseKey);
@@ -3149,9 +3184,12 @@ function fileStreamResponse(c: AppContext, obj: any, name: string, disposition: 
   headers.set("Content-Type", getFileMimeType(name));
   headers.set("Content-Disposition", `${disposition}; filename="${encodeURIComponent(name)}"`);
   obj.writeHttpMetadata(headers);
+  // 001 index::fileDownload: 声明支持分段, 浏览器才能拖动视频进度 / 断点续传
+  headers.set("Accept-Ranges", "bytes");
+  if (typeof obj.size === "number") headers.set("Content-Length", String(obj.size));
   if (noStore) headers.set("Cache-Control", "no-store");
   else if (disposition === "inline") headers.set("Cache-Control", "public, max-age=3600");
-  return new Response(obj.body, { headers });
+  return new Response(c.req.method === "HEAD" ? null : obj.body, { headers });
 }
 
 export async function fileOutHandler(
@@ -3201,14 +3239,48 @@ export async function fileOutHandler(
   const passInfo = await checkAllowPassword(c.env, user, src.source, parentVirtualDir(path), passInput);
   if (passInfo) return c.json({ code: false, data: "explorer.folderPass.tips" });
   // 001 auth: 下载/预览需 download 权限 (含文档单独权限覆盖)
-  const dlAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD, "common.noPermission", fileSourceID(path));
+  const dlAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD, "common.noPermission", fileSourceID(path), src.relPath);
   if (!dlAuth.ok) return c.json({ code: false, data: dlAuth.error });
   const key = keyFromBase(src.source.baseKey, src.relPath);
-  let obj: any = null;
   const io = ioClientOf(src.source);
+  const fileName = overrides?.name || ((typeof params.name === "string" && params.name) ? params.name : path.split("/").filter(Boolean).pop() || "file");
+  const noStore = /(^|\/)\.system\/avatar\//.test(src.relPath);
+
+  // 001 index::fileDownload: HTTP Range 支持 (视频拖动进度 / 断点续传 / 下载器分段)
+  const rangeHeader = (c.req.header("range") || "").trim();
+  const rangeMatch = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
+  if (rangeMatch && (rangeMatch[1] || rangeMatch[2])) {
+    const head = io ? await io.head(key).catch(() => null) : await c.env.FILES.head(key).catch(() => null);
+    const total = head && typeof head.size === "number" ? head.size : null;
+    if (total !== null) {
+      let start = rangeMatch[1] ? parseInt(rangeMatch[1], 10) : 0;
+      let end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : total - 1;
+      if (!rangeMatch[1]) {
+        // bytes=-N: 末尾 N 字节
+        start = Math.max(0, total - (rangeMatch[2] ? parseInt(rangeMatch[2], 10) : 0));
+        end = total - 1;
+      }
+      if (start > end || start >= total) {
+        return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${total}` } });
+      }
+      end = Math.min(end, total - 1);
+      const part = await readObjectRangeWithTotal(c, src.source, src.relPath, start, end);
+      if (!part.bytes) return c.json({ code: false, data: "Not found" });
+      const headers = new Headers();
+      headers.set("Content-Type", getFileMimeType(fileName));
+      headers.set("Content-Disposition", `${disposition}; filename="${encodeURIComponent(fileName)}"`);
+      headers.set("Accept-Ranges", "bytes");
+      headers.set("Content-Range", `bytes ${start}-${end}/${total}`);
+      headers.set("Content-Length", String(part.bytes.byteLength));
+      if (disposition === "inline") headers.set("Cache-Control", "public, max-age=3600");
+      return new Response(new Blob([part.bytes as BlobPart]), { status: 206, headers });
+    }
+  }
+
+  let obj: any = null;
   if (io) {
     const g = await io.get(key).catch(() => null);
-    if (g) obj = { body: g.body, writeHttpMetadata(_h: Headers) {} };
+    if (g) obj = { body: g.body, size: g.totalSize, writeHttpMetadata(_h: Headers) {} };
   } else {
     obj = await c.env.FILES.get(key).catch(() => null);
   }
@@ -3217,13 +3289,11 @@ export async function fileOutHandler(
   // 001 fileOutUpdate -> updateLastOpen: 记录最近打开时间
   if (user) await updateLastOpen(c.env.DB, path, user.id).catch(() => {});
 
-  const name = overrides?.name || ((typeof params.name === "string" && params.name) ? params.name : path.split("/").filter(Boolean).pop() || "file");
   if (disposition === "attachment" && user) {
     await addAuditLog(c.env.DB, "download", user.id, path, null, null, null);
   }
   // 头像等用户资料图不缓存, 保证重新上传后立即刷新(同一 URL 会命中旧缓存)
-  const noStore = /(^|\/)\.system\/avatar\//.test(src.relPath);
-  return fileStreamResponse(c, obj, name, disposition, noStore);
+  return fileStreamResponse(c, obj, fileName, disposition, noStore);
 }
 
 explorerApi.all("/index/fileDownload", (c) => fileOutHandler(c, "attachment"));
@@ -3259,7 +3329,7 @@ export { safeZipEntryName, zipDecodeFileName, parseZipInnerPath };
 async function readZipInnerEntry(c: AppContext, user: any, zipPath: string, indexArray: number[]): Promise<{ name: string; content: ArrayBuffer } | null> {
   const src = await resolveFileSource(c.env, user, zipPath);
   if (!src.ok) return null;
-  const zAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+  const zAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, undefined, undefined, src.relPath);
   if (!zAuth.ok) return null;
   const bytes = await readObjectBytes(c, src.source, src.relPath);
   if (!bytes) return null;
@@ -3307,7 +3377,7 @@ async function zipAddItem(c: AppContext, user: Vars["currentUser"], ctx: ZipCont
     ctx.error = src.error;
     return;
   }
-  const dlAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD);
+  const dlAuth = await requireSourceAuth(c.env, user, src.source, AUTH_DOWNLOAD, undefined, undefined, src.relPath);
   if (!dlAuth.ok) {
     ctx.error = dlAuth.error;
     return;
@@ -3409,8 +3479,10 @@ explorerApi.all("/index/zip", async (c) => {
   // filter/limit::checkZip - 压缩文件大小限制在 zipAddItem 收集时增量校验, 避免重复遍历
   try {
     const zip = new JSZip();
+    // 001 filter/limit::checkZip: downloadZipLimit(GB) 为后台"打包下载限制", 优先于 zipFileSizeMax
+    const zipLimit = await gbLimit(c.env.DB, "downloadZipLimit");
     const zipMax = await gbLimit(c.env.DB, "zipFileSizeMax");
-    const ctx: ZipContext = { zip, total: 0, maxTotal: zipMax || undefined };
+    const ctx: ZipContext = { zip, total: 0, maxTotal: zipLimit || zipMax || undefined };
     for (const it of items) {
       await zipAddItem(c, user, ctx, it);
       if (ctx.error) return emit(false, ctx.error);
@@ -3428,7 +3500,7 @@ explorerApi.all("/index/zip", async (c) => {
     }
     const tsrc = await resolveFileSource(c.env, user, targetVPath);
     if (!tsrc.ok) return emit(false, tsrc.error);
-    const upAuth = await requireSourceAuth(c.env, user, tsrc.source, AUTH_UPLOAD);
+    const upAuth = await requireSourceAuth(c.env, user, tsrc.source, AUTH_UPLOAD, undefined, undefined, tsrc.relPath);
     if (!upAuth.ok) return emit(false, upAuth.error);
     const quota = await checkSpaceQuota(c.env, tsrc.source, ctx.total, toRealPath(targetVPath));
     if (!quota.ok) return emit(false, quota.error);
@@ -3477,13 +3549,13 @@ explorerApi.all("/index/unzip", async (c) => {
   try {
     const zsrc = await resolveFileSource(c.env, user, zipPath);
     if (!zsrc.ok) return emit(false, zsrc.error);
-    const zAuth = await requireSourceAuth(c.env, user, zsrc.source, AUTH_VIEW);
+    const zAuth = await requireSourceAuth(c.env, user, zsrc.source, AUTH_VIEW, undefined, undefined, zsrc.relPath);
     if (!zAuth.ok) return emit(false, zAuth.error);
     if (rootDisabledActions(zsrc.source, zsrc.relPath, "unzip")) return emit(false, "explorer.pathNotSupport");
 
     const tsrc = await resolveFileSource(c.env, user, pathTo);
     if (!tsrc.ok) return emit(false, tsrc.error);
-    const upAuth = await requireSourceAuth(c.env, user, tsrc.source, AUTH_UPLOAD);
+    const upAuth = await requireSourceAuth(c.env, user, tsrc.source, AUTH_UPLOAD, undefined, undefined, tsrc.relPath);
     if (!upAuth.ok) return emit(false, upAuth.error);
     if (rootDisabledActions(tsrc.source, toRealPath(pathTo), "unzip")) return emit(false, "explorer.pathNotSupport");
 
@@ -3558,7 +3630,7 @@ explorerApi.all("/index/unzipList", async (c) => {
   try {
     const src = await resolveFileSource(c.env, user, path);
     if (!src.ok) return emit(false, src.error);
-    const zAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+    const zAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, undefined, undefined, src.relPath);
     if (!zAuth.ok) return emit(false, zAuth.error);
 
     // 优先只读 central directory (Range 下载, 规避全量下载慢导致前端长任务轮询超时)
@@ -3601,6 +3673,24 @@ explorerApi.all("/index/zipDownload", async (c) => {
   const items = parseDataArr(params.dataArr);
   if (items.length === 0) return emit(false, "参数错误");
 
+  // 001 index::zipDownload: zipClient=1 (且系统开启 downloadZipClient) 时走客户端打包,
+  // 返回文件清单由前端生成 zip, 避免大目录在服务端全量打包超时
+  if (String(params.zipClient) === "1" || String(params.zipClient) === "true") {
+    const clientEnabled = String((await getSetting(c.env.DB, "downloadZipClient")) ?? "1") !== "0";
+    if (clientEnabled) {
+      const out: Record<string, unknown>[] = [];
+      try {
+        for (const it of items) {
+          const nm = it.name || it.path.split("/").filter(Boolean).pop() || "file";
+          await zipClientCollect(c, user, it.path, "/" + nm, out, it.type === "folder" || it.path.endsWith("/"));
+        }
+        return emit(true, out);
+      } catch (err: any) {
+        return emit(false, err.message);
+      }
+    }
+  }
+
   // filter/limit::checkZip - 压缩文件大小限制在 zipAddItem 收集时增量校验, 避免重复遍历
 
   // 001 listPassword::authCheck: 压缩下载前校验加密文件夹
@@ -3619,8 +3709,10 @@ explorerApi.all("/index/zipDownload", async (c) => {
 
   try {
     const zip = new JSZip();
+    // 001 filter/limit::checkZip: downloadZipLimit(GB) 为后台"打包下载限制", 优先于 zipFileSizeMax
+    const zipLimit = await gbLimit(c.env.DB, "downloadZipLimit");
     const zipMax = await gbLimit(c.env.DB, "zipFileSizeMax");
-    const ctx: ZipContext = { zip, total: 0, maxTotal: zipMax || undefined };
+    const ctx: ZipContext = { zip, total: 0, maxTotal: zipLimit || zipMax || undefined };
     for (const it of items) {
       await zipAddItem(c, user, ctx, it);
       if (ctx.error) return emit(false, ctx.error);
@@ -3733,7 +3825,7 @@ explorerApi.all("/index/setAuth", async (c) => {
   if (!src.ok) return c.json({ code: false, data: src.error });
   if (src.source.type !== "group") return c.json({ code: false, data: "仅部门文档支持设置权限" });
   // 需部门管理员权限 (001 auth.actionPathCheck root)
-  const rootAuth = await requireSourceAuth(c.env, user, src.source, AUTH_ROOT);
+  const rootAuth = await requireSourceAuth(c.env, user, src.source, AUTH_ROOT, undefined, undefined, src.relPath);
   if (!rootAuth.ok) return c.json({ code: false, data: rootAuth.error });
 
   const sourceID = fileSourceID(path);
@@ -3780,7 +3872,7 @@ explorerApi.all("/index/fileSave", async (c) => {
     return c.json({ code: false, data: "explorer.pathNotSupport" });
   }
   // 001 auth: 保存文件需 edit 权限 (含文档单独权限覆盖)
-  const saveAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, "common.noPermission", fileSourceID(path));
+  const saveAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, "common.noPermission", fileSourceID(path), src.relPath);
   if (!saveAuth.ok) return c.json({ code: false, data: saveAuth.error });
   // 001: 保存前将旧内容写入历史版本
   await saveFileHistory(c, src.source, src.relPath, path, user.id);
@@ -3808,6 +3900,26 @@ async function saveFileHistory(c: AppContext, src: SourceRef, relPath: string, p
     const ok = await writeObject(c, src, fileKey, oldBytes, "application/octet-stream");
     if (ok) {
       await c.env.DB.prepare("UPDATE source_history SET fileKey = ? WHERE id = ?").bind(fileKey, historyId).run();
+      // 001 fileHistoryMax: 超出版本上限时清理最旧的版本 (避免 source_history/.history 无限膨胀)
+      const maxRaw = parseInt(String((await getSetting(c.env.DB, "fileHistoryMax")) ?? "0"), 10);
+      if (Number.isFinite(maxRaw) && maxRaw > 0) {
+        const rows = (await c.env.DB.prepare(
+          "SELECT id, fileKey FROM source_history WHERE path = ? ORDER BY id DESC LIMIT -1 OFFSET ?"
+        ).bind(path, maxRaw).all().catch(() => null)) as unknown as { results: { id: number; fileKey: string }[] } | null;
+        const stale = rows?.results || [];
+        if (stale.length > 0) {
+          const histIo = ioClientOf(src);
+          for (const row of stale) {
+            if (!row.fileKey) continue;
+            const histKey = keyFromBase(src.baseKey, row.fileKey);
+            if (histIo) await histIo.delete(histKey).catch(() => undefined);
+            else await c.env.FILES.delete(histKey).catch(() => undefined);
+          }
+          await c.env.DB.prepare(
+            `DELETE FROM source_history WHERE id IN (${stale.map(() => "?").join(",")})`
+          ).bind(...stale.map((r) => r.id)).run().catch(() => undefined);
+        }
+      }
     } else {
       await c.env.DB.prepare("DELETE FROM source_history WHERE id = ?").bind(historyId).run();
     }
@@ -3820,7 +3932,7 @@ async function saveFileHistory(c: AppContext, src: SourceRef, relPath: string, p
 async function historyResolve(c: AppContext, user: Vars["currentUser"], path: string): Promise<{ src: SourceRef; relPath: string } | Response> {
   const src = await resolveFileSource(c.env, user, path);
   if (!src.ok) return c.json({ code: false, data: src.error });
-  const auth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT);
+  const auth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, undefined, undefined, src.relPath);
   if (!auth.ok) return c.json({ code: false, data: auth.error });
   return { src: src.source, relPath: src.relPath };
 }
@@ -4062,7 +4174,7 @@ async function editorFileGetHandler(c: AppContext) {
   const getPass = await checkAllowPassword(c.env, user, src.source, parentVirtualDir(path), typeof params.folderPassword === "string" ? params.folderPassword : "");
   if (getPass) return c.json({ code: false, data: "explorer.folderPass.tips" });
   // 001 auth: 读取文件需 view 权限 (含文档单独权限覆盖)
-  const getAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, "common.noPermission", fileSourceID(path));
+  const getAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, "common.noPermission", fileSourceID(path), src.relPath);
   if (!getAuth.ok) return c.json({ code: false, data: getAuth.error });
   const bytes = await readObjectBytes(c, src.source, src.relPath);
   if (!bytes) return c.json({ code: false, data: "common.pathNotExists" });
@@ -4109,7 +4221,7 @@ explorerApi.all("/editor/fileSave", async (c) => {
   const savePass = await checkAllowPassword(c.env, user, src.source, parentVirtualDir(path), typeof params.folderPassword === "string" ? params.folderPassword : "");
   if (savePass) return c.json({ code: false, data: "explorer.folderPass.tips" });
   // 001 auth: 编辑器保存需 edit 权限 (含文档单独权限覆盖)
-  const editAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, "common.noPermission", fileSourceID(path));
+  const editAuth = await requireSourceAuth(c.env, user, src.source, AUTH_EDIT, "common.noPermission", fileSourceID(path), src.relPath);
   if (!editAuth.ok) return c.json({ code: false, data: editAuth.error });
   // 001 IO::setContent: 保存前把旧内容写入历史版本
   await saveFileHistory(c, src.source, src.relPath, path, user.id);
@@ -4212,7 +4324,7 @@ async function runListSearch(
   try {
     const src = await resolveFileSource(c.env, user, path);
     if (!src.ok) return [];
-    const searchAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+    const searchAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, undefined, undefined, src.relPath);
     if (!searchAuth.ok) return [];
     const virtualPrefix = src.source.type === "io" ? `{io:${src.source.sourceId}}/` : `{source:${src.source.sourceId}}/`;
     await searchSourcePrefix(
@@ -4274,7 +4386,7 @@ async function fileViewHandler(c: AppContext): Promise<Response> {
     // 001 IO::info: 文件不存在则无预览入口 (R2 或 io 外链均检查)
     const head = await headObject(c, src.source, src.relPath);
     if (!head) return c.json({ code: true, data: null });
-    const viewAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW);
+    const viewAuth = await requireSourceAuth(c.env, user, src.source, AUTH_VIEW, undefined, undefined, src.relPath);
     if (!viewAuth.ok) return c.json({ code: true, data: null });
 
     const appHost = getAppHost(c);
@@ -4597,7 +4709,7 @@ explorerApi.post("/upload/fileUpload", async (c) => {
   const realDir = normDirPath(src.relPath);
 
   // 001 auth: 上传需 upload 权限
-  const upAuth = await requireSourceAuth(c.env, user, src.source, AUTH_UPLOAD);
+  const upAuth = await requireSourceAuth(c.env, user, src.source, AUTH_UPLOAD, undefined, undefined, src.relPath);
   if (!upAuth.ok) return c.json({ code: false, data: upAuth.error });
   // 001 checkSpace: 部门配额检测 (按文件总大小)
   const quota = await checkSpaceQuota(c.env, src.source, size || file.size, realDir);

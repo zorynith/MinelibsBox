@@ -3,8 +3,20 @@
  */
 
 import type { Context, Next, MiddlewareHandler } from "hono";
-import { getSession, getUserById } from "./db";
+import { getSession, getUserById, getSetting, deleteSession } from "./db";
 import { t } from "./i18n";
+
+/** 001 SystemOption sessionTime (秒, 默认 4 小时); 60s 内存缓存, 避免每次请求都查库 */
+let sessionTtlCache: { at: number; hours: number } | null = null;
+
+export async function sessionTtlHours(db: D1Database): Promise<number> {
+  if (sessionTtlCache && Date.now() - sessionTtlCache.at < 60_000) return sessionTtlCache.hours;
+  const raw = await getSetting(db, "sessionTime").catch(() => null);
+  const sec = parseInt(String(raw ?? ""), 10);
+  const hours = Number.isFinite(sec) && sec > 0 ? Math.max(1, Math.round(sec / 3600)) : 4;
+  sessionTtlCache = { at: Date.now(), hours };
+  return hours;
+}
 
 const SESSION_COOKIE = "kod_session";
 
@@ -17,6 +29,8 @@ export interface AuthUser {
   avatar: string;
   sex: number;
   role: string;
+  /** 角色 id (1=管理员); 用于角色级权限拦截 */
+  roleID?: number;
   status: number;
   config_json: string;
 }
@@ -63,6 +77,28 @@ export async function authRequired(c: AppContext, next: Next) {
     return c.json({ success: false, code: "NOT_LOGIN", message: "Session expired" }, 401);
   }
 
+  // 001 userDataInit: 账号被禁用/未启用时立即失效 (管理员禁用后无需等会话过期)
+  if (Number(session.status ?? 1) === 0) {
+    await deleteSession(c.env.DB, sessionId).catch(() => undefined);
+    clearSessionCookie(c);
+    return c.json({ success: false, code: "USER_INVALID", message: t("user.userEnabled") }, 401);
+  }
+
+  // 001: 滑动过期 (sessionTime); 仅在剩余寿命不足一半时续期, 减少 D1 写入
+  try {
+    const ttlHours = await sessionTtlHours(c.env.DB);
+    const ttlMs = ttlHours * 3600 * 1000;
+    const expires = Date.parse(String(session.expires_at || ""));
+    if (Number.isFinite(expires) && expires - Date.now() < ttlMs / 2) {
+      const next = new Date(Date.now() + ttlMs).toISOString();
+      if (!Number.isFinite(expires) || next > String(session.expires_at)) {
+        await c.env.DB.prepare("UPDATE sessions SET expires_at = ? WHERE id = ?").bind(next, sessionId).run().catch(() => undefined);
+      }
+    }
+  } catch {
+    /* 续期失败不影响请求 */
+  }
+
   const user: AuthUser = {
     id: session.user_id as number,
     username: session.username as string,
@@ -72,6 +108,7 @@ export async function authRequired(c: AppContext, next: Next) {
     avatar: (session.avatar as string) || "",
     sex: (session.sex as number) || 1,
     role: session.role as string,
+    roleID: Number(session.roleID ?? 0) || undefined,
     status: (session.status as number) ?? 1,
     config_json: session.config_json as string,
   };

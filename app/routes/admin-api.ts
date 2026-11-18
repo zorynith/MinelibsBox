@@ -1033,6 +1033,10 @@ adminApi.all("/member/edit", async (c) => {
   if (updates.length) {
     updates.push("updated_at = datetime('now')");
     await c.env.DB.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).bind(...args, userID).run();
+    // 001 userHash 机制等价实现: 管理员重置密码后旧会话立即失效
+    if (q.password) {
+      await c.env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userID).run().catch(() => undefined);
+    }
   }
   if (q.groupInfo !== undefined && q.groupInfo !== null) {
     const groupInfo = parseGroupInfo(q.groupInfo);
