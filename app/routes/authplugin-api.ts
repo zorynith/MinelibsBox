@@ -76,6 +76,8 @@ async function checkAuth(c: any, appName: string, user: Vars["currentUser"]): Pr
 
 /** 插件是否被 worker 收录(ASSETS 提供) */
 async function pluginConfigHas(c: any, appName: string): Promise<boolean> {
+  // appName 来自请求参数, 限制字符集避免 ../ 穿越探测 static 下其他 JSON
+  if (!/^[A-Za-z0-9_-]+$/.test(appName)) return false;
   try {
     const res = await c.env.ASSETS.fetch(new Request(`https://assets.local/plugins/${appName}/package.json`));
     return res.ok;
