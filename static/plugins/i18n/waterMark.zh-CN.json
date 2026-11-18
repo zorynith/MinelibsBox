@@ -1,0 +1,15 @@
+{
+	"waterMark.meta.name": "文档水印",
+	"waterMark.meta.title": "文档水印（防截屏/防拍照）",
+	"waterMark.meta.desc": "在 PDF、Office、图片等文件预览窗口叠加用户与时间水印",
+	"waterMark.meta.enable": "启用水印",
+	"waterMark.meta.enableDesc": "关闭后不再对预览内容叠加水印",
+	"waterMark.meta.text": "水印文字",
+	"waterMark.meta.textDesc": "支持变量: {user}=当前用户, {date}=日期, {time}=时间",
+	"waterMark.meta.fontSize": "字号",
+	"waterMark.meta.opacity": "不透明度",
+	"waterMark.meta.opacityDesc": "数值越小越淡, 单位 %",
+	"waterMark.meta.rotate": "旋转角度",
+	"waterMark.meta.gap": "平铺间距",
+	"waterMark.meta.color": "文字颜色"
+}

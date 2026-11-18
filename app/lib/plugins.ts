@@ -28,7 +28,7 @@ export interface PluginContext {
 }
 
 /** All plugins shipped with the worker (served from ASSETS static/plugins). */
-export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "drawio", "Photopea", "bisheng", "excalidraw", "minder", "svgEditor", "tuiImage", "officeLive", "yzOffice", "adminer", "fileThumb", "msgWarning", "oauth", "storeImport", "webdav", "autoViewer", "flashPlayer"];
+export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "drawio", "Photopea", "bisheng", "excalidraw", "minder", "svgEditor", "tuiImage", "officeLive", "yzOffice", "adminer", "fileThumb", "msgWarning", "oauth", "storeImport", "webdav", "autoViewer", "flashPlayer", "waterMark"];
 // 已移除: "client" (客户端·系统增强) — 扫码登录/TFA/客户端同步等功能依赖 App 与
 // 外部短信/邮件 API, 本项目不使用, 故不注册该插件 (服务端 handler 一并删除)。
 

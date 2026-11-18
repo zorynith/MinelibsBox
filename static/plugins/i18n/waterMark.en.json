@@ -1,0 +1,15 @@
+{
+	"waterMark.meta.name": "Watermark",
+	"waterMark.meta.title": "Document Watermark",
+	"waterMark.meta.desc": "Overlay user and time watermark on PDF, Office and image previews",
+	"waterMark.meta.enable": "Enable watermark",
+	"waterMark.meta.enableDesc": "Turn off to stop overlaying watermarks on previews",
+	"waterMark.meta.text": "Watermark text",
+	"waterMark.meta.textDesc": "Variables: {user}=current user, {date}=date, {time}=time",
+	"waterMark.meta.fontSize": "Font size",
+	"waterMark.meta.opacity": "Opacity",
+	"waterMark.meta.opacityDesc": "Smaller value means fainter, unit %",
+	"waterMark.meta.rotate": "Rotate",
+	"waterMark.meta.gap": "Tile gap",
+	"waterMark.meta.color": "Text color"
+}
