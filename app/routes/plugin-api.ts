@@ -884,25 +884,30 @@ async function renderKodApp(
   const user = c.get("currentUser") as AuthUser | undefined;
   if (!isShare && !user) return c.body(errorPage(title, "未登录"), 200, HTML_HEADERS);
 
-  const key = await resolveFileKey(c, rawPath);
-  const obj = key ? await c.env.FILES.head(key).catch(() => null) : null;
-  if (!obj) {
-    const global = await loadLangPack(c.env.ASSETS, lang);
-    const msg = (global && global["common.pathNotExists"]) || "文件不存在";
-    return c.body(errorPage(title, msg), 200, HTML_HEADERS);
-  }
-
+  // 左侧菜单直接点插件图标时没有 path 参数(001 同样如此): 此时应渲染空编辑器,
+  // 由前端「新建/选择文件」发起后续操作, 不能按「文件不存在」报错。
+  let fileUrl = "";
   let canWrite = false;
-  if (!isShare) {
-    const src = await resolveFileSource(c.env, user as AuthUser, rawPath);
-    if (src.ok) canWrite = hasAuth(await sourceAuthOf(c.env, user as AuthUser, src.source), AUTH_EDIT);
-  }
+  if (rawPath) {
+    const key = await resolveFileKey(c, rawPath);
+    const obj = key ? await c.env.FILES.head(key).catch(() => null) : null;
+    if (!obj) {
+      const global = await loadLangPack(c.env.ASSETS, lang);
+      const msg = (global && global["common.pathNotExists"]) || "文件不存在";
+      return c.body(errorPage(title, msg), 200, HTML_HEADERS);
+    }
 
-  // 页面自身由 Worker 渲染(与 appHost 同源), 但插件资源在 static 域, 用带签名的匿名链接
-  // 可以避免 iframe 内跨域丢 cookie 导致的 401。
-  const fileUrl = isShare
-    ? fileOutUrl(appHost, rawPath)
-    : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
+    if (!isShare) {
+      const src = await resolveFileSource(c.env, user as AuthUser, rawPath);
+      if (src.ok) canWrite = hasAuth(await sourceAuthOf(c.env, user as AuthUser, src.source), AUTH_EDIT);
+    }
+
+    // 页面自身由 Worker 渲染(与 appHost 同源), 但插件资源在 static 域, 用带签名的匿名链接
+    // 可以避免 iframe 内跨域丢 cookie 导致的 401。
+    fileUrl = isShare
+      ? fileOutUrl(appHost, rawPath)
+      : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
+  }
 
   const pluginHost = `${staticPath}plugins/${id}/`;
   const pluginApi = `${appHost}index.php?plugin/${id}/`;
