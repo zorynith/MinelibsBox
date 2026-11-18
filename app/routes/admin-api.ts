@@ -4,7 +4,7 @@
  */
 import { Hono } from "hono";
 import { authRequired, hashPassword, isAdmin } from "../lib/auth";
-import { getUserByUsername, userSearch, setSetting, getSetting, addAuditLog, getPluginMeta, setPluginStatus, setPluginConfig, getIoSourceList, getIoSourceById } from "../lib/db";
+import { getUserByUsername, getUserOption, userSearch, setSetting, getSetting, addAuditLog, getPluginMeta, setPluginStatus, setPluginConfig, getIoSourceList, getIoSourceById } from "../lib/db";
 import { parseKodPassword } from "../lib/mcrypt";
 import { t } from "../lib/i18n";
 import { userDefaultInit } from "../lib/user-init";
@@ -17,6 +17,17 @@ import { handleUserNotice } from "../lib/user-notice";
 import { htmlClean } from "../lib/html-filter";
 import { toUnixCN } from "../lib/time";
 import { passwordError } from "../lib/user-check";
+import {
+  userGroupFilter,
+  filterGroupList,
+  filterUserList,
+  filterConfig,
+  userGroupAdmin,
+  userGroupAt,
+  userGroupRootShow,
+  allowChangeUserRole,
+  groupParents,
+} from "../lib/user-group-filter";
 
 type Vars = { currentUser: import("../lib/auth").AuthUser };
 const adminApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -51,49 +62,41 @@ async function allParams(c: any): Promise<Record<string, string>> {
 
 // ============ admin/group ============
 
-/**
- * 部门列表 - admin/group/get
- * 参数: parentID, requestFromType
- * root 用户 parentID 为空/'root' 时返回根部门; 否则返回其子部门。
- * 返回 {list, pageInfo}, list 项含 groupID/parentID/name/hasChildren/sizeMax/sizeUse/status 等。
- */
-adminApi.all("/group/get", async (c) => {
+/** 最近分享目标 (001 explorer.userShareTarget::get(10)) */
+async function shareTargetRecent(c: any, limit = 10): Promise<any[]> {
   const user = c.get("currentUser");
-  const query = await allParams(c);
-  const parentID = (query.parentID || "").trim();
-  const isRoot = user.role === "admin" || user.role === "root";
-
-  // root 用户请求根部门时返回部门 id=1
-  let groups: any[] = [];
-  if (!parentID || parentID === "root" || parentID === "rootOuter") {
-    if (!isRoot) {
-      return c.json(ok({ list: [], pageInfo: {} }));
-    }
-    const row = await c.env.DB.prepare("SELECT * FROM groups WHERE id = 1").first();
-    if (row) groups = [row];
-  } else if (/^\d+$/.test(parentID)) {
-    const pid = parseInt(parentID, 10);
-    const result = await c.env.DB.prepare(
-      "SELECT * FROM groups WHERE parent_id = ? ORDER BY sort ASC, id ASC"
-    ).bind(pid).all();
-    groups = result.results as any[];
-    // If a leaf group has no children but is requested, return the group itself
-    // (mirrors 001 listChild which can return empty list)
-  } else {
-    // Treat as root request
-    const row = await c.env.DB.prepare("SELECT * FROM groups WHERE id = 1").first();
-    if (row) groups = [row];
+  const raw = await getUserOption(c.env.DB, user.id, "saveData", "shareTarget");
+  if (!raw) return [];
+  let data: Record<string, any>;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return [];
   }
+  if (!data || typeof data !== "object") return [];
+  const list: any[] = [];
+  for (const key of Object.keys(data)) {
+    if (list.length >= limit) break;
+    const value = data[key];
+    if (!value || typeof value !== "object") continue;
+    value.nodeAddClass = "node-share-item-store";
+    value.icon = '<i class="font-icon ri-team-fill"></i>';
+    list.push(value);
+  }
+  return list;
+}
 
+/** 部门行 -> 列表项 (001 Group::listData/listChild 输出字段) */
+async function buildGroupItems(c: any, groups: any[]): Promise<any[]> {
   const groupSizes = await scanGroupSizes(c.env.FILES);
   const list: any[] = [];
   for (const g of groups) {
-    const childCount = await c.env.DB.prepare(
+    const childCount: any = await c.env.DB.prepare(
       "SELECT COUNT(*) AS cnt FROM groups WHERE parent_id = ?"
-    ).bind(g.id as number).first<{ cnt: number }>();
-    const metaInfo = await c.env.DB.prepare(
+    ).bind(g.id as number).first();
+    const metaInfo: any = await c.env.DB.prepare(
       "SELECT status FROM groups WHERE id = ?"
-    ).bind(g.id as number).first<{ status: number }>();
+    ).bind(g.id as number).first();
     list.push({
       groupID: g.id,
       parentID: g.parent_id,
@@ -114,6 +117,104 @@ adminApi.all("/group/get", async (c) => {
       nodeData: { groupID: g.id, parentID: g.parent_id, name: g.name },
     });
   }
+  return list;
+}
+
+/** 按部门 id 批量获取 (001 Group::listByID) */
+async function groupListByID(c: any, ids: number[]): Promise<any[]> {
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  const result = await c.env.DB.prepare(
+    `SELECT * FROM groups WHERE id IN (${placeholders}) ORDER BY sort ASC, id ASC`
+  ).bind(...ids).all();
+  return buildGroupItems(c, result.results as any[]);
+}
+
+/**
+ * 部门列表 - admin/group/get (001 adminGroup::get)
+ * 参数: parentID, requestFromType, rootParam
+ * 后台拉取信息需传入 requestFromType=admin, 即拉取自己为部门管理员的部门。
+ * 返回 {list, pageInfo}, list 项含 groupID/parentID/name/hasChildren/sizeMax/sizeUse/status 等。
+ */
+adminApi.all("/group/get", async (c) => {
+  const user = c.get("currentUser");
+  const filtered = await userGroupFilter(c, "admin.group.get", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
+
+  const cfg = await filterConfig(c.env.DB);
+  const requestAdmin = (query.requestFromType || "") === "admin";
+  const rawParentID = (query.parentID || "").trim();
+  const adminGroups = await userGroupAdmin(c.env.DB, user);
+  const atGroups = await userGroupAt(c.env.DB, user);
+  const rootShow = await userGroupRootShow(c.env.DB, user, cfg);
+
+  let parentID: string | string[] = rawParentID;
+  if (!rawParentID || rawParentID === "root" || rawParentID === "rootOuter") {
+    // 后台拉取: 自己为部门管理员的部门; 其他: 自己所在部门根部门
+    if (requestAdmin && adminGroups.length) parentID = adminGroups;
+    if (!requestAdmin && atGroups.length && parentID !== "rootOuter") parentID = atGroups;
+    if (parentID === "rootOuter") parentID = rootShow;
+    if (isAdmin(user)) parentID = ["1"];
+  }
+
+  let groups: any[] = [];
+  if (Array.isArray(parentID)) {
+    const ids = parentID.map((v) => parseInt(String(v), 10)).filter((v) => v > 0);
+    if (ids.length) {
+      const placeholders = ids.map(() => "?").join(",");
+      const result = await c.env.DB.prepare(
+        `SELECT * FROM groups WHERE id IN (${placeholders}) ORDER BY sort ASC, id ASC`
+      ).bind(...ids).all();
+      groups = result.results as any[];
+    }
+  } else if (/^\d+$/.test(parentID)) {
+    const pid = parseInt(parentID, 10);
+    const result = await c.env.DB.prepare(
+      "SELECT * FROM groups WHERE parent_id = ? ORDER BY sort ASC, id ASC"
+    ).bind(pid).all();
+    groups = result.results as any[];
+  }
+
+  let list: any[] = await buildGroupItems(c, groups);
+
+  // 权限设置/分享目标: 追加"对外授权"与"最近使用"节点 (001 rootParam appendShareHistory)
+  if (query.rootParam && query.rootParam.includes("appendShareHistory")) {
+    const toOuterGroup = {
+      groupID: "rootOuter",
+      parentID: "root",
+      name: t("explorer.auth.toOuter"),
+      isParent: true,
+      disableSelect: true,
+      disableOpen: true, // 禁用自动展开
+      nodeAddClass: "node-append-group",
+    };
+    const shareHistory: any = {
+      groupID: "-",
+      parentID: "0",
+      name: t("explorer.groupAuthRecent"),
+      isParent: true,
+      disableSelect: true,
+      nodeAddClass: "node-append-shareTarget",
+      children: await shareTargetRecent(c, 10),
+      icon: '<i class="font-icon ri-star-fill"></i>',
+    };
+
+    // 权限设置时, parentID 为当前部门; 显示部门最上层
+    if (typeof parentID === "string" && /^\d+$/.test(parentID)) {
+      list = await groupListByID(c, [parseInt(parentID, 10)]);
+    }
+    // 自己可见根目录不在当前显示列表中, 则显示对外授权
+    const listIds = list.map((item) => String(item.groupID)).join(",");
+    if (rootShow.join(",") !== listIds) {
+      list.push(toOuterGroup);
+    }
+    if (shareHistory.children.length > 0) {
+      list = [shareHistory, ...list];
+    }
+  }
+
+  list = await filterGroupList(c.env.DB, user, list, cfg);
   return c.json(ok({ list, pageInfo: {} }));
 });
 
@@ -121,57 +222,47 @@ adminApi.all("/group/get", async (c) => {
  * 部门信息 - admin/group/getByID
  */
 adminApi.all("/group/getByID", async (c) => {
-  const query = await allParams(c);
+  const user = c.get("currentUser");
+  const filtered = await userGroupFilter(c, "admin.group.getByID", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const id = (query.id || "").trim();
   const ids = id.split(",").filter((x) => /^\d+$/.test(x)).map(Number);
   if (ids.length === 0) return c.json(ok([]));
-  const placeholders = ids.map(() => "?").join(",");
-  const result = await c.env.DB.prepare(
-    `SELECT * FROM groups WHERE id IN (${placeholders}) ORDER BY sort ASC, id ASC`
-  ).bind(...ids).all();
-  const groupSizes = await scanGroupSizes(c.env.FILES);
-  const list = (result.results as any[]).map((g) => ({
-    groupID: g.id,
-    parentID: g.parent_id,
-    parentLevel: g.parent_level || ",",
-    name: g.name,
-    sizeMax: g.size_max || 0,
-    sizeUse: groupSizes[String(g.id)] ?? (g.size_use || 0),
-    sort: g.sort || 0,
-    status: g.status ?? 1,
-    metaInfo: {
-      status: String(g.status ?? 1),
-      ioDriver: g.io_driver ?? 0,
-      authShowType: g.auth_show_type || "all",
-      authShowGroup: g.auth_show_group || "",
-    },
-  }));
+  const list = await filterGroupList(c.env.DB, user, await groupListByID(c, ids), await filterConfig(c.env.DB));
   return c.json(ok(list));
 });
 
 /**
  * 搜索部门 - admin/group/search
- * 参数: words, parentGroup(可选)
+ * 参数: words, parentGroup(可选, 支持多个父部门逗号隔开)
  */
 adminApi.all("/group/search", async (c) => {
-  const query = await allParams(c);
+  const user = c.get("currentUser");
+  const filtered = await userGroupFilter(c, "admin.group.search", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const words = (query.words || "").trim();
   if (!words) return c.json(ok({ list: [], pageInfo: {} }));
+  const parentGroup = (query.parentGroup || "").trim();
   const like = `%${words}%`;
   const result = await c.env.DB.prepare(
     "SELECT * FROM groups WHERE name LIKE ? ORDER BY sort ASC, id ASC LIMIT 100"
   ).bind(like).all();
-  const groupSizes = await scanGroupSizes(c.env.FILES);
-  const list = (result.results as any[]).map((g) => ({
-    groupID: g.id,
-    parentID: g.parent_id,
-    parentLevel: g.parent_level || ",",
-    name: g.name,
-    sizeMax: g.size_max || 0,
-    sizeUse: groupSizes[String(g.id)] ?? (g.size_use || 0),
-    sort: g.sort || 0,
-    status: g.status ?? 1,
-  }));
+  let rows = result.results as any[];
+
+  // 指定父部门时仅返回该部门子树内的部门 (001 listSearch 按 parentGroup 逐个搜索)
+  const parentIDs = parentGroup.split(",").map((v) => v.trim()).filter((v) => /^\d+$/.test(v));
+  if (parentIDs.length) {
+    const kept: any[] = [];
+    for (const g of rows) {
+      const parents = await groupParents(c.env.DB, g.id);
+      if (parents.some((p) => parentIDs.includes(p))) kept.push(g);
+    }
+    rows = kept;
+  }
+
+  const list = await filterGroupList(c.env.DB, user, await buildGroupItems(c, rows), await filterConfig(c.env.DB));
   return c.json(ok({ list, pageInfo: { page: 1, pageNum: 100, total: list.length } }));
 });
 
@@ -181,7 +272,9 @@ adminApi.all("/group/search", async (c) => {
  * 001: groupAdd 后计算 parent_level（含自身的祖先路径，如 ",1,2,"）
  */
 adminApi.all("/group/add", async (c) => {
-  const query = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.group.add", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const name = (query.name || "").trim().replace(/\//g, "");
   if (!name) return c.json({ code: false, data: "名称不能为空" });
   const parentID = parseInt(query.parentID || "0", 10) || 0;
@@ -223,7 +316,9 @@ adminApi.all("/group/add", async (c) => {
  * 参数: groupID(必填), name/sizeMax/sort/parentID(可选)
  */
 adminApi.all("/group/edit", async (c) => {
-  const query = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.group.edit", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const groupID = parseInt(query.groupID || "0", 10);
   if (!groupID) return c.json({ code: false, data: "参数错误" });
 
@@ -277,7 +372,9 @@ adminApi.all("/group/edit", async (c) => {
  * 参数: groupID, status(0|1)
  */
 adminApi.all("/group/status", async (c) => {
-  const query = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.group.status", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const groupID = parseInt(query.groupID || "0", 10);
   if (!groupID) return c.json({ code: false, data: "参数错误" });
   const status = query.status === "1" ? 1 : 0;
@@ -290,7 +387,9 @@ adminApi.all("/group/status", async (c) => {
  * 参数: groupID(逗号分隔), delAll(1=级联删除子部门)
  */
 adminApi.all("/group/remove", async (c) => {
-  const query = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.group.remove", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const ids = (query.groupID || "").split(",").filter((x) => /^\d+$/.test(x)).map(Number);
   if (ids.length === 0) return c.json({ code: false, data: "参数错误" });
 
@@ -323,7 +422,9 @@ adminApi.all("/group/remove", async (c) => {
  * 参数: groupID(逗号分隔的 id 列表，按顺序设置 sort)
  */
 adminApi.all("/group/sort", async (c) => {
-  const query = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.group.sort", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const ids = (query.groupID || "").split(",").filter((x) => /^\d+$/.test(x)).map(Number);
   for (let i = 0; i < ids.length; i++) {
     await c.env.DB.prepare("UPDATE groups SET sort = ? WHERE id = ?").bind(i, ids[i]).run();
@@ -337,7 +438,9 @@ adminApi.all("/group/sort", async (c) => {
  * 将 from 部门的成员迁移到 to 部门
  */
 adminApi.all("/group/switchGroup", async (c) => {
-  const query = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.group.switchgroup", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const from = parseInt(query.from || "0", 10);
   const to = parseInt(query.to || "0", 10);
   if (!from || !to) return c.json({ code: false, data: "参数错误" });
@@ -680,27 +783,29 @@ adminApi.all("/storage/remove", async (c) => {
  * 返回 {list, pageInfo}; list 项含 userID/name/nickName/avatar/roleID/sizeUse/sizeMax/groupInfo/status
  */
 adminApi.all("/member/get", async (c) => {
-  const query = await allParams(c);
+  const user = c.get("currentUser");
+  const filtered = await userGroupFilter(c, "admin.member.get", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const groupID = (query.groupID || "").trim();
   const statusFilter = query.status !== undefined && query.status !== "" ? query.status : null;
 
-  if (!groupID || groupID === "0") {
-    // 001: groupID 为空返回空数组; 前端初始传 '0' 时按全部用户处理
-    if (groupID === "0") return c.json(ok(await memberListByGroup(c, 0, statusFilter)));
-    return c.json(ok({ list: [], pageInfo: {} }));
-  }
-  if (groupID === "1") {
-    // 根部门 = 全部用户
-    return c.json(ok(await memberListByGroup(c, 0, statusFilter)));
-  }
-  return c.json(ok(await memberListByGroup(c, parseInt(groupID, 10), statusFilter)));
+  // 001: groupID 为空返回空数组; 根部门(id=1)获取全部用户
+  if (!groupID || groupID === "0") return c.json(ok([]));
+  const gid = groupID === "1" ? 0 : parseInt(groupID, 10) || 0;
+  const result: any = await memberListByGroup(c, gid, statusFilter);
+  result.list = await filterUserList(c.env.DB, user, result.list || [], query, await filterConfig(c.env.DB));
+  return c.json(ok(result));
 });
 
 /**
  * 用户信息 - admin/member/getByID
  */
 adminApi.all("/member/getByID", async (c) => {
-  const query = await allParams(c);
+  const user = c.get("currentUser");
+  const filtered = await userGroupFilter(c, "admin.member.getByID", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const id = (query.id || "").trim();
   const ids = id.split(",").filter((x) => /^\d+$/.test(x)).map(Number);
   if (ids.length === 0) return c.json(ok([]));
@@ -709,10 +814,11 @@ adminApi.all("/member/getByID", async (c) => {
     `SELECT * FROM users WHERE id IN (${placeholders})`
   ).bind(...ids).all();
   const stats = await scanBucketStats(c.env.FILES);
-  const list: any[] = [];
+  let list: any[] = [];
   for (const u of result.results as any[]) {
     list.push(await buildMemberItem(c, u, stats.perUser[u.username]?.size || 0));
   }
+  list = await filterUserList(c.env.DB, user, list, query, await filterConfig(c.env.DB));
   return c.json(ok(list));
 });
 
@@ -721,36 +827,53 @@ adminApi.all("/member/getByID", async (c) => {
  * 参数: words, status, parentGroup(可选)
  */
 adminApi.all("/member/search", async (c) => {
-  const query = await allParams(c);
+  const user = c.get("currentUser");
+  const filtered = await userGroupFilter(c, "admin.member.search", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const query = filtered.params;
   const words = (query.words || "").trim();
   const statusFilter = query.status !== undefined && query.status !== "" ? query.status : null;
   const parentGroup = (query.parentGroup || "").trim();
 
   if (!words) return c.json(ok({ list: [], pageInfo: {} }));
   const like = `%${words}%`;
-  let result: any;
-  if (/^\d+$/.test(parentGroup) && parentGroup !== "1") {
-    // 在指定部门内搜索
-    const pid = parseInt(parentGroup, 10);
-    result = await c.env.DB.prepare(
-      `SELECT u.* FROM users u
-       JOIN user_groups ug ON u.id = ug.user_id
-       WHERE ug.group_id = ? AND (u.username LIKE ? OR u.nickname LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)
-       ${statusFilter !== null ? "AND u.status = ?" : ""}
-       GROUP BY u.id ORDER BY u.id ASC LIMIT 200`
-    ).bind(pid, like, like, like, like, ...(statusFilter !== null ? [statusFilter] : [])).all();
+  const parentIDs = parentGroup.split(",").map((v) => v.trim()).filter((v) => /^\d+$/.test(v));
+  const matchWords = "u.username LIKE ? OR u.nickname LIKE ? OR u.email LIKE ? OR u.phone LIKE ?";
+
+  let rows: any[] = [];
+  if (parentIDs.length && !parentIDs.includes("1")) {
+    // 支持多个父部门; 每个部门包含其子部门 (001 listSearch 逐个 parentGroup 搜索后合并)
+    const seen = new Set<number>();
+    for (const pid of parentIDs) {
+      const result = await c.env.DB.prepare(
+        `SELECT DISTINCT u.* FROM users u
+         JOIN user_groups ug ON u.id = ug.user_id
+         JOIN groups g ON g.id = ug.group_id
+         WHERE (ug.group_id = ? OR g.parent_level LIKE ?) AND (${matchWords})
+         ${statusFilter !== null ? "AND u.status = ?" : ""}
+         ORDER BY u.id ASC LIMIT 200`
+      ).bind(parseInt(pid, 10), `%,${pid},%`, like, like, like, like, ...(statusFilter !== null ? [statusFilter] : [])).all();
+      for (const u of result.results as any[]) {
+        if (seen.has(u.id)) continue;
+        seen.add(u.id);
+        rows.push(u);
+      }
+    }
   } else {
-    result = await c.env.DB.prepare(
-      `SELECT * FROM users WHERE username LIKE ? OR nickname LIKE ? OR email LIKE ? OR phone LIKE ?
-       ${statusFilter !== null ? "AND status = ?" : ""}
-       ORDER BY id ASC LIMIT 200`
+    const result = await c.env.DB.prepare(
+      `SELECT * FROM users u WHERE (${matchWords})
+       ${statusFilter !== null ? "AND u.status = ?" : ""}
+       ORDER BY u.id ASC LIMIT 200`
     ).bind(like, like, like, like, ...(statusFilter !== null ? [statusFilter] : [])).all();
+    rows = result.results as any[];
   }
+
   const stats = await scanBucketStats(c.env.FILES);
-  const list: any[] = [];
-  for (const u of result.results as any[]) {
+  let list: any[] = [];
+  for (const u of rows) {
     list.push(await buildMemberItem(c, u, stats.perUser[u.username]?.size || 0));
   }
+  list = await filterUserList(c.env.DB, user, list, query, await filterConfig(c.env.DB));
   return c.json(ok({ list, pageInfo: { page: 1, pageNum: 200, total: list.length } }));
 });
 
@@ -802,7 +925,9 @@ adminApi.all("/member/authCheck", async (c) => {
  * 001: userAdd -> userGroupSet -> show_json(success, true, userID)
  */
 adminApi.all("/member/add", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.member.add", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   const name = (q.name || "").trim();
   const nickName = (q.nickName || "").trim() || name;
   const roleID = parseInt(q.roleID || "0", 10) || 0;
@@ -851,7 +976,9 @@ adminApi.all("/member/add", async (c) => {
  * 001: userEdit -> userGroupSet -> show_json(success, true, userID)
  */
 adminApi.all("/member/edit", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.member.edit", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   const userID = parseInt(q.userID || "0", 10);
   if (!userID) return c.json(fail("explorer.error"));
 
@@ -921,7 +1048,9 @@ adminApi.all("/member/edit", async (c) => {
  * 禁/启用用户 - admin/member/status
  */
 adminApi.all("/member/status", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.member.status", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   const userID = parseInt(q.userID || "0", 10);
   if (!userID) return c.json(fail("explorer.error"));
   const status = q.status === "1" ? 1 : 0;
@@ -934,7 +1063,9 @@ adminApi.all("/member/status", async (c) => {
  * 参数: userID(逗号分隔)
  */
 adminApi.all("/member/remove", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.member.remove", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   // 禁止删除管理员账号：admin 被删后 initDatabase 会按 seed 重建为默认 admin123，导致密码与设置"变回"
   const adminRows = await c.env.DB.prepare("SELECT id FROM users WHERE role IN ('admin','root')").all<{ id: number }>();
   const protectedIDs = new Set(adminRows.results.map((r) => r.id));
@@ -961,7 +1092,9 @@ adminApi.all("/member/remove", async (c) => {
  * 用户加入部门 - admin/member/addGroup
  */
 adminApi.all("/member/addGroup", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.member.addgroup", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   const userID = parseInt(q.userID || "0", 10);
   if (!userID) return c.json(fail("explorer.error"));
   const groupInfo = parseGroupInfo(q.groupInfo || "");
@@ -981,7 +1114,9 @@ adminApi.all("/member/addGroup", async (c) => {
  * 用户移出部门 - admin/member/removeGroup
  */
 adminApi.all("/member/removeGroup", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.member.removegroup", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   const userID = parseInt(q.userID || "0", 10);
   const groupID = parseInt(q.groupID || "0", 10);
   if (!userID || !groupID) return c.json(fail("explorer.error"));
@@ -993,7 +1128,9 @@ adminApi.all("/member/removeGroup", async (c) => {
  * 用户部门迁移 - admin/member/switchGroup
  */
 adminApi.all("/member/switchGroup", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.member.switchgroup", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   const userID = parseInt(q.userID || "0", 10);
   const from = parseInt(q.from || "0", 10);
   const to = parseInt(q.to || "0", 10);
@@ -1078,17 +1215,24 @@ async function buildMemberItem(c: any, u: any, usedSize = 0) {
  * 返回数组, 每项含 id/name/label/display/sort/administrator/auth
  */
 adminApi.all("/role/get", async (c) => {
+  const user = c.get("currentUser");
+  const cfg = await filterConfig(c.env.DB);
   const result = await c.env.DB.prepare("SELECT * FROM roles ORDER BY sort ASC, id ASC").all();
-  const list = (result.results as any[]).map((r) => ({
-    id: r.id,
-    name: r.name,
-    display: r.display ?? 1,
-    label: r.label || "",
-    sort: r.sort || 0,
-    administrator: r.administrator ?? 0,
-    system: r.system ?? 0,
-    auth: r.auth || "",
-  }));
+  const list: any[] = [];
+  // 过滤比自己权限大的角色 (001 adminRole::get)
+  for (const r of result.results as any[]) {
+    if (!(await allowChangeUserRole(c.env.DB, user, r.id, cfg))) continue;
+    list.push({
+      id: r.id,
+      name: r.name,
+      display: r.display ?? 1,
+      label: r.label || "",
+      sort: r.sort || 0,
+      administrator: r.administrator ?? 0,
+      system: r.system ?? 0,
+      auth: r.auth || "",
+    });
+  }
   return c.json(ok(list));
 });
 
@@ -1108,7 +1252,9 @@ function roleFields(q: Record<string, string>) {
  * 001: adminRole add -> show_json(success, true, id)
  */
 adminApi.all("/role/add", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.role.add", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   const name = (q.name || "").trim();
   if (!name) return c.json(fail("explorer.error"));
   const label = q.label || "label-blue-normal";
@@ -1131,7 +1277,9 @@ adminApi.all("/role/add", async (c) => {
  * 参数: id, name, label, display, ignoreFileSize, desc, auth
  */
 adminApi.all("/role/edit", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.role.edit", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   const id = parseInt(q.id || "0", 10);
   if (!id) return c.json(fail("explorer.error"));
   const updates: string[] = [];
@@ -1166,7 +1314,9 @@ adminApi.all("/role/edit", async (c) => {
  * 参数: id
  */
 adminApi.all("/role/remove", async (c) => {
-  const q = await allParams(c);
+  const filtered = await userGroupFilter(c, "admin.role.remove", await allParams(c));
+  if (filtered.deny) return c.json(filtered.deny);
+  const q = filtered.params;
   const id = parseInt(q.id || "0", 10);
   if (!id) return c.json(fail("explorer.error"));
   const used = await c.env.DB.prepare("SELECT COUNT(*) AS c FROM user_groups WHERE authID = ?").bind(id).first<{ c: number }>();

@@ -83,6 +83,8 @@ const ZH: Record<string, string> = {
   "explorer.filter.unzipSizeLimit": "解压文件大小超出限制; 您最大可解压文档:",
   "explorer.filter.zipSizeLimit": "压缩文件大小超出限制; 您最大可压缩文档:",
   "explorer.filter.uploadSizeLimit": "上传大小超出限制; 您最大可上传文档:",
+  "explorer.groupAuthRecent": "最近使用",
+  "explorer.auth.toOuter": "对外授权 (其他部门或用户)",
 };
 
 const EN: Record<string, string> = {
@@ -157,6 +159,8 @@ const EN: Record<string, string> = {
   "explorer.filter.unzipSizeLimit": "The unzip file size exceeds the limit; the maximum you can unzip is:",
   "explorer.filter.zipSizeLimit": "Compressed file size exceeds limit; your maximum compressible documents:",
   "explorer.filter.uploadSizeLimit": "The upload size exceeds the limit; the maximum you can upload is:",
+  "explorer.groupAuthRecent": "Recently",
+  "explorer.auth.toOuter": "External authorization (other departments or users)",
 };
 
 /** Translate an i18n key to display text. Falls back to the key itself when unknown. */
