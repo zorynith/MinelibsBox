@@ -424,6 +424,164 @@ async function logsTable(c: any, params: Record<string, any>, L: (k: string, d?:
   return { total, list };
 }
 
+// ---------- 巡检: 事件产生器 ----------
+
+/**
+ * Worker 无法采集宿主 CPU/内存/磁盘/RAID 指标, 这里只实现能从库里真实得到的检查:
+ *   opsUserAccErr   : 管理员账号未绑定邮箱
+ *   dataFileDownErr : 当日下载文件次数达到阈值的用户
+ * 其余硬件类事件在 Web 端保持"已配置但不产生告警", 与 001 无 cockpit 插件的表现一致。
+ */
+const PRODUCER_EVENTS = ["opsUserAccErr", "dataFileDownErr"];
+
+/** 001 的消息模板用 %s/%d 顺序占位 */
+function formatTpl(tpl: string, args: Array<string | number>): string {
+  let i = 0;
+  return String(tpl || "").replace(/%(s|d)/g, () => String(args[i++] ?? ""));
+}
+
+function inTimeWindow(nowHM: string, from: string, to: string): boolean {
+  if (!from || !to) return true;
+  return from <= to ? nowHM >= from && nowHM <= to : nowHM >= from || nowHM <= to;
+}
+
+async function collectFindings(
+  c: any,
+  event: string,
+  merged: any,
+  L: (key: string, fallback?: string) => string
+): Promise<string[]> {
+  const db = c.env.DB;
+  if (event === "opsUserAccErr") {
+    const rows = (await db
+      .prepare("SELECT username, nickname, email FROM users WHERE roleID = 1")
+      .all()) as { results?: any[] };
+    const names = (rows.results || [])
+      .filter((u) => !u.email)
+      .map((u) => u.nickname || u.username)
+      .filter(Boolean);
+    if (!names.length) return [];
+    return [`${L("msgWarning.ops.admEmlErr")}（${names.join(", ")}）`];
+  }
+  if (event === "dataFileDownErr") {
+    const limit = Number(merged?.policy?.cntMax?.value ?? 100) || 100;
+    const start = new Date();
+    start.setUTCHours(0, 0, 0, 0); // audit_logs.created_at 为 UTC datetime('now')
+    const since = start.toISOString().slice(0, 19).replace("T", " ");
+    const rows = (await db
+      .prepare(
+        "SELECT user_id, COUNT(*) AS cnt FROM audit_logs WHERE action = 'download' AND created_at >= ? GROUP BY user_id"
+      )
+      .bind(since)
+      .all()) as { results?: any[] };
+    const over = (rows.results || []).filter((r) => Number(r.cnt) >= limit);
+    if (!over.length) return [];
+    const nowText = new Date().toISOString().slice(11, 16);
+    return [formatTpl(L("msgWarning.data.downFileErr"), [nowText, over.length, limit])];
+  }
+  return [];
+}
+
+/** 按各事件的开关/频率/时段/日上限执行巡检, 写日志与待推送消息 (供 notice、autoTask 调用) */
+export async function runMsgWarningTasks(c: any): Promise<{ events: number; messages: number }> {
+  const db = c.env.DB;
+  const lng = await pluginLng(c);
+  const L = translator(lng);
+  const config = await loadConfig(c);
+  const savedList = (config[EVNT_KEY] || {}) as Record<string, any>;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const today = new Date().toISOString().slice(0, 10);
+  const nowHM = new Date().toISOString().slice(11, 16);
+  let events = 0;
+  let messages = 0;
+
+  for (const def of NTC_EVNT_LIST) {
+    if (!PRODUCER_EVENTS.includes(def.event)) continue;
+    const saved = savedList[def.event] || {};
+    const merged = mergeEvnt(def, saved);
+    if (!Number(merged.status)) continue;
+
+    const notice = merged.notice as NoticeRule;
+    if (!inTimeWindow(nowHM, notice.timeFrom, notice.timeTo)) continue;
+
+    const result: Record<string, any> = { ...merged.result };
+    if (result.dayKey !== today) {
+      result.cntToday = 0;
+      result.dayKey = today;
+    }
+    const timeFreq = Number(notice.timeFreq || 0);
+    if (result.ntcTime && nowSec - Number(result.ntcTime) < timeFreq * 60) continue;
+    const maxDay = Number(notice.cntMaxDay || 0);
+    if (maxDay > 0 && Number(result.cntToday) >= maxDay) continue;
+
+    const texts = await collectFindings(c, def.event, merged, L).catch(() => [] as string[]);
+    if (!texts.length) continue;
+
+    let targetIDs: number[] = [];
+    try {
+      const raw = typeof notice.target === "string" ? JSON.parse(notice.target) : notice.target;
+      targetIDs = ((raw && raw.user) || []).map((n: any) => Number(n)).filter(Boolean);
+    } catch {
+      targetIDs = [];
+    }
+    if (!targetIDs.length) {
+      const admins = (await db.prepare("SELECT id FROM users WHERE roleID = 1").all()) as { results?: any[] };
+      targetIDs = (admins.results || []).map((r) => Number(r.id)).filter(Boolean);
+    }
+
+    const methods = String(notice.method || "ktips")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const title = L(def.title, def.event);
+
+    for (const text of texts) {
+      for (const method of methods) {
+        if (method === "ktips" || method === "kwarn") {
+          for (const uid of targetIDs) {
+            await db
+              .prepare(
+                "INSERT INTO plugin_msgwarning_notice (userID, event, level, method, title, message, createTime, status) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
+              )
+              .bind(uid, def.event, Number(def.level), method, title, text, nowSec)
+              .run();
+          }
+          await addMsgWarningLog(db, {
+            event: def.event,
+            userID: targetIDs[0] || 0,
+            method,
+            status: 1,
+            desc: text.slice(0, 200),
+          });
+          messages++;
+        } else if (method === "email") {
+          // Worker 无 SMTP; 平台邮件依赖外部服务, 这里如实记录失败原因而不是静默丢弃
+          await addMsgWarningLog(db, {
+            event: def.event,
+            userID: targetIDs[0] || 0,
+            method,
+            status: 0,
+            desc: "邮件通道不可用（Worker 不支持 SMTP，平台邮件服务未配置）",
+          });
+        }
+      }
+    }
+
+    result.cntToday = Number(result.cntToday || 0) + 1;
+    result.cntTotal = Number(result.cntTotal || 0) + 1;
+    result.ntcTime = nowSec;
+    result.tskTime = nowSec;
+    savedList[def.event] = { ...saved, result };
+    events++;
+  }
+
+  if (events) {
+    config[EVNT_KEY] = savedList;
+    await saveConfig(c, config);
+  }
+  return { events, messages };
+}
+
 // ---------- 路由处理 ----------
 
 /** plugin/msgWarning/table */
@@ -518,8 +676,7 @@ export async function msgWarningActionHandler(c: any): Promise<Response> {
             return c.json({ code: false, data: L("msgWarning.evnt.freqLsUseTimeErr") });
           }
           if (timeFreq < def.taskFreq) {
-            const tpl = L("msgWarning.evnt.freqLsTimeErr");
-            return c.json({ code: false, data: tpl.replace("%s", String(def.taskFreq)) });
+            return c.json({ code: false, data: formatTpl(L("msgWarning.evnt.freqLsTimeErr"), [def.taskFreq]) });
           }
         }
       }
@@ -574,14 +731,63 @@ export async function msgWarningActionHandler(c: any): Promise<Response> {
   return c.json({ code: false, data: t("common.illegalRequest") });
 }
 
-/** plugin/msgWarning/notice: 返回待推送的 ktips/kwarn 消息 (无巡检任务时为空) */
+/**
+ * plugin/msgWarning/notice: 前端每 60s 轮询。
+ * 先跑一次巡检(受各事件 timeFreq 限制, 不会重复告警), 再取走当前用户的待推送消息。
+ * 返回 { ktips?: {event:{title,level,message[]}}, kwarn?: {...} }, 无消息时 []。
+ */
 export async function msgWarningNoticeHandler(c: any): Promise<Response> {
-  return c.json({ code: true, data: [] });
+  const user: any = c.get("currentUser");
+  if (!user) return c.json({ code: true, data: [] });
+  await runMsgWarningTasks(c).catch(() => null);
+
+  const rows = (await c.env.DB.prepare(
+    "SELECT * FROM plugin_msgwarning_notice WHERE userID = ? AND status = 0 ORDER BY id ASC LIMIT 50"
+  )
+    .bind(user.id)
+    .all()) as { results?: any[] };
+  const list = rows.results || [];
+  if (!list.length) return c.json({ code: true, data: [] });
+
+  const out: Record<string, any> = {};
+  const ids: number[] = [];
+  for (const row of list) {
+    ids.push(Number(row.id));
+    const method = row.method === "kwarn" ? "kwarn" : "ktips";
+    const bucket = out[method] || (out[method] = {});
+    const item = bucket[row.event] || (bucket[row.event] = { title: row.title, level: Number(row.level), message: [] });
+    item.message.push(row.message);
+  }
+  await c.env.DB.prepare(
+    `UPDATE plugin_msgwarning_notice SET status = 1 WHERE id IN (${ids.map(() => "?").join(",")})`
+  )
+    .bind(...ids)
+    .run();
+  return c.json({ code: true, data: out });
 }
 
-/** plugin/msgWarning/message: 设置页"系统消息"体检结果; 空对象 → 前端显示"一切正常" */
+/** plugin/msgWarning/autoTask: 计划任务入口, 返回本次巡检摘要 */
+export async function msgWarningAutoTaskHandler(c: any): Promise<Response> {
+  const summary = await runMsgWarningTasks(c).catch(() => ({ events: 0, messages: 0 }));
+  return c.json({ code: true, data: summary });
+}
+
+/** plugin/msgWarning/message: 设置页"系统消息"体检; 空对象 → 前端显示"一切正常" */
 export async function msgWarningMessageHandler(c: any): Promise<Response> {
-  return c.json({ code: true, data: {} });
+  const lng = await pluginLng(c);
+  const L = translator(lng);
+  const config = await loadConfig(c);
+  const saved = (config[EVNT_KEY] || {}) as Record<string, any>;
+  const issues: string[] = [];
+  for (const def of NTC_EVNT_LIST) {
+    if (!PRODUCER_EVENTS.includes(def.event)) continue;
+    const texts = await collectFindings(c, def.event, mergeEvnt(def, saved[def.event] || {}), L).catch(
+      () => [] as string[]
+    );
+    issues.push(...texts);
+  }
+  if (!issues.length) return c.json({ code: true, data: {} });
+  return c.json({ code: true, data: { user: issues } });
 }
 
 /** plugin/msgWarning/sendType: 可用发送方式, 值为 '1' 才可勾选 */

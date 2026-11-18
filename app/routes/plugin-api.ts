@@ -32,6 +32,7 @@ import {
   msgWarningTableHandler,
   msgWarningActionHandler,
   msgWarningNoticeHandler,
+  msgWarningAutoTaskHandler,
   msgWarningTaskInfoHandler,
   msgWarningMessageHandler,
   msgWarningSendTypeHandler,
@@ -1897,7 +1898,8 @@ async function pluginHandler(c: any) {
   if (name === "msgWarning") {
     if (act === "table") return msgWarningTableHandler(c);
     if (act === "action") return msgWarningActionHandler(c);
-    if (act === "notice" || act === "autoTask") return msgWarningNoticeHandler(c);
+    if (act === "notice") return msgWarningNoticeHandler(c);
+    if (act === "autoTask") return msgWarningAutoTaskHandler(c);
     if (act === "taskInfo") return msgWarningTaskInfoHandler(c);
     if (act === "message") return msgWarningMessageHandler(c);
     if (act === "sendType") return msgWarningSendTypeHandler(c);

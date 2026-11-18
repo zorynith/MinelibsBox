@@ -464,6 +464,20 @@ export async function initDatabase(db: D1Database): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_msgwarning_log_time ON plugin_msgwarning_log(createTime)`,
 
+    // 通知中心待推送消息 (ktips/kwarn), 前端 plugin/msgWarning/notice 轮询取走
+    `CREATE TABLE IF NOT EXISTS plugin_msgwarning_notice (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userID INTEGER NOT NULL DEFAULT 0,
+      event TEXT NOT NULL DEFAULT '',
+      level INTEGER NOT NULL DEFAULT 1,
+      method TEXT NOT NULL DEFAULT 'ktips',
+      title TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      createTime INTEGER NOT NULL DEFAULT 0,
+      status INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_msgwarning_notice_user ON plugin_msgwarning_notice(userID, status)`,
+
     // 插件运行时缓存 (镜像 001 pluginCacheFileSet/Cache::set):
     // 供 yzOffice 等需要跨请求保存任务状态的插件使用, 跨 isolate 共享
     `CREATE TABLE IF NOT EXISTS plugin_cache (
