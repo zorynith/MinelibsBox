@@ -464,6 +464,80 @@ export async function initDatabase(db: D1Database): Promise<void> {
       createTime INTEGER NOT NULL DEFAULT 0
     )`,
 
+    // 项目管理: 项目表 (镜像 001/plugins/project plugin_project; desc 为保留字需加引号)
+    `CREATE TABLE IF NOT EXISTS plugin_project (
+      projectID INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      "desc" TEXT NOT NULL DEFAULT '',
+      status INTEGER NOT NULL DEFAULT 1,
+      createUser INTEGER NOT NULL DEFAULT 0,
+      modifyUser INTEGER NOT NULL DEFAULT 0,
+      createTime INTEGER NOT NULL DEFAULT 0,
+      modifyTime INTEGER NOT NULL DEFAULT 0
+    )`,
+
+    // 项目管理: 任务表 (isList=1 为分组节点; sort 为同级内从 1 起的连续序号)
+    `CREATE TABLE IF NOT EXISTS plugin_project_task (
+      taskID INTEGER PRIMARY KEY AUTOINCREMENT,
+      projectID INTEGER NOT NULL DEFAULT 0,
+      pid INTEGER NOT NULL DEFAULT 0,
+      name TEXT NOT NULL DEFAULT '',
+      "desc" TEXT NOT NULL DEFAULT '',
+      status INTEGER NOT NULL DEFAULT 1,
+      isList INTEGER NOT NULL DEFAULT 0,
+      sort INTEGER NOT NULL DEFAULT 0,
+      ownerUser INTEGER NOT NULL DEFAULT 0,
+      createUser INTEGER NOT NULL DEFAULT 0,
+      modifyUser INTEGER NOT NULL DEFAULT 0,
+      createTime INTEGER NOT NULL DEFAULT 0,
+      modifyTime INTEGER NOT NULL DEFAULT 0
+    )`,
+
+    // 项目管理: 项目扩展属性 KV (部分 key 以 JSON 存储, 见 ProjectModel metaKeyJson)
+    `CREATE TABLE IF NOT EXISTS plugin_project_meta (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      projectID INTEGER NOT NULL DEFAULT 0,
+      key TEXT NOT NULL DEFAULT '',
+      value TEXT NOT NULL DEFAULT '',
+      createTime INTEGER NOT NULL DEFAULT 0,
+      modifyTime INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (projectID, key)
+    )`,
+
+    // 项目管理: 任务扩展属性 KV
+    `CREATE TABLE IF NOT EXISTS plugin_project_task_meta (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      taskID INTEGER NOT NULL DEFAULT 0,
+      key TEXT NOT NULL DEFAULT '',
+      value TEXT NOT NULL DEFAULT '',
+      createTime INTEGER NOT NULL DEFAULT 0,
+      modifyTime INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (taskID, key)
+    )`,
+
+    // 项目管理: 成员表 (项目成员 taskID=0; 任务成员 projectID=0; authType 1/2/3)
+    `CREATE TABLE IF NOT EXISTS plugin_project_user (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      projectID INTEGER NOT NULL DEFAULT 0,
+      taskID INTEGER NOT NULL DEFAULT 0,
+      userID INTEGER NOT NULL DEFAULT 0,
+      authType INTEGER NOT NULL DEFAULT 1,
+      createTime INTEGER NOT NULL DEFAULT 0,
+      modifyTime INTEGER NOT NULL DEFAULT 0
+    )`,
+
+    // 项目管理: 增量日志 (项目级日志 taskID=0; 前端按 id 增量拉取)
+    `CREATE TABLE IF NOT EXISTS plugin_project_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      projectID INTEGER NOT NULL DEFAULT 0,
+      taskID INTEGER NOT NULL DEFAULT 0,
+      userID INTEGER NOT NULL DEFAULT 0,
+      logType TEXT NOT NULL DEFAULT '',
+      "desc" TEXT NOT NULL DEFAULT '',
+      createTime INTEGER NOT NULL DEFAULT 0,
+      modifyTime INTEGER NOT NULL DEFAULT 0
+    )`,
+
     // Indexes
     `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(share_token)`,
@@ -482,6 +556,18 @@ export async function initDatabase(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_source_meta_sourceID ON source_meta(sourceID, key)`,
     `CREATE INDEX IF NOT EXISTS idx_share_to_shareID ON share_to(shareID)`,
     `CREATE INDEX IF NOT EXISTS idx_share_to_target ON share_to(targetType, targetID)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_status ON plugin_project(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_createUser ON plugin_project(createUser)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_task_project ON plugin_project_task(projectID, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_task_pid ON plugin_project_task(pid)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_task_sort ON plugin_project_task(projectID, pid, sort)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_task_meta_key ON plugin_project_task_meta(key)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_meta_key ON plugin_project_meta(key)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_user_project ON plugin_project_user(projectID, taskID)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_user_user ON plugin_project_user(userID)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_log_project ON plugin_project_log(projectID, id)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_log_user ON plugin_project_log(userID)`,
+    `CREATE INDEX IF NOT EXISTS idx_project_log_type ON plugin_project_log(projectID, logType)`,
     `CREATE INDEX IF NOT EXISTS idx_user_notice_user ON user_notice(userID)`,
     `CREATE INDEX IF NOT EXISTS idx_audit_logs_time ON audit_logs(created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_task_result_expire ON task_result(expire_at)`,
