@@ -481,3 +481,15 @@ Entries discovered by the Agent during task execution should follow this format:
   - repair：storageBases 补部门空间 __group__/<gid>/ 与保险箱 __safe__/<uid>/ 及其 vpath；新增 findPathsBySourceIDs 做 sourceID→vpath 反查（全量枚举，200k 上限，含祖先目录推导）；clearSource 改为真删（deleteVPath + source_meta/source_secret/folder_password/recent/share 清理）；resetSizeById 改真失效缓存（explorer-api 导出 invalidateSpaceUsageByBase/invalidateAllSpaceUsage）。其余 9 条按“worker 无 io_file/io_source 文档表”的事实输出准确说明，不再假装成功。
   - 本地验证（省时要点）：`cp wrangler.jsonc.example wrangler.jsonc` → 删 `.wrangler/deploy`（否则 wrangler 重定向到 dist/wrangler.json，无 D1/R2 绑定）→ `npx wrangler dev --port 8789 --local`；POST 需带 cookie 里的 CSRF_TOKEN。已实测通过：密级仅 group 生效/home 被忽略、list 与 pathInfo 均返回 metaInfo.user_sourceSecret、shareInfo/historyCount/targetType、license/index、resetSizeById 反查路径、clearSource（含分享记录清理）。
   - 仍保留的差异：client 插件（用户明确不要）；myShare 的 groupParentLevel（worker 无部门空间 io_source 模型，恒 null）。
+
+[Project Knowledge Summary]
+- Date: 2026-11-18
+- Context: 第二轮深度差异审计（行为/参数/权限/插件资产），接口 action 层已无缺口
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - 已证伪的误报：`explorer/index/fileDownloadRemove` 并不缺 —— 前端 apiConfig 实际映射 `explorer/share/fileDownloadRemove`，对应 share-api.ts:1474，打包下载链路正常。以后审计“路由缺失”必须先核对前端常量值，不能只看 action 名。
+  - P0：`user/view/sendCode` 把验证码放进响应 `data.code`（user-account-api.ts:130 `ok({send:true, code})`），配合两步 findpwd 可接管任意账号。
+  - P1：① 登录验证码假开关（needCheckCode 仅存在于 user-api.ts:626 默认值，loginSubmit 不校验 checkCode，前端 main.js:79146/90204 会渲染并传值）；② 禁用用户仍可登录/继续操作（user-api.ts loginSubmit 与 lib/auth.ts:52-81 均不看 status）；③ 改密后旧会话不失效（无 001 userHash 机制）且前端传 `rememberPassword` 而 Worker 读 `remember`（user-api.ts:70）；④ 权限四缺：角色级 canCheckRole 未接（lib/auth-role-config.ts 仅后台展示）、sourceAuth 无父级继承（explorer-api.ts:598 精确 sourceID）、io 挂载对任意登录用户全放行（:586）、AUTH_SHARE 位未用于 userShare/add；且 mkdir/mkfile 用 AUTH_EDIT、粘贴用 AUTH_UPLOAD，与 001 相反；⑤ pathRename 无重名/非法字符/长度校验→静默覆盖（:2660+，/share/pathRename:1135 同病）；⑥ 分享三降级：shareLinkAllowEdit 未在 edit 动作校验、分享者权限被收回后旧外链仍可用、numDownload 把 HEAD/Range 也计数。
+  - P2：上传无秒传/断点续传（explorer-api.ts:4578-4591 恒空）、modifyTime 忽略、settings.upload 一组 DB 值未回填（恒用 user-api.ts:558 硬编码）；下载无 Range（视频不能拖动）、无 type=image 缩略、fileOutBy 忽略 add、zipClient/downloadZipLimit 未实现；pathHidden 未过滤、newUserFolder/newUserApp 硬编码（lib/user-init.ts:45-97）、fileHistoryMax 不裁剪、groupSpaceLimit 系列未消费；粘贴后不清剪贴板、同目录复制不克隆、fileRepeat 被忽略。
+  - 插件资产：pdfjs 缺 Djvu/ofd 且 fileExt 裁成 pdf,ai；officeViewer 缺 jsoffice/libreoffice（只剩 webOffice 只读）；storeImport/start、oauth/bind、msgWarning/table|action、fileThumb/check 在 plugin-api.ts 无分支（前端点击即“未知插件”）。
+  - 已核实一致、无需重复审计：密码锁定/强度/CSRF/并发登录/踢设备/登录日志、找回密码两步、图形验证码生成与校验机制本身、分享密码/期限/权限位字段、回收站与恢复自动重命名、zip/unzip、8 个权限位常量与主要调用点。
