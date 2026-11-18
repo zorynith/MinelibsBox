@@ -370,6 +370,17 @@ export async function initDatabase(db: D1Database): Promise<void> {
       UNIQUE (userID, sourceID)
     )`,
 
+    // 文档密级 (mirrors 001 SourceSecret model: sourceID -> typeID)
+    `CREATE TABLE IF NOT EXISTS source_secret (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sourceID TEXT NOT NULL,
+      typeID TEXT NOT NULL DEFAULT '',
+      createUser INTEGER NOT NULL DEFAULT 0,
+      createTime INTEGER NOT NULL DEFAULT 0,
+      modifyTime INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (sourceID)
+    )`,
+
     // 最近访问 (mirrors 001 explorer listRecent: 记录用户最近打开的文件/文件夹)
     `CREATE TABLE IF NOT EXISTS recent (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -554,6 +565,7 @@ export async function initDatabase(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_group_meta_groupID ON group_meta(groupID, key)`,
     `CREATE INDEX IF NOT EXISTS idx_group_tag_file_group ON group_tag_file(groupID, path)`,
     `CREATE INDEX IF NOT EXISTS idx_source_meta_sourceID ON source_meta(sourceID, key)`,
+    `CREATE INDEX IF NOT EXISTS idx_source_secret_sourceID ON source_secret(sourceID)`,
     `CREATE INDEX IF NOT EXISTS idx_share_to_shareID ON share_to(shareID)`,
     `CREATE INDEX IF NOT EXISTS idx_share_to_target ON share_to(targetType, targetID)`,
     `CREATE INDEX IF NOT EXISTS idx_project_status ON plugin_project(status)`,
@@ -939,6 +951,29 @@ export async function getSetting(db: D1Database, key: string): Promise<string | 
 
 export async function setSetting(db: D1Database, key: string, value: string) {
   return db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(key, value).run();
+}
+
+/**
+ * 001 SystemOption 中语义为 "JSON 字符串" 的配置项。
+ * 前端 (admin 表单 / 属性面板) 用 jsonDecode(...) 解析这些值, 因此下发时必须保持字符串,
+ * 不能像其它配置那样 JSON.parse 成数组/对象。
+ */
+export const RAW_STRING_SETTING_KEYS = new Set(["sourceSecretList", "sourceSecretSetUser"]);
+
+/** settings.value 的读取解析: JSON 优先, 但 sourceSecretList 等保持原始字符串。 */
+export function parseSettingValue(key: string, raw: string): any {
+  if (RAW_STRING_SETTING_KEYS.has(key)) return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** 写入前的归一化: 保证 sourceSecretList 始终以 JSON 字符串落库 (001 SystemOption 行为)。 */
+export function normalizeSettingValue(key: string, value: any): string {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }
 
 // User fav helpers (follows 001 user_fav model behavior)

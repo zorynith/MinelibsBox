@@ -4,7 +4,7 @@
  */
 import { Hono } from "hono";
 import { authRequired, hashPassword, isAdmin } from "../lib/auth";
-import { getUserByUsername, getUserOption, userSearch, setSetting, getSetting, addAuditLog, getPluginMeta, setPluginStatus, setPluginConfig, getIoSourceList, getIoSourceById } from "../lib/db";
+import { getUserByUsername, getUserOption, userSearch, setSetting, getSetting, addAuditLog, getPluginMeta, setPluginStatus, setPluginConfig, getIoSourceList, getIoSourceById, parseSettingValue, normalizeSettingValue } from "../lib/db";
 import { parseKodPassword } from "../lib/mcrypt";
 import { t } from "../lib/i18n";
 import { userDefaultInit } from "../lib/user-init";
@@ -1864,12 +1864,8 @@ adminApi.all("/setting/get", async (c) => {
   const rows = await c.env.DB.prepare("SELECT key, value FROM settings").all();
   const map: Record<string, any> = {};
   for (const r of rows.results as any[]) {
-    const v = r.value;
-    try {
-      map[r.key] = JSON.parse(v);
-    } catch {
-      map[r.key] = v;
-    }
+    // sourceSecretList 等"JSON 字符串"型配置保持字符串 (001 SystemOption 语义)
+    map[r.key] = parseSettingValue(r.key, r.value);
   }
   return c.json(ok(map));
 });
@@ -1893,7 +1889,9 @@ adminApi.all("/setting/set", async (c) => {
   }
   for (const [k, v] of Object.entries(obj)) {
     if (v === undefined) continue;
-    const value = typeof v === "string" ? v : JSON.stringify(v);
+    const value = normalizeSettingValue(k, v);
+    // 前端 table 组件在密级列表为空时会提交字符串 "null"; 保留旧值, 避免误清空已配置密级
+    if (k === "sourceSecretList" && (value === "null" || value === "")) continue;
     await setSetting(c.env.DB, k, value);
   }
   return c.json(ok("explorer.success"));

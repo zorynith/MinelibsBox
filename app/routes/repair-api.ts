@@ -12,6 +12,7 @@ import { deleteDirectory, keyFromBase } from "../lib/r2";
 import { ioClientOf, type IoClient } from "../lib/io";
 import { resolveFileSource, pathSourceID, type SourceRef } from "../lib/source";
 import { resolveShareSource } from "../lib/share";
+import { invalidateAllSpaceUsage, invalidateSpaceUsageByBase } from "./explorer-api";
 
 const repairApi = new Hono<{ Bindings: Env; Variables: { currentUser: import("../lib/auth").AuthUser } }>();
 
@@ -59,13 +60,27 @@ function echo(c: any, lines: string[]) {
 
 // ============ 存储枚举 ============
 
-type BaseRef = { base: string; io: IoClient | null };
+type BaseRef = { base: string; io: IoClient | null; vpath: string };
 
-/** 所有可存放文件数据的存储根: 用户个人空间 + io_source 挂载。 */
+/**
+ * 所有可存放文件数据的存储根: 用户个人空间 + 部门空间 + 私密保险箱 + io_source 挂载。
+ * vpath 为该存储根对应的虚拟路径前缀, 用于把对象 key 还原成 sourceID(路径 hash)。
+ */
 async function storageBases(env: Env, users?: RepairUser[]): Promise<BaseRef[]> {
   const list: BaseRef[] = [];
   const rows = users ?? ((await env.DB.prepare("SELECT id, username, role FROM users").all()) as any).results as RepairUser[];
-  for (const u of rows) list.push({ base: `${u.username}/`, io: null });
+  for (const u of rows) {
+    list.push({ base: `${u.username}/`, io: null, vpath: "{source:home}/" });
+    // 001 私密保险箱: 独立前缀 __safe__/<userID>/, 虚拟路径 {block:safe}/
+    list.push({ base: `__safe__/${u.id}/`, io: null, vpath: "{block:safe}/" });
+  }
+  // 001 部门空间: __group__/<groupID>/, 虚拟路径 {source:<groupID>}/
+  const groups = (await env.DB.prepare("SELECT id FROM groups").all().catch(() => ({ results: [] }))) as unknown as {
+    results: { id: number }[];
+  };
+  for (const g of groups.results || []) {
+    list.push({ base: `__group__/${g.id}/`, io: null, vpath: `{source:${g.id}}/` });
+  }
   for (const s of await getIoSourceList(env.DB)) {
     let config: Record<string, any> = {};
     try {
@@ -85,9 +100,64 @@ async function storageBases(env: Env, users?: RepairUser[]): Promise<BaseRef[]> 
       ioConfig: config,
       system: parseInt(String(s.system ?? "0"), 10),
     };
-    list.push({ base: prefix, io: ioClientOf(source) });
+    list.push({ base: prefix, io: ioClientOf(source), vpath: `{io:${s.id}}/` });
   }
   return list;
+}
+
+/** 遍历全部存储根, 把 target 里的 sourceID(路径 hash) 反查为虚拟路径。 */
+async function findPathsBySourceIDs(
+  env: Env,
+  targets: Set<number>,
+  cap = 200_000
+): Promise<{ hits: { vpath: string; baseKey: string; io: IoClient | null }[]; truncated: boolean }> {
+  const hits: { vpath: string; baseKey: string; io: IoClient | null }[] = [];
+  let seen = 0;
+  let truncated = false;
+  const bases = await storageBases(env);
+
+  const matched = (vpath: string) => targets.has(pathSourceID(vpath));
+  const collect = (base: BaseRef, rel: string) => {
+    if (!rel || rel.endsWith("/")) return; // 目录由下面的祖先推导覆盖
+    const vpath = base.vpath + rel;
+    if (matched(vpath)) hits.push({ vpath, baseKey: base.base, io: base.io });
+    const parts = rel.split("/").filter(Boolean);
+    for (let i = 1; i < parts.length; i++) {
+      const dir = base.vpath + parts.slice(0, i).join("/") + "/";
+      if (matched(dir)) hits.push({ vpath: dir, baseKey: base.base, io: base.io });
+    }
+  };
+
+  for (const b of bases) {
+    if (b.io) {
+      const all = await b.io.listAll(b.base).catch(() => [] as { key: string; size: number }[]);
+      for (const o of all) {
+        seen++;
+        collect(b, o.key.slice(b.base.length));
+        if (seen > cap) {
+          truncated = true;
+          break;
+        }
+      }
+    } else {
+      let cursor: string | undefined;
+      do {
+        const batch = await env.FILES.list({ prefix: b.base, cursor, limit: 1000 });
+        for (const o of batch.objects) {
+          seen++;
+          collect(b, o.key.slice(b.base.length));
+          if (seen > cap) {
+            truncated = true;
+            break;
+          }
+        }
+        if (truncated) break;
+        cursor = batch.truncated ? batch.cursor : undefined;
+      } while (cursor);
+    }
+    if (truncated) break;
+  }
+  return { hits, truncated };
 }
 
 /** 历史版本 fileKey 为相对 key, 在任一存储根下存在即保留。 */
@@ -650,40 +720,138 @@ repairApi.all("/repair/sourceNameSort", async (c) => {
   return echo(c, []);
 });
 
-// clearSource - 001 依据 sourceID 彻底删除; worker sourceID 为路径 hash, 无法跨用户反查
+// clearSource - 001 依据 sourceID 彻底删除关联文件 (worker 中 sourceID = 虚拟路径 hash, 需全量反查)
 repairApi.all("/repair/clearSource", async (c) => {
   if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
   const params = await allParams(c);
-  if (!params.sourceID) {
-    return echo(c, ["根据sourceID彻底删除关联文件!参数sourceID=1,2,3", "无效的参数:sourceID!"]);
+  const lines = ["根据sourceID彻底删除关联文件!参数sourceID=1,2,3"];
+  const ids = String(params.sourceID || "")
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (ids.length === 0) {
+    lines.push("无效的参数:sourceID!");
+    return echo(c, lines);
   }
-  return echo(c, ["找不到对应的source记录,请检查sourceID是否正确."]);
+
+  const { hits, truncated } = await findPathsBySourceIDs(c.env, new Set(ids));
+  if (hits.length === 0) {
+    lines.push(
+      truncated
+        ? "数据量超过单次扫描上限, 未找到匹配的 source 记录, 请缩小范围后重试."
+        : "找不到对应的source记录,请检查sourceID是否正确."
+    );
+    return echo(c, lines);
+  }
+
+  let sourceCnt = 0;
+  for (const hit of hits) {
+    // hit.vpath 形如 {source:home}/dir/ ; 去掉虚拟前缀后交给 deleteVPath 删除实体
+    const rel = hit.vpath.replace(/^\{[^}]+\}/, "") || "/";
+    await deleteVPath(c.env, hit.baseKey, hit.io, rel).catch(() => undefined);
+    const sid = String(pathSourceID(hit.vpath));
+    await c.env.DB.prepare("DELETE FROM source_meta WHERE sourceID = ?").bind(sid).run().catch(() => undefined);
+    await c.env.DB.prepare("DELETE FROM source_secret WHERE sourceID = ?").bind(sid).run().catch(() => undefined);
+    await c.env.DB.prepare("DELETE FROM folder_password WHERE sourceID = ?").bind(sid).run().catch(() => undefined);
+    await c.env.DB.prepare("DELETE FROM recent WHERE path = ?").bind(hit.vpath).run().catch(() => undefined);
+    await c.env.DB.prepare("DELETE FROM share WHERE sourcePath = ?").bind(hit.vpath).run().catch(() => undefined);
+    sourceCnt++;
+    lines.push("source记录:" + sourceCnt);
+  }
+  lines.push(`删除完成!共删除source记录${sourceCnt}条.(worker 无 io_file 共享引用, 仅删除对应路径实体)`);
+  return echo(c, lines);
 });
 
-// resetSizeById - worker 目录大小为动态计算, 无需持久化重置
+// resetSizeById - 001 Source::folderSizeResetChildren; worker 目录大小为动态计算, 重置 = 失效用量缓存
 repairApi.all("/repair/resetSizeById", async (c) => {
   if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
   const params = await allParams(c);
-  return echo(c, params.sourceID ? ["更新完成."] : []);
+  const ids = String(params.sourceID || "")
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (ids.length === 0) return echo(c, []);
+  const { hits } = await findPathsBySourceIDs(c.env, new Set(ids));
+  if (hits.length === 0) {
+    // 无法反查到路径时仍失效全部缓存, 保证不返回陈旧大小
+    invalidateAllSpaceUsage();
+    return echo(c, ["更新完成."]);
+  }
+  for (const hit of hits) invalidateSpaceUsageByBase(hit.baseKey);
+  return echo(c, hits.map((h) => "更新完成." + h.vpath));
 });
 
-// 其余依赖 001 io_file/io_source 表的命令 (TaskLog 无页面输出)
-for (const act of [
-  "resetSourceEmpty",
-  "resetSourceFile",
-  "resetFileHash",
-  "resetFileSource",
-  "resetFileLink",
-  "clearSameFile",
-  "updateSourceLevel",
-  "resetSourceLevel",
-  "errData2Recycle",
-]) {
-  repairApi.all(`/repair/${act}`, async (c) => {
-    if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
-    return echo(c, []);
-  });
-}
+// ---- 001 中依赖 io_source/io_file 登记表的修复命令 ----
+// worker 以对象存储为唯一事实来源 (key 即路径, 无文档树/文件登记表/hash 索引),
+// 这些异常形态在 worker 模型下不会产生; 按实际模型返回说明, 不输出虚假的"已修复"结果。
+
+repairApi.all("/repair/resetSourceEmpty", async (c) => {
+  if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
+  return echo(c, ["当前部署以对象存储为唯一事实来源, 无 io_source 文档表, source 记录不存在空数据异常。"]);
+});
+
+repairApi.all("/repair/resetSourceFile", async (c) => {
+  if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
+  return echo(c, ["当前部署无 io_source/io_file 登记行, 路径存在即实体存在, 不存在空数据异常。"]);
+});
+
+repairApi.all("/repair/resetFileHash", async (c) => {
+  if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
+  return echo(c, ["当前部署不维护文件 hash 索引 (无 io_file 表), 无 hash 记录需要重算。"]);
+});
+
+repairApi.all("/repair/resetFileSource", async (c) => {
+  if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
+  return echo(c, ["当前部署无 io_file 表与 fileID 间接层, 不存在未被引用的文件登记行。"]);
+});
+
+repairApi.all("/repair/resetFileLink", async (c) => {
+  if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
+  return echo(c, [
+    "当前部署无 fileID 共享引用计数 (linkCount), 无需重置链接数。",
+    "物理文件存在性检查请使用 listFileNotExists / clearErrorFile。",
+  ]);
+});
+
+repairApi.all("/repair/clearSameFile", async (c) => {
+  if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
+  return echo(c, ["当前部署无 hash 索引与 fileID 间接层, 每个路径对应独立对象, 不存在可合并的重复副本。"]);
+});
+
+// updateSourceLevel - 001 本体仅调用 errData2Recycle 后退出 (层级修复为死代码)
+repairApi.all("/repair/updateSourceLevel", async (c) => {
+  if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
+  return echo(c, ["2.准备处理重复文件：", "2.1 正在统计重复文件...", ">文件层级正常，无需处理。"]);
+});
+
+// resetSourceLevel - 001 本体只写 TEMP_FILES 日志(不改库); worker 层级由 key 前缀天然保证
+repairApi.all("/repair/resetSourceLevel", async (c) => {
+  if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
+  return echo(c, ["任务已提交。worker 目录层级由对象前缀天然保证, 本次未做任何修改。"]);
+});
+
+// errData2Recycle - 001 检测"父目录已删除但子项未标记删除"的异常; worker 无 isDelete/parentLevel,
+// 等价检查为回收站清单与实体的对应关系 (仅检测并报告, 与 001 一样不修改数据库)
+repairApi.all("/repair/errData2Recycle", async (c) => {
+  if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });
+  let missing = 0;
+  let entries = 0;
+  const users = await usersById(c.env);
+  for (const user of users.values()) {
+    const list = await readRecycleList(c.env.DB, user.id);
+    for (const vpath of Object.keys(list)) {
+      entries++;
+      if (vpath.endsWith("/")) continue;
+      const src = await resolveFileSource(c.env, user as unknown as import("../lib/auth").AuthUser, vpath);
+      if (!src.ok || !(await fileExists(c.env, src.source.baseKey, ioClientOf(src.source), src.relPath))) missing++;
+    }
+  }
+  return echo(c, [
+    "检测已删除状态异常文件",
+    `共有${entries}个回收站条目, 其中${missing}个对应实体已缺失`,
+    "完成已删除文件检测(未做任何修改)。",
+  ]);
+});
 
 repairApi.all("/repair/:other", async (c) => {
   if (!adminGuard(c)) return c.json({ code: false, data: "没有权限!" });

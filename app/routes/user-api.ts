@@ -3,7 +3,7 @@
  * These are the critical APIs the 003 SPA needs to bootstrap
  */
 import { Hono } from "hono";
-import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions, addAuditLog } from "../lib/db";
+import { getUserByUsername, createSession, deleteSession, getUserById, getSetting, setSetting, getSession, getDefaultIoSource, getUserOption, getAllUserOptions, addAuditLog, parseSettingValue } from "../lib/db";
 import { getSessionId, clearSessionCookie, setSessionCookie, verifyPassword, authRequired } from "../lib/auth";
 import { parseKodPassword } from "../lib/mcrypt";
 import { DEV_KOD, devLicenseHashes } from "../lib/license";
@@ -42,12 +42,8 @@ async function loadSettingsMap(db: D1Database): Promise<Record<string, any>> {
   const rows = await db.prepare("SELECT key, value FROM settings").all();
   const map: Record<string, any> = {};
   for (const r of rows.results as any[]) {
-    const v = r.value;
-    try {
-      map[r.key] = JSON.parse(v);
-    } catch {
-      map[r.key] = v;
-    }
+    // sourceSecretList 等"JSON 字符串"型配置保持字符串, 否则前端 jsonDecode 拿到数组会解析失败
+    map[r.key] = parseSettingValue(r.key, r.value);
   }
   return map;
 }
@@ -283,6 +279,13 @@ userApi.get("/license", async (c) => {
 userApi.post("/license", async (c) => {
   return c.json({ code: true, data: { valid: true, type: "dev", expired: false, versionType: "B", versionText: "开发版" } });
 });
+// license/index - 前端 apiConfig 的 licenseRegister 指向 user/license/index (001 商业授权模块,
+// 本仓库不含该模块源码; 开发版一律视为已授权, 返回前端弹窗可直接展示的文案)
+const licenseRegisterHandler = async (c: any) => {
+  return c.json({ code: true, data: t("common.version.authorizeSuccess") });
+};
+userApi.get("/license/index", licenseRegisterHandler);
+userApi.post("/license/index", licenseRegisterHandler);
 
 // call - system call endpoint (seajs uses eval, must return JS)
 userApi.get("/view/call", async (c) => {

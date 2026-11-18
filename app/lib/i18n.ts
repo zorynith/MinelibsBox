@@ -13,6 +13,7 @@
 
 const ZH: Record<string, string> = {
   "explorer.success": "操作成功",
+  "common.version.authorizeSuccess": "恭喜您，在线升级授权成功！",
   "explorer.error": "操作失败",
   "explorer.repeatError": "名称重复",
   "explorer.settingSuccess": "修改已生效",
@@ -89,6 +90,7 @@ const ZH: Record<string, string> = {
 
 const EN: Record<string, string> = {
   "explorer.success": "Success",
+  "common.version.authorizeSuccess": "Congratulations, the license has been activated successfully!",
   "explorer.error": "Error",
   "explorer.repeatError": "Name already exists",
   "explorer.settingSuccess": "Saved",

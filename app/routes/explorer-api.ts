@@ -32,6 +32,8 @@ import { BUILTIN_LIGHT_APPS } from "../lib/light-apps-data";
 import { ALL_PLUGINS, loadPluginPackage, defaultPluginConfig, normalizePluginConfig } from "../lib/plugins";
 import { getStaticHost, getAppHost } from "../lib/user-system";
 import { applyPathInfoCover, applyPathInfoCoverBatch } from "../lib/user-view";
+import { applySourceSecret, applySourceSecretBatch, applySourceSecretItem } from "../lib/source-secret";
+import { applyShareInfoBatch, applyHistoryCountBatch } from "../lib/list-extra";
 import { taskResultSet } from "../lib/task-result-cache";
 import { listViewSave, listViewApply } from "../lib/list-view";
 import { mcryptEncode, mcryptDecode } from "../lib/mcrypt";
@@ -380,13 +382,25 @@ function kodFileType(name: string): string {
   return "others";
 }
 
-/** 组装列表项的 pathDisplay: 传入源显示名链(pathDisplayBase)时替换 `{source:...}` 前缀; 否则用 displayPath 兜底。 */
+/**
+ * 组装列表项的 pathDisplay: 传入源显示名链(pathDisplayBase)时替换 `{source:...}`/`{io:N}` 前缀;
+ * 否则用 displayPath 兜底。001 listDriver::parsePathIO 对外部存储路径做同样的前缀替换。
+ */
 function itemPathDisplay(path: string, pathDisplayBase?: string): string {
   if (pathDisplayBase) {
-    const rel = path.replace(/^\{source:[^}]+\}/, "");
+    const rel = path.replace(/^\{(?:source:[^}]+|io:\d+)\}/, "");
     return pathDisplayBase + rel;
   }
   return displayPath(path);
+}
+
+/** 001 listDriver::parsePathIO: 存储驱动 -> LNG('admin.storage.<driver>'), 无翻译回退驱动名。 */
+function ioTypeLabel(driver: string): string {
+  const name = String(driver || "");
+  if (!name) return "";
+  const key = "admin.storage." + name.toLowerCase();
+  const val = t(key);
+  return val && val !== key ? val : name;
 }
 
 /**
@@ -690,11 +704,17 @@ async function ioSourceUsedSize(env: Env, s: Record<string, any>): Promise<numbe
 const s3SizeCache = new Map<string, { size: number; ts: number }>();
 
 /** 失效某存储根的空间用量缓存 (R2 sizeCache + S3 s3SizeCache) */
-function invalidateSpaceUsageByBase(baseKey: string) {
+export function invalidateSpaceUsageByBase(baseKey: string) {
   sizeCache.delete(baseKey);
   for (const k of s3SizeCache.keys()) {
     if (k.endsWith(`:${baseKey}`)) s3SizeCache.delete(k);
   }
+}
+
+/** 失效全部空间用量缓存 (001 repair resetSizeById: 目录大小动态计算, 重置即失效缓存) */
+export function invalidateAllSpaceUsage() {
+  sizeCache.clear();
+  s3SizeCache.clear();
 }
 
 /** 统计外部存储挂载已用空间 (实时 list-all, 带 TTL 缓存); 配置缺失时返回 0 */
@@ -1043,8 +1063,12 @@ async function blockDriver(c: AppContext, user: Vars["currentUser"]): Promise<an
       type: "folder",
       isFolder: true,
       isParent: true,
-      ioType: s.id,
+      // 001 listDriver::driverMake: ioType 为驱动类型文案, ioDriver 为驱动原始名
+      ioType: ioTypeLabel(String(s.driver || "")),
       ioDriver: s.driver,
+      driverType: s.driver,
+      ioIsSystem: system ? 1 : 0,
+      icon: "io-" + String(s.driver || "").toLowerCase(),
       size: await ioSourceUsedSize(c.env, s),
       driverSpace: Math.round(parseInt(String(s.size_max ?? "0"), 10) * 1024 * 1024 * 1024),
       pathDesc: system ? `系统存储: ${s.name}` : `挂载存储: ${s.name}`,
@@ -1660,10 +1684,12 @@ async function listDriverRoot(c: AppContext): Promise<Response> {
       path: `{io:${s.id}}/`,
       size: await ioSourceUsedSize(c.env, s),
       driverSpace: Math.round(parseInt(String(s.size_max ?? "0"), 10) * 1024 * 1024 * 1024),
-      driverDefault: parseInt(String(s.default ?? "0"), 10) === 1 ? "1" : "0",
+      // io_source 表字段为 is_default (001 io_source.default 语义)
+      driverDefault: parseInt(String((s as any).is_default ?? "0"), 10) === 1 ? "1" : "0",
       driverType: s.driver,
       ioDriver: s.driver,
-      ioType: s.driver,
+      ioType: ioTypeLabel(String(s.driver || "")),
+      ioIsSystem: parseInt(String(s.system ?? "0"), 10) === 1 ? 1 : 0,
       icon: "io-" + String(s.driver || "").toLowerCase(),
       isParent: true,
     });
@@ -1967,6 +1993,27 @@ explorerApi.all("/list/path", async (c) => {
       }
     }
 
+    // 001 list::parseData 附加项: 分享角标(sourceInfo.shareInfo) 与 历史版本数(historyCount)
+    const allItems = [...folderList, ...fileList] as Record<string, any>[];
+    await applyShareInfoBatch(c.env.DB, user.id, allItems);
+    await applyHistoryCountBatch(c.env.DB, allItems);
+    // 001 文档密级: 列表项注入 metaInfo.user_sourceSecret, 前端据此渲染密级徽标
+    await applySourceSecretBatch(c.env.DB, allItems);
+
+    // 001 listDriver::parsePathIO: 外部存储项补 io 驱动信息 (图标/类型列/属性面板)
+    if (source.type === "io") {
+      const ioLabel = ioTypeLabel(String(source.driver || ""));
+      const ioConfig = (source.ioConfig as Record<string, any>) || {};
+      for (const item of allItems) {
+        item.ioDriver = source.driver ?? "";
+        item.ioType = ioLabel;
+        item.ioIsSystem = parseInt(String(source.system ?? "0"), 10) === 1 ? 1 : 0;
+        if (ioConfig.domain) item.ioDomain = String(ioConfig.domain);
+        if (ioConfig.bucket) item.ioBucket = String(ioConfig.bucket);
+        if (ioConfig.basePath) item.ioBasePath = String(ioConfig.basePath);
+      }
+    }
+
     // 001 listView::listDataSet: 当前路径生效的显示模式/排序偏好
     const listView = await listViewApply(c.env.DB, user.id, parsed.thisPath);
 
@@ -2224,6 +2271,8 @@ explorerApi.all("/index/pathInfo", async (c) => {
         isReadable: true,
         isTruePath: true,
         sourceID: fileSourceID(path),
+        targetType: src.source.type,
+        targetID: src.source.targetID,
         size: 0,
         ext: "",
         modifyTime: nowSec(),
@@ -2258,6 +2307,8 @@ explorerApi.all("/index/pathInfo", async (c) => {
           isReadable: true,
           isTruePath: true,
           sourceID: fileSourceID(path),
+          targetType: src.source.type,
+          targetID: src.source.targetID,
           size: obj.size,
           ext,
           modifyTime: toUnix(obj.uploaded),
@@ -2272,6 +2323,10 @@ explorerApi.all("/index/pathInfo", async (c) => {
 
   if (result.length === 0) return c.json({ code: false, data: "路径不存在" });
   await applyPathInfoCoverBatch(c.env.DB, result, getAppHost(c));
+  // 001 index::fileInfoAddHistory + userShare::shareAppendItem + 文档密级: 详情项同样需要这些字段
+  await applyHistoryCountBatch(c.env.DB, result);
+  await applyShareInfoBatch(c.env.DB, user.id, result);
+  await applySourceSecretBatch(c.env.DB, result);
   if (result.length === 1) return c.json({ code: true, data: result[0] });
   return c.json({ code: true, data: result });
 });
@@ -2440,7 +2495,9 @@ explorerApi.all("/index/setMeta", async (c) => {
 
   const sid = metaSourceID(path);
   const existing = await getSourceMeta(c.env.DB, sid);
-  delete meta["user_sourceSecret"]; // 密级: worker 未实现 SourceSecret, 按原逻辑忽略该字段
+  // 001 index::sourceSecretApply: 先摘出 user_sourceSecret 落 source_secret 表
+  // (仅部门空间 + 系统开启密级 + 管理员/白名单用户才写库, 但该 key 始终不进入 source_meta)
+  await applySourceSecret(c.env.DB, user, sid, src.source.type, meta);
 
   // 001 thumbClear: clear=1 时清空封面与缓存时间
   if (String(params.clear ?? "") === "1") {
