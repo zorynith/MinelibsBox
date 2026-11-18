@@ -12,15 +12,16 @@
 
         window.docEditor = new DocsAPI.DocEditor("placeholder",
             {
+@@tokenLine@@
                 "document": {
                     "fileType": @@fileType@@,
                     "key": @@key@@,
                     "title": @@title@@,
                     "url": @@url@@,
                     "permissions": {
-                        "download": @@canDownload@@,
-                        "edit": @@canEdit@@,
-                        "print": @@canPrint@@,
+                        "download": @@canDownloadJs@@,
+                        "edit": @@canEditJs@@,
+                        "print": @@canPrintJs@@,
                     },
                 },
                 "documentType": @@documentType@@,

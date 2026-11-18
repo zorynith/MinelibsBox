@@ -444,6 +444,36 @@ async function onlyOfficeToken(env: Env, path: string, timeTo: number): Promise<
   return (await sha256Hex(path + String(timeTo) + apiKey)).slice(0, 32);
 }
 
+// ---------- OnlyOffice JWT (HS256) ----------
+
+function b64urlBytes(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function b64urlText(text: string): string {
+  return b64urlBytes(new TextEncoder().encode(text));
+}
+
+/**
+ * HS256 JWT 签名。镜像 001 plugins/onlyoffice app.php 的 jwtEncode/editorJwtPayload:
+ * Document Server 7.1+ 开启 JWT 后, DocEditor 初始化配置必须带服务端签发的 token。
+ */
+async function onlyOfficeJwt(payload: Record<string, unknown>, secret: string): Promise<string> {
+  const head = b64urlText(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const body = b64urlText(JSON.stringify(payload));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${head}.${body}`));
+  return `${head}.${body}.${b64urlBytes(new Uint8Array(sig))}`;
+}
+
 async function checkOnlyOfficeToken(env: Env, params: Record<string, any>): Promise<{ ok: true } | { ok: false; error: string }> {
   const path = String(params.path ?? "");
   if (!path) return { ok: false, error: "explorer.share.errorParam" };
@@ -684,6 +714,40 @@ async function renderOnlyOffice(c: any, params: { rawPath: string; fileName: str
   // 001 editorOpt: chat/comments/help 开关 (缺省对齐 package.json 默认全开)
   const editorOpt = officeEditorOpt(config);
 
+  // JWT: 2.50 起支持 jwtOpen/jwtSecret, Document Server 开启 JWT 后配置必须带签名 token,
+  // 否则编辑器报 "The document security token is not correctly formed"。
+  // 载荷字段与弹窗里的配置保持一致, 避免签名与实体不匹配被拒。
+  const jwtSecret = String(config.jwtSecret || "").trim();
+  const jwtOn = config.jwtOpen === undefined ? true : String(config.jwtOpen) === "1";
+  let tokenLine = "";
+  if (jwtOn && jwtSecret) {
+    const isEdit = canWrite;
+    const canCopy = isEdit ? true : String(config.canCopy || "0") === "1";
+    const canChat = isEdit && (config.chat === undefined ? true : String(config.chat) === "1");
+    const canComment = isEdit && (config.comments === undefined ? true : String(config.comments) === "1");
+    const token = await onlyOfficeJwt(
+      {
+        document: {
+          key: docKey,
+          url: fileUrl,
+          permissions: {
+            canCopy,
+            copy: canCopy,
+            edit: isEdit,
+            print: canDownload,
+            review: canDownload,
+            download: canDownload,
+            chat: canChat,
+            comment: canComment,
+          },
+        },
+        editorConfig: { callbackUrl: isEdit ? callbackUrl : "", mode },
+      },
+      jwtSecret
+    );
+    tokenLine = `                "token": ${JSON.stringify(token)},`;
+  }
+
   const tpl = await loadTemplate(c.env.ASSETS, "plugins/OnlyOffice/static/office.tpl.html");
   if (!tpl) return c.json({ code: false, data: "OnlyOffice template not found" });
 
@@ -694,9 +758,10 @@ async function renderOnlyOffice(c: any, params: { rawPath: string; fileName: str
     ["@@key@@", j(docKey)],
     ["@@title@@", j(docTitle)],
     ["@@url@@", j(fileUrl)],
-    ["@@canDownload@@", canDownload ? "1" : "0"],
-    ["@@canEdit@@", canWrite ? "1" : "0"],
-    ["@@canPrint@@", canPrint ? "1" : "0"],
+    ["@@tokenLine@@", tokenLine],
+    ["@@canDownloadJs@@", canDownload ? "true" : "false"],
+    ["@@canEditJs@@", canWrite ? "true" : "false"],
+    ["@@canPrintJs@@", canPrint ? "true" : "false"],
     ["@@documentType@@", j(documentType)],
     ["@@type@@", j("desktop")],
     ["@@callbackUrl@@", j(callbackUrl)],
