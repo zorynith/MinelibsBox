@@ -1,0 +1,50 @@
+{
+	"id":"flashPlayer",
+	"name":"{{LNG['flashPlayer.meta.name']}}",
+	"title":"{{LNG['flashPlayer.meta.title']}}",
+	"version":"1.0",
+	"source":{
+		"className":"x-item-icon x-swf"
+	},
+	"category":"media,file",
+	"description":"Flash Player support after chrome 80",
+	"keywords":"Flash Player",
+	"auther":{
+		"copyright":"kodcloud.",
+		"homePage":"http://www.kodcloud.com"
+	},
+	"configItem":{
+		"pluginAuth":{
+			"type":"userSelect",
+			"value":{"all":1},
+			"display":"{{LNG['admin.plugin.auth']}}",
+			"desc":"{{LNG['admin.plugin.authDesc']}}",
+			"require":1
+		},
+		"step001":"<hr/>",
+		"fileSort":{
+			"type":"number",
+			"display":"{{LNG['admin.plugin.fileSort']}}",
+			"desc":"{{LNG['admin.plugin.fileSortDesc']}}",
+			"value":300
+		},
+		"fileExt":{
+			"type":"tags",
+			"display":"{{LNG['admin.plugin.fileExt']}}",
+			"desc":"{{LNG['admin.plugin.fileExtDesc']}}",
+			"value":"swf"
+		},
+		"autoplay":{
+			"type":"switch",
+			"display":"{{LNG['flashPlayer.meta.autoplay']}}",
+			"desc":"{{LNG['flashPlayer.meta.autoplayDesc']}}",
+			"value":"1"
+		},
+		"cdn":{
+			"type":"text",
+			"display":"{{LNG['flashPlayer.meta.cdn']}}",
+			"desc":"{{LNG['flashPlayer.meta.cdnDesc']}}",
+			"value":"https://unpkg.com/@ruffle-rs/ruffle@0.7.1/"
+		}
+	}
+}

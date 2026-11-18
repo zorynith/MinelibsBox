@@ -1,0 +1,10 @@
+{
+	"flashPlayer.meta.name": "Flash Player",
+	"flashPlayer.meta.title": "Flash Player",
+	"flashPlayer.meta.desc": "Play Flash(.swf) files online with Ruffle",
+	"flashPlayer.meta.autoplay": "Autoplay",
+	"flashPlayer.meta.autoplayDesc": "Start playing automatically after opening a .swf file",
+	"flashPlayer.meta.cdn": "Ruffle asset base",
+	"flashPlayer.meta.cdnDesc": "Base directory of the Ruffle player script; falls back to the public CDN when unreachable",
+	"flashPlayer.tips.loadError": "Failed to load Ruffle, please check the network or the CDN address in plugin settings"
+}

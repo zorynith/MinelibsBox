@@ -1,0 +1,10 @@
+{
+	"flashPlayer.meta.name": "Flash Player",
+	"flashPlayer.meta.title": "Flash 动画播放",
+	"flashPlayer.meta.desc": "基于 Ruffle 在线播放 Flash(.swf) 文件",
+	"flashPlayer.meta.autoplay": "自动播放",
+	"flashPlayer.meta.autoplayDesc": "打开 .swf 文件后自动开始播放",
+	"flashPlayer.meta.cdn": "Ruffle 资源地址",
+	"flashPlayer.meta.cdnDesc": "Ruffle 播放器脚本所在目录; 该地址不可用时自动回退到公共 CDN",
+	"flashPlayer.tips.loadError": "Ruffle 加载失败, 请检查网络或后台配置的 CDN 地址"
+}
