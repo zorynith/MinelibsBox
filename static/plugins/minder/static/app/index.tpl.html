@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+    <head>
+		<title>@@title@@</title>
+		<meta charset="utf-8">
+		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+		<meta name="mobile-web-app-capable" content="yes">
+		<meta name="theme-color" content="#d89000">
+        <link rel="icon" href="@@pluginHost@@static/images/icon.svg" sizes="any" type="image/svg+xml">
+		<link rel="stylesheet" href="@@pluginHost@@static/mind-map/css/chunk-vendors.css">
+		<link rel="stylesheet" href="@@pluginHost@@static/mind-map/css/app.css">
+		<link rel="stylesheet" href="@@pluginHost@@static/app/style.css">
+		<link rel="stylesheet" href="@@staticPath@@style/lib/font-icon/style.css">
+    </head>
+
+    <body>
+        <div id="app"></div>
+        <script>
+			var kodSdkConfig = {api:'@@appHost@@',pluginApi:"@@pluginApi@@"};
+			var FILE_INFO = {
+				fileUrl:	'@@fileUrl@@',
+				fileName: 	'@@fileName@@',
+				savePath:	'@@savePath@@',
+				canWrite:	@@canWrite@@
+			};
+			var appLang = '@@lang@@';
+			var appTitle= '@@title@@';
+			window.externalPublicPath = '@@pluginHost@@static/mind-map/';
+			window.takeOverApp = true;
+			window.LNG = @@lngJson@@;
+        </script>
+		<script src="@@staticPath@@app/dist/sdk.js"></script>
+		<script src="@@pluginHost@@static/mind-map/js/chunk-3222d6ee.js"></script>
+		<script src="@@pluginHost@@static/mind-map/js/app.js"></script>
+		<script src="@@pluginHost@@static/app/iconSearch.js"></script>
+		<script src="@@pluginHost@@static/app/xmindParse.js"></script>
+		<script src="@@pluginHost@@static/app/lib/jszip.min.js"></script>
+		<script src="@@pluginHost@@static/app/lib/xml-js.min.js"></script>
+		<script src="@@pluginHost@@static/app/page.js"></script>
+    </body>
+</html>

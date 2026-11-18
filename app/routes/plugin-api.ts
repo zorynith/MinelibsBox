@@ -866,6 +866,67 @@ if(localStorage.getItem('auto-viewer-theme') === 'light'){document.body.classLis
 }
 
 /** 001 drawio: 嵌入官方 draw.io 编辑器, autosave/save 消息写回文件。 */
+/**
+ * kodbox 系「独立编辑器」插件的通用渲染。excalidraw / minder 的页面结构一致:
+ * 服务端把 FILE_INFO(fileUrl/fileName/savePath/canWrite) 与 LNG 注入 HTML,
+ * 前端再自行 ajax 拉取文件内容、用 kodApi.fileSave 保存。
+ * 001 由 PHP 渲染 static/app/index.php, 这里改读同目录下的 index.tpl.html。
+ */
+async function renderKodApp(
+  c: any,
+  params: { rawPath: string; fileName: string; appHost: string; staticPath: string; lang: string },
+  id: string
+) {
+  const { rawPath, fileName, appHost, staticPath, lang } = params;
+  const lng = await loadPluginLang(c.env.ASSETS, id, lang);
+  const title = lng[`${id}.meta.title`] || lng[`${id}.meta.name`] || id;
+  const isShare = rawPath.indexOf("{shareItemLink:") === 0;
+  const user = c.get("currentUser") as AuthUser | undefined;
+  if (!isShare && !user) return c.body(errorPage(title, "未登录"), 200, HTML_HEADERS);
+
+  const key = await resolveFileKey(c, rawPath);
+  const obj = key ? await c.env.FILES.head(key).catch(() => null) : null;
+  if (!obj) {
+    const global = await loadLangPack(c.env.ASSETS, lang);
+    const msg = (global && global["common.pathNotExists"]) || "文件不存在";
+    return c.body(errorPage(title, msg), 200, HTML_HEADERS);
+  }
+
+  let canWrite = false;
+  if (!isShare) {
+    const src = await resolveFileSource(c.env, user as AuthUser, rawPath);
+    if (src.ok) canWrite = hasAuth(await sourceAuthOf(c.env, user as AuthUser, src.source), AUTH_EDIT);
+  }
+
+  // 页面自身由 Worker 渲染(与 appHost 同源), 但插件资源在 static 域, 用带签名的匿名链接
+  // 可以避免 iframe 内跨域丢 cookie 导致的 401。
+  const fileUrl = isShare
+    ? fileOutUrl(appHost, rawPath)
+    : await fileViewLinkOut(c, rawPath, user as AuthUser, fileName);
+
+  const pluginHost = `${staticPath}plugins/${id}/`;
+  const pluginApi = `${appHost}index.php?plugin/${id}/`;
+  const tpl = await loadTemplate(c.env.ASSETS, `plugins/${id}/static/app/index.tpl.html`);
+  if (!tpl) return c.json({ code: false, data: `${id} template not found` });
+
+  const globalLng = (await loadLangPack(c.env.ASSETS, lang)) || {};
+  const lngAll = JSON.stringify({ ...globalLng, ...lng }).replace(/</g, "\\u003c");
+  const html = replaceAll(tpl, [
+    ["@@title@@", title],
+    ["@@lang@@", jsEscape(lang)],
+    ["@@staticPath@@", staticPath],
+    ["@@appHost@@", appHost],
+    ["@@pluginHost@@", pluginHost],
+    ["@@pluginApi@@", pluginApi],
+    ["@@fileUrl@@", jsEscape(fileUrl)],
+    ["@@fileName@@", jsEscape(fileName)],
+    ["@@savePath@@", jsEscape(canWrite ? rawPath : "")],
+    ["@@canWrite@@", canWrite ? "true" : "false"],
+    ["@@lngJson@@", lngAll],
+  ]);
+  return c.body(html, 200, HTML_HEADERS);
+}
+
 async function renderDrawio(c: any, params: { rawPath: string; fileName: string; appHost: string; staticPath: string; lang: string }) {
   const { rawPath, fileName, appHost, staticPath, lang } = params;
   const lng = await loadPluginLang(c.env.ASSETS, "drawio", lang);
@@ -1580,6 +1641,10 @@ async function pluginHandler(c: any) {
 
   if (name === "autoViewer") {
     return renderAutoViewer(c, { rawPath, fileName, ext, appHost, staticPath, lang });
+  }
+
+  if (name === "excalidraw" || name === "minder") {
+    return renderKodApp(c, { rawPath, fileName, appHost, staticPath, lang }, name);
   }
 
   if (name === "drawio") {

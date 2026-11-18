@@ -1,0 +1,68 @@
+/* 
+#root .excalidraw{
+    --island-bg-color: hsla(0,0%,100%,.96);
+    --overlay-bg-color: hsla(0,0%,100%,.88);
+} 
+*/
+
+#root{position: absolute;top: 0;left: 0;right: 0;bottom: 0;}
+#root .excalidraw .dropdown-menu .dropdown-menu-item[data-testid="load-button"],
+#root .excalidraw .dropdown-menu .dropdown-menu-item[data-testid="json-export-button"],
+#root .excalidraw .dropdown-menu .dropdown-menu-item[data-testid="collab-button"],
+#root .excalidraw .dropdown-menu-container a[href],
+#root .excalidraw .clear-canvas-button +div,
+#root .welcome-screen-menu button:nth-child(3),
+#root .welcome-screen-menu a[href],
+
+#root .App-toolbar__extra-tools-dropdown .dropdown-menu-item:nth-child(6),
+#root .App-toolbar__extra-tools-dropdown .dropdown-menu-item[data-testid="toolbar-magicframe"],
+#root .excalidraw-ui-top-right,
+#root .default-sidebar .sidebar-triggers .sidebar-tab-trigger:nth-child(3),
+#root .default-sidebar .sidebar-triggers .sidebar-tab-trigger:nth-child(4),
+
+#root .footer-center a.encrypted-icon,
+#root .excalidraw-modal-container .Dialog.HelpDialog .HelpDialog__header,
+.excalidraw .Modal.command-palette-dialog .commands .command-category:last-child,
+.excalidraw .Modal.HelpDialog .HelpDialog__header{display: none !important;}
+
+.excalidraw .dropdown-menu .dropdown-menu-item__shortcut{font-size: 12px;padding-left: 5px;}
+.excalidraw div[data-testid="canvas-background-label"]{padding-left: 10px;opacity: 0.5;}
+.excalidraw.excalidraw--mobile .dropdown-menu .dropdown-menu-container{gap:0;}
+.excalidraw.excalidraw--mobile .ToolIcon__icon{width: 2.5em;}
+.excalidraw.excalidraw--mobile .dropdown-menu-button--mobile{width:3em;}
+
+#root .excalidraw .popover .context-menu{
+	box-shadow: 0 0 0 .5px #88888830, 0 10px 40px 0 #88888840;
+    animation-name: dropdownMenuShow;-webkit-animation-name: dropdownMenuShow;
+    animation-duration: .16s;-webkit-animation-duration: .16s;
+    border: none;background: #fff;padding: 10px 5px;
+}
+#root .excalidraw .popover .context-menu button{
+	border-radius: 4px;color:#555;transition: all 0.2s;
+    padding: .3rem 1.5rem .3rem 0.6rem;
+}
+#root .excalidraw .popover .context-menu-item.checkmark:before{right: 4px;left: inherit;}
+#root .excalidraw .popover .context-menu .context-menu-item:hover{background-color: #eee;}
+#root .excalidraw .popover .context-menu .context-menu-item-separator{margin:4px 0 4px 10px;padding:0px;border-top-width: 0.7px;}
+
+#root .excalidraw .exc-stats .exc-stats__row--heading{
+    text-align: left;font-weight:800;padding:12px 0 4px 0;
+    border-bottom: 0.7px solid #99999940;
+}
+#root .excalidraw .exc-stats .exc-stats__row .drag-input-container{
+    box-shadow: 0 0 0 0.7px #99999920;background:#99999905;
+}
+
+#root .dropdown-menu-kod .dropdown-menu-item__icon{width: 16px;height: 16px;font-size: 18px;position: relative;top: -1px;opacity: 0.5;}
+#root .dropdown-menu-kod button.disabled{pointer-events: none; opacity: 0.5;}
+#root .dropdown-menu-kod .hr-line{border-bottom: 0.7px solid #99999930;margin: 0.5rem 0px;}
+#root .dropdown-menu-kod .dropdown-menu-item__icon:before{font-family: 'remixicon' !important;}
+#root .dropdown-menu-kod button[kod-action="file-save"] .dropdown-menu-item__icon:before{content:"\f0b0";}
+#root .dropdown-menu-kod button[kod-action="file-open"] .dropdown-menu-item__icon:before{content:"\ed54";}
+
+
+.kod-read-only .App-toolbar-container,
+.kod-read-only .undo-redo-buttons,
+.kod-read-only .excalidraw .context-menu li[data-testid="viewMode"],
+.kod-read-only .excalidraw .context-menu li[data-testid="zenMode"],
+.kod-read-only .help-icon{display:none !important;}

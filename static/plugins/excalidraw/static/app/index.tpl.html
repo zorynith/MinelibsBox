@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+    <head>
+		<title>@@title@@</title>
+		<meta charset="utf-8">
+		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+		<meta name="mobile-web-app-capable" content="yes">
+		<meta name="theme-color" content="#d89000">
+        <link rel="icon" href="@@pluginHost@@static/images/icon.svg" sizes="any" type="image/svg+xml">
+		<link rel="stylesheet" href="@@staticPath@@style/lib/font-icon/style.css">
+		<link rel="stylesheet" href="@@pluginHost@@static/app/style.css">
+		<link rel="stylesheet" href="@@pluginHost@@static/excalidraw/assets/index-6msCUY9p.css">
+    </head>
+
+    <body>
+        <div id="root"></div>
+        <script>
+			var kodSdkConfig = {api:'@@appHost@@',pluginApi:"@@pluginApi@@"};
+			var FILE_INFO = {
+				fileUrl:	'@@fileUrl@@',
+				fileName: 	'@@fileName@@',
+				savePath:	'@@savePath@@',
+				canWrite:	@@canWrite@@
+			};
+			var appLang = '@@lang@@';
+			var appTitle= '@@title@@';
+			window.EXCALIDRAW_ASSET_PATH = ['@@pluginHost@@static/excalidraw/'];
+			window.LNG = @@lngJson@@;
+        </script>
+		<script src="@@staticPath@@app/dist/sdk.js"></script>
+		<script src="@@pluginHost@@static/app/page.js"></script>
+    	<script type="module" src="@@pluginHost@@static/excalidraw/assets/index-54XM3_3X.js"></script>
+    </body>
+</html>
