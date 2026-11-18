@@ -3665,9 +3665,9 @@ explorerApi.all("/index/unzipList", async (c) => {
 /**
  * 清理用户临时目录中过期的打包产物 (/.temp/archive_*.zip)。
  * zipDownload 每次生成一个临时 zip 供前端二次下载, 无人删除会无限累积占用存储;
- * 生成新文件前顺带清理, 保留最近 10 分钟的文件, 避免并发下载被误删。
+ * 生成新文件前顺带清理, 保留最近 3 小时的文件, 避免并发/延迟下载被误删。
  */
-async function cleanTempArchive(c: AppContext, src: SourceRef, keepMs = 10 * 60 * 1000): Promise<void> {
+async function cleanTempArchive(c: AppContext, src: SourceRef, keepMs = 3 * 60 * 60 * 1000): Promise<void> {
   const prefix = keyFromBase(src.baseKey, "/.temp/");
   const cutoff = Date.now() - keepMs;
   const isArchive = (key: string) => /^archive_[a-z0-9]+\.zip$/i.test(key.split("/").pop() || "");
