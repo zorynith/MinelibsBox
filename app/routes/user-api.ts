@@ -117,7 +117,8 @@ userApi.post("/index/loginSubmit", async (c) => {
 
   // 001 SystemOption sessionTime: 普通会话按配置时长(默认 4h, 滑动续期), 勾选"保持登录"30 天
   const ttlHours = await sessionTtlHours(c.env.DB);
-  const maxAge = remember ? 30 * 86400 : ttlHours * 3600;
+  // Cookie Max-Age 必须是整数秒, ttlHours 可能是 0.5 这类小数
+  const maxAge = remember ? 30 * 86400 : Math.floor(ttlHours * 3600);
   const sessionId = await createSession(c.env.DB, user.id as number, remember ? 720 : ttlHours);
   // filter/userLoginState::checkLimit - 同账号并发登录限制 + 记录登录设备
   await loginStateCheck(c.env.DB, Number(user.id), sessionId, c.req.raw);

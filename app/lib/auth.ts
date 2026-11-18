@@ -13,7 +13,8 @@ export async function sessionTtlHours(db: D1Database): Promise<number> {
   if (sessionTtlCache && Date.now() - sessionTtlCache.at < 60_000) return sessionTtlCache.hours;
   const raw = await getSetting(db, "sessionTime").catch(() => null);
   const sec = parseInt(String(raw ?? ""), 10);
-  const hours = Number.isFinite(sec) && sec > 0 ? Math.max(1, Math.round(sec / 3600)) : 4;
+  // 保留小数小时: 30 分钟等非整小时配置若被 Math.round 取整会放大成 1 小时
+  const hours = Number.isFinite(sec) && sec > 0 ? sec / 3600 : 4;
   sessionTtlCache = { at: Date.now(), hours };
   return hours;
 }
