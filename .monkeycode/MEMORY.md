@@ -418,3 +418,18 @@ Entries discovered by the Agent during task execution should follow this format:
   - admin 路由接入方式：每个 handler 开头 `userGroupFilter(c, "admin.xxx.yyy", await allParams(c))`，用返回的 `filtered.params` 替代原 query（filter 会按 001 语义裁剪/改写 roleID、groupInfo）；`filtered.deny` 为 show_json 等价负载（列表类返回空 list+info:"empty"）。action 名与 001 一致用小写，如 `admin.member.addgroup`、`admin.group.switchgroup`。
   - adminGroup::get 的 parentID 解析顺序与 001 一致（requestFromType=admin→userGroupAdmin；否则→userGroupAt；rootOuter→userGroupRootShow；isRoot 强制 ["1"]），rootParam 含 appendShareHistory 时追加 `rootOuter`(对外授权) 与 `-`(最近使用，读 user_option type=shareTarget key=saveData) 节点。
   - 目录 `dist/dev`、`dist/orig` 仍禁改；本仓库 `git config` 由 CNB 令牌自动生成（user.name=cnb.xxx），提交必须用该身份否则 cnb-gpgsign 报 403 invalid signature author；origin 为 cnb.cool，github remote 需单独凭据（.git/.git-credentials 仅有 cnb.cool）。
+
+[Project Knowledge Summary]
+- Date: 2026-11-18
+- Context: Discovered by Agent while performing 插件市场物料获取（列表筛选 + 单插件下载）
+- Category: Operations & Deployment
+- Instructions:
+  - 官方 API 基址 `https://api.kodcloud.com/?`（001/config/setting.php:56 注释：QQ微信登录/邮件发送/插件-列表等）；响应统一信封 `{code,timeUse,timeNow,data}`。
+  - 插件列表接口路径未确证：`?pluginV5/list` 的 GET/POST 实测均返回 404。此前遗留的 pluginlist.json 即该 API 家族响应，共 111 条，字段为 id/name/title/version/category/description/keywords/auther/source/hidden/menu/server{version,versionTime,price,network,downloadCount,commentCount,userScore,sort,size}。
+  - 列表筛选口径：`server.price===0` 为免费；`hidden===1` 为内部不展示；`category` 含 buy 为收费、含 oem 为定制。
+  - 单插件下载信息：`POST ?pluginV5/install`，参数 app/version/versionHash/code/deviceUUID/systemOS/phpVersion/channel/lang（001/app/controller/admin/plugin.class.php:164-183），返回 data 为 JSON 字符串，内含下载地址，交给 Downloader::start 使用。
+  - 实测结果：缺参返回 `data:"param error!"`；versionHash/code 为假值返回 `data:"该插件与您的版本不兼容,\n请先将kodbox升级到最新版再试!"`，说明服务端强校验授权，无合法授权拿不到下载地址。
+  - 官方安装流程：check→download→fileSize→unzip→remove；zip 落 `<pluginDir>/<app>.zip`，解压到 `<pluginDir>/<app>/`。主程序升级另走固定地址 `http://static.kodcloud.com/update/update/<文件名>`。
+  - 无授权时的复刻落地：资源放 `static/plugins/<id>/`（至少 package.json + static/main.js），注册进 `app/lib/plugins.ts` 的 ALL_PLUGINS（未配置过的插件 getPluginMeta 默认 status=1，即默认启用），语言包放 `static/plugins/i18n/<id>.<lang>.json`；main.js 在 `explorer.kodApp.before` 中 push {name,title,ext,sort,icon,callback}，callback 内用 `requireAsync(pluginHost+'page.js?v=版本')` 载入预览页。
+  - `static/plugins/__assets__.json` 被 .gitignore 忽略、由 `npm run build` 生成；CI 必须跑 build，否则运行时退化为逐插件 fetch，接近 Workers 子请求上限。
+  - `/tmp` 会被环境清理（本轮 pluginlist.json 与解压包均丢失），抓到列表或插件包后需立即转存到仓库或工作目录。
