@@ -28,7 +28,7 @@ export interface PluginContext {
 }
 
 /** All plugins shipped with the worker (served from ASSETS static/plugins). */
-export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "drawio", "Photopea", "bisheng", "excalidraw", "minder", "officeLive", "yzOffice", "adminer", "fileThumb", "msgWarning", "oauth", "storeImport", "webdav", "autoViewer"];
+export const ALL_PLUGINS = ["DPlayer", "jPlayer", "photoSwipe", "picasa", "htmlEditor", "officeViewer", "pdfjs", "simpleClock", "toolsCommon", "webodf", "OnlyOffice", "drawio", "Photopea", "bisheng", "excalidraw", "minder", "svgEditor", "tuiImage", "officeLive", "yzOffice", "adminer", "fileThumb", "msgWarning", "oauth", "storeImport", "webdav", "autoViewer"];
 // 已移除: "client" (客户端·系统增强) — 扫码登录/TFA/客户端同步等功能依赖 App 与
 // 外部短信/邮件 API, 本项目不使用, 故不注册该插件 (服务端 handler 一并删除)。
 
@@ -194,17 +194,24 @@ export async function mergePluginLang(assets: Fetcher, list: Record<string, stri
   }
 }
 
-/** Load plugin static/main.js template. Returns null on failure. */
+/**
+ * Load plugin main.js template. Returns null on failure.
+ * 001 个别插件把入口放在 static/app/main.js (如 tuiImage), 这里按顺序回退。
+ */
+const PLUGIN_MAIN_PATHS = ["static/main.js", "static/app/main.js"];
+
 export async function loadPluginMainJs(assets: Fetcher, name: string): Promise<string | null> {
   const entry = (await loadPluginBundle(assets)).plugins?.[name];
   if (entry && typeof entry.main === "string") return entry.main;
-  try {
-    const res = await assets.fetch(new Request(`https://assets.local/plugins/${name}/static/main.js`));
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
+  for (const rel of PLUGIN_MAIN_PATHS) {
+    try {
+      const res = await assets.fetch(new Request(`https://assets.local/plugins/${name}/${rel}`));
+      if (res.ok) return await res.text();
+    } catch {
+      /* try next */
+    }
   }
+  return null;
 }
 
 /**

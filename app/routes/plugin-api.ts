@@ -875,7 +875,8 @@ if(localStorage.getItem('auto-viewer-theme') === 'light'){document.body.classLis
 async function renderKodApp(
   c: any,
   params: { rawPath: string; fileName: string; appHost: string; staticPath: string; lang: string },
-  id: string
+  id: string,
+  tplRel = "static/app/index.tpl.html"
 ) {
   const { rawPath, fileName, appHost, staticPath, lang } = params;
   const lng = await loadPluginLang(c.env.ASSETS, id, lang);
@@ -911,7 +912,7 @@ async function renderKodApp(
 
   const pluginHost = `${staticPath}plugins/${id}/`;
   const pluginApi = `${appHost}index.php?plugin/${id}/`;
-  const tpl = await loadTemplate(c.env.ASSETS, `plugins/${id}/static/app/index.tpl.html`);
+  const tpl = await loadTemplate(c.env.ASSETS, `plugins/${id}/${tplRel}`);
   if (!tpl) return c.json({ code: false, data: `${id} template not found` });
 
   const globalLng = (await loadLangPack(c.env.ASSETS, lang)) || {};
@@ -1648,8 +1649,12 @@ async function pluginHandler(c: any) {
     return renderAutoViewer(c, { rawPath, fileName, ext, appHost, staticPath, lang });
   }
 
-  if (name === "excalidraw" || name === "minder") {
+  if (name === "excalidraw" || name === "minder" || name === "tuiImage") {
     return renderKodApp(c, { rawPath, fileName, appHost, staticPath, lang }, name);
+  }
+
+  if (name === "svgEditor") {
+    return renderKodApp(c, { rawPath, fileName, appHost, staticPath, lang }, name, "static/template.tpl.html");
   }
 
   if (name === "drawio") {

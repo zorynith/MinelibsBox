@@ -26,8 +26,9 @@ for (const name of readdirSync(pluginsDir)) {
   const pkgPath = join(dir, "package.json");
   if (!existsSync(pkgPath)) continue;
   const entry = { pkg: readFileSync(pkgPath, "utf8"), langs: {} };
-  const mainPath = join(dir, "static", "main.js");
-  if (existsSync(mainPath)) entry.main = readFileSync(mainPath, "utf8");
+  // 入口默认 static/main.js; 个别插件(如 tuiImage)放在 static/app/main.js
+  const mainPath = [join(dir, "static", "main.js"), join(dir, "static", "app", "main.js")].find((p) => existsSync(p));
+  if (mainPath) entry.main = readFileSync(mainPath, "utf8");
   plugins[name] = entry;
 }
 
