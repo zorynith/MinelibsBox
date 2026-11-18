@@ -35,10 +35,27 @@ kodReady.push(function(){
 	};
 	
 	// 用 canvas 生成一个水印平铺块, 避免大量 DOM 节点;
+	// 画布尺寸必须容纳"旋转后"的文字外接框, 否则文字两端会被裁掉(如 administrator => dministrator);
 	var buildTile = function(){
 		var text = renderText();
-		var w = conf.gap;
-		var h = Math.max(80, Math.round(conf.gap * 0.6));
+		var font = conf.fontSize + 'px sans-serif';
+		
+		// 先量一次文字尺寸(离屏画布);
+		var measure = document.createElement('canvas').getContext('2d');
+		measure.font = font;
+		var textW = Math.ceil(measure.measureText(text).width) || 0;
+		var textH = Math.ceil(conf.fontSize * 1.2);
+		
+		var rad = conf.rotate * Math.PI / 180;
+		var cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+		var boxW = textW * cos + textH * sin;
+		var boxH = textW * sin + textH * cos;
+		
+		// 平铺间距不小于文字外接框, 再留 12px 余量防止相邻水印粘连;
+		var pad = 12;
+		var w = Math.max(conf.gap, Math.ceil(boxW) + pad * 2);
+		var h = Math.max(80, Math.ceil(boxH) + pad * 2);
+		
 		var ratio = Math.min(window.devicePixelRatio || 1, 2);
 		var canvas = document.createElement('canvas');
 		canvas.width  = w * ratio;
@@ -47,11 +64,11 @@ kodReady.push(function(){
 		ctx.scale(ratio, ratio);
 		ctx.globalAlpha = conf.opacity;
 		ctx.fillStyle   = conf.color;
-		ctx.font        = conf.fontSize + 'px sans-serif';
+		ctx.font        = font;
 		ctx.textAlign   = 'center';
 		ctx.textBaseline = 'middle';
 		ctx.translate(w / 2, h / 2);
-		ctx.rotate(conf.rotate * Math.PI / 180);
+		ctx.rotate(rad);
 		ctx.fillText(text, 0, 0);
 		return canvas.toDataURL('image/png');
 	};
