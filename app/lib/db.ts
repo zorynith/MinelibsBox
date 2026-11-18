@@ -944,12 +944,36 @@ export async function deleteSession(db: D1Database, sessionId: string) {
 }
 
 // Settings helpers
+/**
+ * settings 全表内存缓存(TTL 30s)。
+ * 单个请求链路里 getSetting 会被调用多次(explorer/sign/csrf/login-state 等),
+ * 单行查询各自计费; 改为 30s 读一次全表, 其余请求走内存查找。写入时立即失效。
+ */
+let settingsCache: { at: number; map: Map<string, string> } | null = null;
+const SETTINGS_CACHE_TTL = 30_000;
+
+async function loadAllSettings(db: D1Database): Promise<Map<string, string> | null> {
+  if (settingsCache && Date.now() - settingsCache.at < SETTINGS_CACHE_TTL) return settingsCache.map;
+  try {
+    const rows = await db.prepare("SELECT key, value FROM settings").all<{ key: string; value: string }>();
+    const map = new Map<string, string>();
+    for (const r of rows.results || []) map.set(r.key, r.value);
+    settingsCache = { at: Date.now(), map };
+    return map;
+  } catch {
+    return null;
+  }
+}
+
 export async function getSetting(db: D1Database, key: string): Promise<string | null> {
+  const map = await loadAllSettings(db);
+  if (map && map.size > 0) return map.get(key) ?? null;
   const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
   return row?.value ?? null;
 }
 
 export async function setSetting(db: D1Database, key: string, value: string) {
+  settingsCache = null;
   return db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(key, value).run();
 }
 
@@ -1237,6 +1261,26 @@ export async function getPluginMeta(db: D1Database, id: string): Promise<{ statu
     status: row ? row.status : 1,
     config: row ? safeParseJson(row.config_json) : {},
   };
+}
+
+/**
+ * 一次性读取全部插件配置。
+ * renderPluginsJs / buildPluginAppList 原先在 31 个插件的循环里各查一次单行,
+ * 每次请求 31 次 D1 查询; 改为一次全表查询(通常不足 10 行)。
+ */
+export async function getPluginMetaAll(db: D1Database): Promise<Map<string, { status: number; config: Record<string, any> }>> {
+  const map = new Map<string, { status: number; config: Record<string, any> }>();
+  try {
+    const rows = await db
+      .prepare("SELECT id, status, config_json FROM plugin")
+      .all<{ id: string; status: number; config_json: string }>();
+    for (const r of rows.results || []) {
+      map.set(String(r.id), { status: r.status, config: safeParseJson(r.config_json) });
+    }
+  } catch {
+    /* 查询失败返回空表, 调用方按默认(启用/空配置)处理 */
+  }
+  return map;
 }
 
 export async function setPluginStatus(db: D1Database, id: string, status: number) {

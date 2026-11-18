@@ -2358,10 +2358,24 @@ function metaSourceID(path: string): number {
   return fileSourceID(path);
 }
 
+/**
+ * 同一用户同一文件 5 分钟内只记录一次最近打开时间。
+ * fileOut 每发一次请求都会调用(视频拖动进度会产生几十个 Range 请求),
+ * 原先每次都写 2 次 D1(source_meta + recent), 节流后写入量大幅下降。
+ */
+const lastOpenThrottle = new Map<string, number>();
+const LAST_OPEN_WINDOW = 5 * 60 * 1000;
+
 /** 001 explorerIndex::updateLastOpen: 记录文件最近打开时间 (仅文件)。 */
 async function updateLastOpen(db: D1Database, path: string, userID?: number): Promise<void> {
   if (!path || path.endsWith("/")) return;
-  await setSourceMeta(db, metaSourceID(path), "viewTime", String(Math.floor(Date.now() / 1000)));
+  const key = `${userID ?? 0}:${path}`;
+  const now = Date.now();
+  const prev = lastOpenThrottle.get(key);
+  if (prev && now - prev < LAST_OPEN_WINDOW) return;
+  if (lastOpenThrottle.size > 2000) lastOpenThrottle.clear();
+  lastOpenThrottle.set(key, now);
+  await setSourceMeta(db, metaSourceID(path), "viewTime", String(Math.floor(now / 1000)));
   if (userID) await touchRecent(db, userID, path, "file");
 }
 

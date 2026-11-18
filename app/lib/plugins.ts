@@ -8,7 +8,7 @@
  *      parseFile -> parseLang -> parseConfig -> parsePackage
  */
 import { parseLooseJson } from "./loose-json";
-import { getPluginMeta } from "./db";
+import { getPluginMetaAll } from "./db";
 
 export interface PluginPackage {
   id: string;
@@ -141,11 +141,23 @@ export function loadPluginBundle(assets: Fetcher): Promise<PluginAssetsBundle> {
  * Load plugin package.json. 优先取聚合包, 缺失时回退到单独 ASSETS fetch
  * (本地未执行构建脚本 / 聚合包缺失时仍可工作)。Returns null on failure.
  */
+/**
+ * 聚合包内容在 isolate 生命周期内不变(构建期快照), 解析结果可直接缓存,
+ * 避免 renderPluginsJs 每次请求对 31 个 package.json 重复 parseLooseJson。
+ */
+const pkgCache = new Map<string, PluginPackage>();
+/** 插件语言包合并结果缓存(key: `${name}:${lang}`), 同聚合包生命周期内有效 */
+const langPackCache = new Map<string, Record<string, string>>();
+
 export async function loadPluginPackage(assets: Fetcher, name: string): Promise<PluginPackage | null> {
   const entry = (await loadPluginBundle(assets)).plugins?.[name];
   if (entry && typeof entry.pkg === "string") {
+    const cached = pkgCache.get(name);
+    if (cached) return cached;
     try {
-      return parseLooseJson(entry.pkg) as PluginPackage;
+      const pkg = parseLooseJson(entry.pkg) as PluginPackage;
+      pkgCache.set(name, pkg);
+      return pkg;
     } catch {
       /* fall through to direct fetch */
     }
@@ -186,6 +198,10 @@ export async function loadPluginLang(assets: Fetcher, name: string, lang: string
   if (!Object.keys(bundled).length) {
     return (await fetchPluginLangFile(assets, name, lang)) || {};
   }
+  // 合并结果只依赖聚合包, 按 插件+语言 缓存, 避免每次请求重复合并
+  const cacheKey = `${name}:${lang}`;
+  const cached = langPackCache.get(cacheKey);
+  if (cached) return cached;
   const out: Record<string, string> = {};
   for (const l of [lang, ...PLUGIN_LANG_FALLBACK.filter((x) => x !== lang)]) {
     const pack = bundled[l];
@@ -194,6 +210,7 @@ export async function loadPluginLang(assets: Fetcher, name: string, lang: string
       if (typeof v === "string" && !(k in out)) out[k] = v;
     }
   }
+  langPackCache.set(cacheKey, out);
   return out;
 }
 
@@ -355,12 +372,13 @@ function resolvePkgLngRaw(pkg: PluginPackage, langArr: Record<string, string>): 
  */
 export async function buildPluginAppList(assets: Fetcher, db: D1Database, lang: string, staticPath = "/"): Promise<Record<string, any>> {
   const out: Record<string, any> = {};
+  const metas = await getPluginMetaAll(db);
   for (const name of ALL_PLUGINS) {
     const pkg = await loadPluginPackage(assets, name);
     if (!pkg) continue;
     const langArr = await loadPluginLang(assets, name, lang);
     const resolved = resolvePkgLngRaw(pkg, langArr);
-    const meta = await getPluginMeta(db, name);
+    const meta = metas.get(name) ?? { status: 1, config: {} };
     // {{pluginHost}}/{{staticPath}} -> 可访问静态路径 (001 admin appList 返回已替换的 icon/screenshoot 路径, 前端直接作 img src)
     const pluginHost = `${staticPath}plugins/${name}/`;
     const src = resolved.source as Record<string, any>;
@@ -503,12 +521,14 @@ export async function renderPluginsJs(
   currentUser?: { id: number; role: string } | null
 ): Promise<string> {
   let body = "var kodReady=[];";
+  // 一次取全部插件配置(原实现循环内逐插件查询, 每次请求 31 次 D1 单行查询)
+  const metas = db ? await getPluginMetaAll(db) : null;
   for (const name of ALL_PLUGINS) {
     // adminer 仅管理员可见 (001 adminerPlugin::echoJs 硬编码 isRoot 判断)
     if (name === "adminer" && isRoot !== true) continue;
     let meta: { status: number; config: Record<string, any> } | null = null;
-    if (db) {
-      meta = await getPluginMeta(db, name);
+    if (metas) {
+      meta = metas.get(name) ?? { status: 1, config: {} };
       if (meta.status !== 1) continue;
     }
     const [pkg, langArr, tpl] = await Promise.all([
