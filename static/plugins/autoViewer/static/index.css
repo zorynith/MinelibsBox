@@ -4,14 +4,15 @@ html body{
 }
 
 body{margin: 0;padding: 0;overflow:hidden;}
+/* 首屏等待: 原样式引用 kodbox 绝对路径的 gif, 本项目不存在该文件, 改为纯 CSS 转圈 */
 body:after{
 	position:absolute;top:0;right:0;bottom:0;left:0;z-index: 100;
-	background-image:url("/kod/kodbox/static/images/common/loading-page.gif");
-	margin:auto;width:72px;height:72px;background-color:#eee;
+	margin:auto;width:30px;height:30px;
 	content:"";text-align: center;transition: all 0.15s;
-	background-size:100% 100%;background-repeat: no-repeat;
-	border-radius:8px;box-shadow: 0 5px 20px rgba(0,0,0,0.05);
+	border:3px solid rgba(255,255,255,0.22);border-top-color:#6aa8ff;
+	border-radius:50%;animation:avSpinner 0.8s linear infinite;
 }
+@keyframes avSpinner{to{transform:rotate(360deg);}}
 body.page-loaded:after{visibility:hidden;opacity:0;}
 img.loading-file-cover{
 	max-width:90%;max-height:90%;margin: auto;
@@ -138,7 +139,20 @@ body .kui-notify .kui-notify-box .kui-notify-item .kui-notify-icon{margin-top: 2
 	box-shadow: 0 0 0 0.7px var(--toolbar-border),2px 2px 5px var(--toolbar-border);
 	border-radius: 20px;transition: all 0.3s;
 }
-#app .bottom-bar .theme-change:before{content:"\f1bc";font-family:'remixicon' !important;}
+/* 主题切换图标: 原实现依赖 remixicon 字体, 但插件页未加载该字体 => 图标空白;
+   改用内联 SVG + mask, 颜色跟随 currentColor, 不依赖任何字体文件 */
+#app .bottom-bar .theme-change:before{
+	content:"" !important;
+	font-family:inherit !important;
+	display:block;width:16px;height:16px;margin:7px auto;
+	background-color:currentColor;
+	-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1'/%3E%3C/svg%3E") center/16px 16px no-repeat;
+	mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1'/%3E%3C/svg%3E") center/16px 16px no-repeat;
+}
+body.mode-light #app .bottom-bar .theme-change:before{
+	-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z'/%3E%3C/svg%3E");
+	mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z'/%3E%3C/svg%3E");
+}
 #app .bottom-bar .theme-change:hover{background:var(--btn-hover);}
 
 #app #bottomBar{overflow: visible;color:var(--text-color);}

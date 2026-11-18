@@ -847,7 +847,7 @@ async function renderAutoViewer(c: any, params: { rawPath: string; fileName: str
 <link rel="stylesheet" href="${pluginStatic}index.css" type="text/css">
 <link rel="stylesheet" href="${pluginStatic}iconfont/index.css" type="text/css">
 </head><body viewer-type="cad">
-<div id="app"><div class="loading-msg tips-icon" style="display:block">Loading...</div></div>
+<div id="app"></div>
 <script>
 var kodSdkConfig={api:${JSON.stringify(appHostSlash)},pluginApi:${JSON.stringify(appHostSlash + "index.php?plugin/autoViewer/")}};
 var FILE_INFO=${JSON.stringify(info)};
