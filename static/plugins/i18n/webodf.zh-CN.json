@@ -1,0 +1,4 @@
+{
+	"admin.plugin.auth": "使用权限",
+	"admin.plugin.authDesc": "设置所有人可用，或者指定用户、用户组、权限组可以使用"
+}

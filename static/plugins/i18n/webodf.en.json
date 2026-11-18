@@ -1,0 +1,4 @@
+{
+	"admin.plugin.auth": "Permission",
+	"admin.plugin.authDesc": "Make everyone available, or specify users, groups, and roles to use"
+}
