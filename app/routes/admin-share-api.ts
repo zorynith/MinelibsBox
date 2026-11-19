@@ -75,18 +75,41 @@ function buildListClauses(params: Record<string, string>, prefix = "s.", include
   return { where, binds };
 }
 
-function buildTimeClause(params: Record<string, string>): { sql: string; binds: (string | number)[] } {
-  const binds: (string | number)[] = [];
+/** 前端 timeFrom/timeTo 统一转 Unix 秒 (秒/毫秒时间戳或日期文本) */
+function toUnixSec(v: string): number | null {
+  const s = String(v || "").trim();
+  if (!s) return null;
+  if (/^\d{10}$/.test(s)) return parseInt(s, 10);
+  if (/^\d{13}$/.test(s)) return Math.floor(parseInt(s, 10) / 1000);
+  if (/^\d+$/.test(s)) return null;
+  const ms = Date.parse(s.includes("T") ? s : s.replace(" ", "T") + "Z");
+  return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
+}
+
+/**
+ * 时间范围过滤。
+ * createTime 在不同来源里可能是 TEXT(ISO / "YYYY-MM-DD HH:MM:SS") 也可能是整数秒,
+ * 直接用字符串比较会出现 "空格 vs T"、"数字 vs 文本" 的类型错位, 把整段时间过滤成空。
+ * 这里统一用 unixepoch() 归一成数值再比较。
+ */
+function buildTimeClause(params: Record<string, string>, col = "createTime"): { sql: string; binds: number[] } {
+  const binds: number[] = [];
   let sql = "";
-  const f = params.timeFrom;
-  const t = params.timeTo;
-  if (f) {
-    sql += " AND createTime >= ?";
-    binds.push(/^\d{10}$/.test(f) ? new Date(parseInt(f, 10) * 1000).toISOString() : f);
+  // 时间列可能是整数秒 / 纯数字文本 / ISO / "YYYY-MM-DD HH:MM:SS",
+  // 统一归一成 Unix 秒后比较, 否则字符串与数字混比会把整段时间过滤成空。
+  const norm = `(CASE
+    WHEN typeof(${col})='integer' THEN ${col}
+    WHEN ${col} NOT GLOB '*[^0-9]*' THEN CAST(${col} AS INTEGER)
+    ELSE unixepoch(${col}) END)`;
+  const f = toUnixSec(params.timeFrom || "");
+  const t = toUnixSec(params.timeTo || "");
+  if (f !== null) {
+    sql += ` AND ${norm} >= ?`;
+    binds.push(f);
   }
-  if (t) {
-    sql += " AND createTime <= ?";
-    binds.push(/^\d{10}$/.test(t) ? new Date(parseInt(t, 10) * 1000).toISOString() : t);
+  if (t !== null) {
+    sql += ` AND ${norm} <= ?`;
+    binds.push(t);
   }
   return { sql, binds };
 }
