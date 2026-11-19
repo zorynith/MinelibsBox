@@ -418,36 +418,41 @@ async function serveIndex(c: Context<{ Bindings: Env }>) {
       -webkit-backdrop-filter:none
     }
     .app-wap-small .artDialog.flashPlayer-dialog.dialog-simple.dialog-min-size .aui-outer{background:transparent}
-    /* 最小化胶囊宽 250px, 而 .aui-title 固定 200px + 右侧 min/close 两个按钮 80px
-       已超出胶囊宽度, 标题文字会压到按钮下面; 改成占满并为按钮留出右内边距。 */
-    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title{
-      width:100%;
-      box-sizing:border-box;
-      padding-right:84px
-    }
-    /* 最小化后图标和标题偏下: .aui-title 本身 30px 高却用 31px 行高, 右侧按钮又被
-       上面的 36px 行高撑着, 收起成 30px 胶囊后内容整体下沉。这里把标题栏/标题/按钮
-       统一回 30px 行高, 并把 path-ico 改为行内块 + 垂直居中。 */
+    /* 收起后的胶囊高 30px: 标题原本靠 line-height 与文本基线定位, 图标是行内元素,
+       不同字体度量下会和文字一起下沉几个像素(改行高只能移动不到 1px, 加 vertical-align
+       反而更偏下)。这里改用 flex, 让图标与标题在 30px 内真正垂直居中;
+       标题同时占满宽度, 为右侧 min/close 两个按钮(约 80px)留出右内边距。 */
     .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-header,
-    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title-bar,
-    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title{height:30px;line-height:30px}
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title-bar{height:30px}
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title{
+      display:flex;
+      align-items:center;
+      width:100%;
+      height:30px;
+      box-sizing:border-box;
+      padding:0 84px 0 10px;
+      line-height:30px;
+      white-space:nowrap
+    }
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title .path-ico{
+      position:static;
+      flex:0 0 auto;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      margin-right:5px
+    }
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title .path-ico img,
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title .path-ico .picture.ico{
+      position:static;
+      top:0;
+      vertical-align:middle
+    }
     .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-outer .aui-btn-box .aui-min,
     .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-outer .aui-btn-box .aui-close{
       height:30px;
       line-height:30px;
       border:none
-    }
-    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title .path-ico{
-      display:inline-block;
-      vertical-align:middle;
-      position:relative;
-      top:0
-    }
-    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title .path-ico img,
-    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title .path-ico .picture.ico{
-      display:inline-block;
-      vertical-align:middle;
-      top:0
     }
   </style>
 
