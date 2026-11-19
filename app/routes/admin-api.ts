@@ -16,6 +16,7 @@ import { getStaticHost } from "../lib/user-system";
 import { handleUserNotice } from "../lib/user-notice";
 import { htmlClean } from "../lib/html-filter";
 import { toUnixCN } from "../lib/time";
+import { getTimezone, isValidTimezone, DEFAULT_TIMEZONE } from "../lib/timezone";
 import { passwordError } from "../lib/user-check";
 import {
   userGroupFilter,
@@ -1871,6 +1872,8 @@ adminApi.all("/setting/get", async (c) => {
     // sourceSecretList 等"JSON 字符串"型配置保持字符串 (001 SystemOption 语义)
     map[r.key] = parseSettingValue(r.key, r.value);
   }
+  // 时区: 未显式配置时回填生效值, 便于管理端/接口看到当前实际使用的时区
+  if (map.timezone === undefined) map.timezone = (await getTimezone(c.env, c.env.DB)) || DEFAULT_TIMEZONE;
   return c.json(ok(map));
 });
 
@@ -1890,6 +1893,15 @@ adminApi.all("/setting/set", async (c) => {
   }
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
     return c.json(fail("explorer.error"));
+  }
+  // 时区支持 IANA 名(Asia/Shanghai)或 UTC 偏移小时(8 / +8 / -5 / 5.5), 非法值直接拒绝
+  if (obj.timezone !== undefined) {
+    const tz = String(obj.timezone).trim();
+    if (tz && !isValidTimezone(tz)) {
+      return c.json(
+        fail("时区格式不正确: 请填写 IANA 时区名(如 Asia/Shanghai) 或 UTC 偏移小时(如 8、+8、-5)")
+      );
+    }
   }
   for (const [k, v] of Object.entries(obj)) {
     if (v === undefined) continue;

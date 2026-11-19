@@ -15,7 +15,10 @@
   "vars": {
     "SITE_TITLE": "MinelibsBox",
     "CHUNK_SIZE_MB": "10",
-    "STATIC_HOST": "https://static.minelibs.eu.org/"
+    "STATIC_HOST": "https://static.minelibs.eu.org/",
+    // 时区: IANA 名 (Asia/Shanghai) 或 UTC 偏移小时 (8 / +8 / -5); 缺省 Asia/Shanghai。
+    // 系统设置里的 settings.timezone 优先生效。
+    "TIMEZONE": "Asia/Shanghai"
   },
   "d1_databases": [
     {

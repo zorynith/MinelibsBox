@@ -17,6 +17,7 @@ import { loadPluginLang } from "./plugins";
 import { isAdmin } from "./auth";
 import { detectLang, loadLangPack } from "./i18n-lang";
 import { t } from "./i18n";
+import { getTimezone, tzDayStartSec, tzDateStartSec, tzParts } from "./timezone";
 
 type Lng = Record<string, string>;
 
@@ -369,7 +370,12 @@ export async function addMsgWarningLog(
     .run();
 }
 
-async function logsTable(c: any, params: Record<string, any>, L: (k: string, d?: string) => string) {
+async function logsTable(
+  c: any,
+  params: Record<string, any>,
+  L: (k: string, d?: string) => string,
+  tz: string
+) {
   const page = Math.max(1, parseInt(String(params.page || "1"), 10) || 1);
   const pageNum = Math.min(200, Math.max(1, parseInt(String(params.pageNum || "50"), 10) || 50));
   const time = String(params.time || "30");
@@ -378,20 +384,18 @@ async function logsTable(c: any, params: Record<string, any>, L: (k: string, d?:
   const now = Math.floor(Date.now() / 1000);
 
   if (time === "0") {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
     where.push("createTime >= ?");
-    binds.push(Math.floor(start.getTime() / 1000));
+    binds.push(tzDayStartSec(tz));
   } else if (time === "diy") {
-    const from = Date.parse(String(params.timeFrom || ""));
-    const to = Date.parse(String(params.timeTo || ""));
-    if (!Number.isNaN(from)) {
+    const from = tzDateStartSec(tz, String(params.timeFrom || ""));
+    const to = tzDateStartSec(tz, String(params.timeTo || ""));
+    if (Number.isFinite(from)) {
       where.push("createTime >= ?");
-      binds.push(Math.floor(from / 1000));
+      binds.push(from);
     }
-    if (!Number.isNaN(to)) {
+    if (Number.isFinite(to)) {
       where.push("createTime <= ?");
-      binds.push(Math.floor(to / 1000) + 86399);
+      binds.push(to + 86399);
     }
   } else if (time !== "all") {
     where.push("createTime >= ?");
@@ -450,7 +454,8 @@ async function collectFindings(
   c: any,
   event: string,
   merged: any,
-  L: (key: string, fallback?: string) => string
+  L: (key: string, fallback?: string) => string,
+  tz: string
 ): Promise<string[]> {
   const db = c.env.DB;
   if (event === "opsUserAccErr") {
@@ -466,19 +471,17 @@ async function collectFindings(
   }
   if (event === "dataFileDownErr") {
     const limit = Number(merged?.policy?.cntMax?.value ?? 100) || 100;
-    const start = new Date();
-    start.setUTCHours(0, 0, 0, 0); // audit_logs.created_at 为 UTC datetime('now')
-    const since = start.toISOString().slice(0, 19).replace("T", " ");
+    // audit_logs.created_at 为 UTC datetime('now'), 这里按系统时区的"今天零点"换算成 UTC 比较
+    const since = tzDayStartSec(tz);
     const rows = (await db
       .prepare(
-        "SELECT user_id, COUNT(*) AS cnt FROM audit_logs WHERE action = 'download' AND created_at >= ? GROUP BY user_id"
+        "SELECT user_id, COUNT(*) AS cnt FROM audit_logs WHERE action = 'download' AND created_at >= datetime(?, 'unixepoch') GROUP BY user_id"
       )
       .bind(since)
       .all()) as { results?: any[] };
     const over = (rows.results || []).filter((r) => Number(r.cnt) >= limit);
     if (!over.length) return [];
-    const nowText = new Date().toISOString().slice(11, 16);
-    return [formatTpl(L("msgWarning.data.downFileErr"), [nowText, over.length, limit])];
+    return [formatTpl(L("msgWarning.data.downFileErr"), [tzParts(tz).hm, over.length, limit])];
   }
   return [];
 }
@@ -515,9 +518,9 @@ async function runMsgWarningTasksInner(c: any): Promise<{ events: number; messag
   const L = translator(lng);
   const config = await loadConfig(c);
   const savedList = (config[EVNT_KEY] || {}) as Record<string, any>;
+  const tz = await getTimezone(c.env, db);
   const nowSec = Math.floor(Date.now() / 1000);
-  const today = new Date().toISOString().slice(0, 10);
-  const nowHM = new Date().toISOString().slice(11, 16);
+  const { dateKey: today, hm: nowHM } = tzParts(tz);
   let events = 0;
   let messages = 0;
 
@@ -540,7 +543,7 @@ async function runMsgWarningTasksInner(c: any): Promise<{ events: number; messag
     const maxDay = Number(notice.cntMaxDay || 0);
     if (maxDay > 0 && Number(result.cntToday) >= maxDay) continue;
 
-    const texts = await collectFindings(c, def.event, merged, L).catch(() => [] as string[]);
+    const texts = await collectFindings(c, def.event, merged, L, tz).catch(() => [] as string[]);
     if (!texts.length) continue;
 
     let targetIDs: number[] = [];
@@ -633,7 +636,7 @@ export async function msgWarningTableHandler(c: any): Promise<Response> {
 
   if (tab === "evnt" || tab === "type" || tab === "logs") {
     if (tab === "logs") {
-      const data = await logsTable(c, params, L);
+      const data = await logsTable(c, params, L, await getTimezone(c.env, c.env.DB));
       return c.json({ code: true, data });
     }
     if (tab === "type") {
@@ -823,7 +826,8 @@ export async function msgWarningMessageHandler(c: any): Promise<Response> {
   const issues: string[] = [];
   for (const def of NTC_EVNT_LIST) {
     if (!PRODUCER_EVENTS.includes(def.event)) continue;
-    const texts = await collectFindings(c, def.event, mergeEvnt(def, saved[def.event] || {}), L).catch(
+    const tz = await getTimezone(c.env, c.env.DB);
+    const texts = await collectFindings(c, def.event, mergeEvnt(def, saved[def.event] || {}), L, tz).catch(
       () => [] as string[]
     );
     issues.push(...texts);
