@@ -454,17 +454,6 @@ async function serveIndex(c: Context<{ Bindings: Env }>) {
       line-height:30px;
       border:none
     }
-    /* 同类问题: 普通窗口(属性/上传/设置等 dialog-form)最小化后也是 250px 宽胶囊,
-       但 .aui-title 被固定成 200px, 右侧 min/close 两个按钮约 80px, 标题会压在按钮下面;
-       行高也仍是 31px 而标题栏只有 30px。这里统一宽度与行高。
-       zip 预览窗口最小化时标题是 auto 高度(内含 90px 头部), 文件面板内有缩略图,
-       两者的标题布局特殊, 单独排除以免压坏。 */
-    .app-wap-small .artDialog.dialog-min-size:not(.zip-view-dialog):not(.dialog-file-panel) .aui-title{
-      width:100%;
-      box-sizing:border-box;
-      padding-right:84px;
-      line-height:30px
-    }
   </style>
 
   <script type="text/javascript">
