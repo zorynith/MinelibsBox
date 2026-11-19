@@ -401,10 +401,10 @@ async function serveIndex(c: Context<{ Bindings: Env }>) {
        但只给 .aui-close 加了 5px 透明边框(扩大触摸区), 且 line-height 仍是 32px,
        导致关闭按钮比最小化按钮低/偏内, 图标也不在同一水平线。
        视频(dplayer)/音乐窗口此前已单独 border:none, 这里统一补齐。 */
-    .app-wap-small .dialog-max.dialog-simple .aui-outer .aui-close{border:none}
-    .app-wap-small .dialog-max.dialog-simple .aui-outer .aui-min,
-    .app-wap-small .dialog-max.dialog-simple .aui-outer .aui-max,
-    .app-wap-small .dialog-max.dialog-simple .aui-outer .aui-close{line-height:36px}
+    .app-wap-small .dialog-max.dialog-simple:not(.dialog-min-size) .aui-outer .aui-close{border:none}
+    .app-wap-small .dialog-max.dialog-simple:not(.dialog-min-size) .aui-outer .aui-min,
+    .app-wap-small .dialog-max.dialog-simple:not(.dialog-min-size) .aui-outer .aui-max,
+    .app-wap-small .dialog-max.dialog-simple:not(.dialog-min-size) .aui-outer .aui-close{line-height:36px}
 
     /* 最小化胶囊: 标题栏是半透明底 + backdrop-filter, 在移动端 WebKit 里 blur 与
        border-radius 叠加会让四个圆角渲染出发黑的小块; 另外 flashPlayer 的 .aui-outer
@@ -424,6 +424,30 @@ async function serveIndex(c: Context<{ Bindings: Env }>) {
       width:100%;
       box-sizing:border-box;
       padding-right:84px
+    }
+    /* 最小化后图标和标题偏下: .aui-title 本身 30px 高却用 31px 行高, 右侧按钮又被
+       上面的 36px 行高撑着, 收起成 30px 胶囊后内容整体下沉。这里把标题栏/标题/按钮
+       统一回 30px 行高, 并把 path-ico 改为行内块 + 垂直居中。 */
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-header,
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title-bar,
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title{height:30px;line-height:30px}
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-outer .aui-btn-box .aui-min,
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-outer .aui-btn-box .aui-close{
+      height:30px;
+      line-height:30px;
+      border:none
+    }
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title .path-ico{
+      display:inline-block;
+      vertical-align:middle;
+      position:relative;
+      top:0
+    }
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title .path-ico img,
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title .path-ico .picture.ico{
+      display:inline-block;
+      vertical-align:middle;
+      top:0
     }
   </style>
 
