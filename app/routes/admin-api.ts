@@ -18,6 +18,7 @@ import { htmlClean } from "../lib/html-filter";
 import { toUnixCN } from "../lib/time";
 import { getTimezone, isValidTimezone, DEFAULT_TIMEZONE } from "../lib/timezone";
 import { passwordError } from "../lib/user-check";
+import { srvGetData, srvStateData } from "./admin-server-api";
 import {
   userGroupFilter,
   filterGroupList,
@@ -1843,22 +1844,14 @@ adminApi.all("/analysis/table", async (c) => {
 
 /**
  * 服务器信息 - admin/setting/server
+ * 系统服务页(admin/server/index)通过该地址取数(前端 URL 表 server -> admin/setting/server):
+ *   action=get         -> { base, cache, db }                     (001 adminServer::get)
+ *   action=get&state=1 -> { cpu, memory, server, default, time }  (001 adminServer::getSrvState)
  */
 adminApi.all("/setting/server", async (c) => {
-  return c.json(ok({
-    web: "Nginx/1.24",
-    php: "PHP/8.2",
-    db: "MySQL/8.0",
-    cache: "Redis/7.0",
-    os: "Linux",
-    serverName: "localhost",
-    phpBit: 64,
-    diskSizeUse: 0,
-    diskSizeMax: 0,
-    systemSizeUse: 0,
-    systemSizeMax: 0,
-    version: "1.68",
-  }));
+  const query = await allParams(c);
+  if (String(query.state || "") === "1") return c.json(ok(await srvStateData(c)));
+  return c.json(ok(await srvGetData(c)));
 });
 
 /**

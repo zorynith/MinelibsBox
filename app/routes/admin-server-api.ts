@@ -10,6 +10,7 @@
 import { Hono } from "hono";
 import { authRequired, isAdmin } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
+import { getTimezone } from "../lib/timezone";
 
 type Vars = { currentUser: AuthUser };
 const adminServerApi = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -32,27 +33,57 @@ async function allParams(c: any): Promise<Record<string, string>> {
   return merged;
 }
 
-function nowStr(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+function nowStr(tz = "Asia/Shanghai"): string {
+  try {
+    // sv-SE 的日期格式恰好是 "YYYY-MM-DD HH:MM:SS"
+    return new Intl.DateTimeFormat("sv-SE", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 19).replace("T", " ");
+  }
 }
 
-// Worker 环境无操作系统信息(/proc 不可读), upTime 恒为 unavailable
-const UPTIME_UNAVAILABLE = "unavailable";
+// Worker 环境无操作系统信息(/proc 不可读), upTime 恒为 N/A
+const UPTIME_UNAVAILABLE = "N/A";
 
 // ============ admin/server/srvGet ============
 
-adminServerApi.all("/server/srvGet", async (c) => {
-  const user = c.get("currentUser");
-  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+/** 基础信息 + 缓存/数据库配置 (001 adminServer::get) */
+export async function srvGetData(c: any): Promise<Record<string, unknown>> {
   const data: Record<string, unknown> = {};
   data["base"] = await serverBaseInfo(c);
   data["cache"] = { cacheType: "file", sessionType: "file" };
   const dbInfo: Record<string, unknown> = { db_type: "sqlite", db_name: "d1", db_dsn: "sqlite:d1" };
   dbInfo["db_info"] = await getDbInfo(c);
   data["db"] = dbInfo;
-  return c.json(ok(data));
+  return data;
+}
+
+/** CPU/内存/磁盘/存储状态 (001 adminServer::getSrvState) */
+export async function srvStateData(c: any): Promise<Record<string, unknown>> {
+  const tz = (await getTimezone(c.env, c.env.DB).catch(() => "")) || "Asia/Shanghai";
+  // Workers 无法读取 /proc, CPU 无法采样; 内存以 128MB 隔离上限作为总量占位
+  return {
+    cpu: 0,
+    memory: { sizeTotal: 128 * 1024 * 1024, sizeUse: 0 },
+    server: { sizeTotal: 0, sizeUse: 0 },
+    default: { sizeTotal: 0, sizeUse: 0 },
+    time: { time: nowStr(tz), upTime: UPTIME_UNAVAILABLE },
+  };
+}
+
+adminServerApi.all("/server/srvGet", async (c) => {
+  const user = c.get("currentUser");
+  if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
+  return c.json(ok(await srvGetData(c)));
 });
 
 // ============ admin/server/getSrvState ============
@@ -60,30 +91,29 @@ adminServerApi.all("/server/srvGet", async (c) => {
 adminServerApi.all("/server/getSrvState", async (c) => {
   const user = c.get("currentUser");
   if (!isAdmin(user)) return c.json(fail("explorer.noPermissionAction"));
-  const data = {
-    cpu: 0,
-    memory: { sizeTotal: 0, sizeUse: 0 },
-    server: { sizeTotal: 0, sizeUse: 0 },
-    default: { sizeTotal: 0, sizeUse: 0 },
-    time: { time: nowStr(), upTime: UPTIME_UNAVAILABLE },
-  };
-  return c.json(ok(data));
+  return c.json(ok(await srvStateData(c)));
 });
 
 // ============ admin/server/getServerInfo ============
 
-async function serverBaseInfo(c: any): Promise<Record<string, unknown>> {
+export async function serverBaseInfo(c: any): Promise<Record<string, unknown>> {
   const req = c.req.raw;
   const url = new URL(req.url);
   const host = req.headers.get("host") || url.host || "";
   const serverSoftware = req.headers.get("cf-ray") ? "Cloudflare Workers" : "Workers (local dev)";
+  const tz = (await getTimezone(c.env, c.env.DB).catch(() => "")) || "Asia/Shanghai";
+  const clientIp =
+    req.headers.get("cf-connecting-ip") ||
+    req.headers.get("x-real-ip") ||
+    (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() ||
+    "";
   const data: Record<string, unknown> = {
     server_state: {},
     server_info: {
       name: host,
-      ip: req.headers.get("cf-connecting-ip") || "",
-      time: nowStr(),
-      upTime: "",
+      ip: clientIp,
+      time: nowStr(tz),
+      upTime: UPTIME_UNAVAILABLE,
       softWare: serverSoftware,
       phpVersion: "workerd",
       system: "Cloudflare Workers",
@@ -106,7 +136,7 @@ async function serverBaseInfo(c: any): Promise<Record<string, unknown>> {
       cache: "File",
     },
     client_info: {
-      ip: req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for") || "",
+      ip: clientIp,
       ua: req.headers.get("user-agent") || "",
       language: req.headers.get("accept-language") || "",
     },
@@ -116,7 +146,7 @@ async function serverBaseInfo(c: any): Promise<Record<string, unknown>> {
 
 // ============ admin/server/getDbInfo ============
 
-async function getDbInfo(c: any): Promise<Record<string, unknown>> {
+export async function getDbInfo(c: any): Promise<Record<string, unknown>> {
   const tables: any[] = (await c.env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
   ).all().catch(() => ({ results: [] as any[] }))).results || [];
