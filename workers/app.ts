@@ -5,7 +5,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { poweredBy } from "hono/powered-by";
-import { logger } from "hono/logger";
 import { apiRoutes } from "../app/routes/api";
 import { pageRoutes } from "../app/routes/pages";
 import { webdavApi } from "../app/routes/webdav-api";
@@ -30,8 +29,8 @@ app.use("*", async (c, next) => {
 });
 
 // Middleware
+// 注: 不挂 logger() - Cloudflare 平台已记录请求日志, 每请求再拼一次日志只增加 CPU/日志量。
 app.use("*", poweredBy());
-app.use("*", logger());
 app.use("*", cors({
   origin: "*",
   allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PROPFIND", "PROPPATCH", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK", "HEAD"],

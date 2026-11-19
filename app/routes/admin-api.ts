@@ -19,6 +19,7 @@ import { toUnixCN } from "../lib/time";
 import { getTimezone, isValidTimezone, DEFAULT_TIMEZONE } from "../lib/timezone";
 import { passwordError } from "../lib/user-check";
 import { srvGetData, srvStateData } from "./admin-server-api";
+import { allParams } from "../lib/http";
 import {
   userGroupFilter,
   filterGroupList,
@@ -49,18 +50,8 @@ function fail(data: any) {
   return { code: false, data: typeof data === "string" ? t(data) : data };
 }
 
-async function parseBody(c: any): Promise<Record<string, string>> {
-  const body: Record<string, string> = {};
-  const rawBody = await c.req.parseBody().catch(() => ({}));
-  for (const [k, v] of Object.entries(rawBody)) {
-    body[k] = typeof v === "string" ? v : "";
-  }
-  return body;
-}
+// 参数合并(query + body)统一走 lib/http; 本地 ok/fail 因带 i18n 翻译而保留
 
-async function allParams(c: any): Promise<Record<string, string>> {
-  return { ...c.req.query(), ...(await parseBody(c)) };
-}
 
 // ============ admin/group ============
 

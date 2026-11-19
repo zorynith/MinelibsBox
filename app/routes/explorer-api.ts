@@ -175,7 +175,7 @@ async function readObjectBytes(c: AppContext, src: SourceRef, relPath: string): 
 }
 
 /** Range 读取对象部分字节 (R2 或 io), 区间为 [start, endInclusive]; 失败 bytes 为 null。 */
-async function readObjectRangeWithTotal(c: AppContext, src: SourceRef, relPath: string, start: number, endInclusive: number): Promise<ZipCentralRangeResult> {
+async function readObjectRangeWithTotal(c: AppContext, src: SourceRef, relPath: string, start: number, endInclusive: number, knownTotal?: number | null): Promise<ZipCentralRangeResult> {
   const key = keyFromBase(src.baseKey, relPath);
   const io = ioClientOf(src);
   if (io) {
@@ -183,11 +183,16 @@ async function readObjectRangeWithTotal(c: AppContext, src: SourceRef, relPath: 
     if (!g) return { bytes: null, totalSize: null };
     return { bytes: await streamToBytes(g.body), totalSize: g.totalSize ?? null };
   }
-  const o = await c.env.FILES.head(key).catch(() => null);
-  if (!o) return { bytes: null, totalSize: null };
+  // 调用方已 head 过时直接复用 total, 避免同一 key 再打一次 R2 HEAD (视频拖动每次都触发)
+  let total = knownTotal ?? null;
+  if (total === null) {
+    const o = await c.env.FILES.head(key).catch(() => null);
+    if (!o) return { bytes: null, totalSize: null };
+    total = o.size;
+  }
   const r = await c.env.FILES.get(key, { range: { offset: start, length: endInclusive - start + 1 } }).catch(() => null);
   if (!r) return { bytes: null, totalSize: null };
-  return { bytes: new Uint8Array(await r.arrayBuffer()), totalSize: o.size };
+  return { bytes: new Uint8Array(await r.arrayBuffer()), totalSize: total };
 }
 
 /** 写入对象到 R2 或外部存储(io)。 */
@@ -3280,7 +3285,7 @@ export async function fileOutHandler(
         return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${total}` } });
       }
       end = Math.min(end, total - 1);
-      const part = await readObjectRangeWithTotal(c, src.source, src.relPath, start, end);
+      const part = await readObjectRangeWithTotal(c, src.source, src.relPath, start, end, total);
       if (!part.bytes) return c.json({ code: false, data: "Not found" });
       const headers = new Headers();
       headers.set("Content-Type", getFileMimeType(fileName));

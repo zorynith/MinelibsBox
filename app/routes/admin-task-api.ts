@@ -8,27 +8,12 @@ import { Hono } from "hono";
 import { authRequired, isAdmin } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
 import { getUserById } from "../lib/db";
+import { ok, fail, allParams } from "../lib/http";
 
 type Vars = { currentUser: AuthUser };
 const adminTaskApi = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 adminTaskApi.use("*", authRequired);
-
-function ok(data: any, info?: any) {
-  const res: any = { code: true, data };
-  if (info !== undefined) res.info = info;
-  return res;
-}
-function fail(data: any) {
-  return { code: false, data };
-}
-
-async function allParams(c: any): Promise<Record<string, string>> {
-  const body = await c.req.parseBody().catch(() => ({}));
-  const merged: Record<string, string> = { ...c.req.query() };
-  for (const [k, v] of Object.entries(body)) merged[k] = typeof v === "string" ? v : "";
-  return merged;
-}
 
 /** 已完成任务的临时结果缓存 (复刻 001 Cache::result_<id>) */
 const taskResultCache = new Map<number, string>();

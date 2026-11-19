@@ -10,27 +10,12 @@ import type { AuthUser } from "../lib/auth";
 import { getUserById } from "../lib/db";
 import { getShareById, removeShares, resolveShareSource, shareOptions } from "../lib/share";
 import { toUnix } from "../lib/time";
+import { ok, fail, allParams } from "../lib/http";
 
 type Vars = { currentUser: AuthUser };
 const adminShareApi = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 adminShareApi.use("*", authRequired);
-
-function ok(data: any, info?: any) {
-  const res: any = { code: true, data };
-  if (info !== undefined) res.info = info;
-  return res;
-}
-function fail(data: any) {
-  return { code: false, data };
-}
-
-async function allParams(c: any): Promise<Record<string, string>> {
-  const body = await c.req.parseBody().catch(() => ({}));
-  const merged: Record<string, string> = { ...c.req.query() };
-  for (const [k, v] of Object.entries(body)) merged[k] = typeof v === "string" ? v : "";
-  return merged;
-}
 
 /** 分享者信息 (001 listDataApply 的 userInfo) */
 async function shareUserInfoOf(db: D1Database, userID: number): Promise<Record<string, unknown>> {

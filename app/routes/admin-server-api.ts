@@ -11,27 +11,12 @@ import { Hono } from "hono";
 import { authRequired, isAdmin } from "../lib/auth";
 import type { AuthUser } from "../lib/auth";
 import { getTimezone } from "../lib/timezone";
+import { ok, fail, allParams } from "../lib/http";
 
 type Vars = { currentUser: AuthUser };
 const adminServerApi = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 adminServerApi.use("*", authRequired);
-
-function ok(data: any, info?: any) {
-  const res: any = { code: true, data };
-  if (info !== undefined) res.info = info;
-  return res;
-}
-function fail(data: any) {
-  return { code: false, data };
-}
-
-async function allParams(c: any): Promise<Record<string, string>> {
-  const body = await c.req.parseBody().catch(() => ({}));
-  const merged: Record<string, string> = { ...c.req.query() };
-  for (const [k, v] of Object.entries(body)) merged[k] = typeof v === "string" ? v : "";
-  return merged;
-}
 
 function nowStr(tz = "Asia/Shanghai"): string {
   try {

@@ -130,12 +130,14 @@ export async function requestRateLimited(c: any): Promise<boolean> {
     .bind(rateKey, JSON.stringify(times), Math.floor(now))
     .run()
     .catch(() => {});
-  // 清理一天未活跃的记录
-  await db
-    .prepare("DELETE FROM request_rate WHERE updated_at < ?")
-    .bind(Math.floor(now) - 86400)
-    .run()
-    .catch(() => {});
+  // 清理一天未活跃的记录: 约 5% 的请求触发一次即可, 避免每个请求都做一次全表 DELETE
+  if (Math.random() < 0.05) {
+    await db
+      .prepare("DELETE FROM request_rate WHERE updated_at < ?")
+      .bind(Math.floor(now) - 86400)
+      .run()
+      .catch(() => {});
+  }
 
   return blocked;
 }
