@@ -395,6 +395,36 @@ async function serveIndex(c: Context<{ Bindings: Env }>) {
        不会被父容器的圆角裁掉，需要 overflow:hidden），与 movie-player-dialog 的处理方式一致。 */
     .artDialog.flashPlayer-dialog.dialog-simple .aui-outer{border-radius:4px;overflow:hidden;background:#000}
     .artDialog.flashPlayer-dialog .aui-content{border-radius:4px;overflow:hidden}
+
+    /* 移动端 dialog-simple 弹窗(flashPlayer、轻应用 iframe 等)右上角按钮对齐:
+       style/dist/main.css 在 .app-wap-small 下把 .aui-min/.aui-close 统一成 36px 高,
+       但只给 .aui-close 加了 5px 透明边框(扩大触摸区), 且 line-height 仍是 32px,
+       导致关闭按钮比最小化按钮低/偏内, 图标也不在同一水平线。
+       视频(dplayer)/音乐窗口此前已单独 border:none, 这里统一补齐。 */
+    .app-wap-small .dialog-max.dialog-simple .aui-outer .aui-close{border:none}
+    .app-wap-small .dialog-max.dialog-simple .aui-outer .aui-min,
+    .app-wap-small .dialog-max.dialog-simple .aui-outer .aui-max,
+    .app-wap-small .dialog-max.dialog-simple .aui-outer .aui-close{line-height:36px}
+
+    /* 最小化胶囊: 标题栏是半透明底 + backdrop-filter, 在移动端 WebKit 里 blur 与
+       border-radius 叠加会让四个圆角渲染出发黑的小块; 另外 flashPlayer 的 .aui-outer
+       带黑色背景, 收起后仅剩标题栏, 黑色会从 3px 圆角外露出。这里统一圆角、关掉模糊,
+       并在收起状态取消黑色底。 */
+    .app-wap-small .dialog-simple.dialog-min-size .aui-title-bar{
+      background:rgba(0,0,0,.55);
+      border-radius:4px;
+      overflow:hidden;
+      backdrop-filter:none;
+      -webkit-backdrop-filter:none
+    }
+    .app-wap-small .artDialog.flashPlayer-dialog.dialog-simple.dialog-min-size .aui-outer{background:transparent}
+    /* 最小化胶囊宽 250px, 而 .aui-title 固定 200px + 右侧 min/close 两个按钮 80px
+       已超出胶囊宽度, 标题文字会压到按钮下面; 改成占满并为按钮留出右内边距。 */
+    .app-wap-small .artDialog.dialog-simple.dialog-min-size .aui-title{
+      width:100%;
+      box-sizing:border-box;
+      padding-right:84px
+    }
   </style>
 
   <script type="text/javascript">
