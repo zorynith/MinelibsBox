@@ -1850,7 +1850,22 @@ adminApi.all("/analysis/table", async (c) => {
  */
 adminApi.all("/setting/server", async (c) => {
   const query = await allParams(c);
+  // 图表 5s 轮询: 只返回 CPU/内存等状态, 不要触发数据库统计
   if (String(query.state || "") === "1") return c.json(ok(await srvStateData(c)));
+  // 缓存/数据库配置保存(前端同 URL 提交 action=save), 001 语义见 adminServer::save
+  if (String(query.action || "") === "save") {
+    const tab = String(query.tab || "");
+    if (tab === "db" || query.db_dsn || query.db_type) {
+      const dbType = String(query.db_dsn || query.db_type || "sqlite");
+      return c.json(dbType === "sqlite" ? fail("admin.setting.dbNeedOthers") : fail("common.env.invalidExt"));
+    }
+    const checking = query.check === "1" || query.check === "true";
+    const type = checking ? String(query.type || "") : String(query.cacheType || "");
+    if (type && type !== "file" && type !== "save") {
+      return c.json(fail(checking ? "admin.install.cacheError" : "common.env.invalidExt"));
+    }
+    return c.json(ok("explorer.success"));
+  }
   return c.json(ok(await srvGetData(c)));
 });
 

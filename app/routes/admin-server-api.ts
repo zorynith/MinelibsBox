@@ -146,16 +146,37 @@ export async function serverBaseInfo(c: any): Promise<Record<string, unknown>> {
 
 // ============ admin/server/getDbInfo ============
 
+// 逐表 COUNT(*) 在库大时非常慢, 会让 /setting/server 超过 Cloudflare 100s 限制(524)。
+// 这里并行统计并加 5s 超时兜底, 结果在 isolate 内缓存 60s。
+let dbInfoCache: { at: number; data: Record<string, unknown> } | null = null;
+const DB_INFO_TTL = 60 * 1000;
+const DB_INFO_TIMEOUT = 5000;
+
 export async function getDbInfo(c: any): Promise<Record<string, unknown>> {
+  if (dbInfoCache && Date.now() - dbInfoCache.at < DB_INFO_TTL) return dbInfoCache.data;
   const tables: any[] = (await c.env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
   ).all().catch(() => ({ results: [] as any[] }))).results || [];
+  const counts = await Promise.race([
+    Promise.all(
+      tables.map((t) =>
+        c.env.DB.prepare(`SELECT COUNT(*) AS total FROM "${t.name}"`).first().catch(() => null)
+      )
+    ),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), DB_INFO_TIMEOUT)),
+  ]);
   let rows = 0;
-  for (const t of tables) {
-    const row: any = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM "${t.name}"`).first().catch(() => null);
-    rows += parseInt(String(row?.total ?? "0"), 10) || 0;
+  if (counts) {
+    for (const row of counts as any[]) rows += parseInt(String(row?.total ?? "0"), 10) || 0;
   }
-  return { total_tables: tables.length, total_rows: rows, total_size: 0 };
+  const data: Record<string, unknown> = {
+    total_tables: tables.length,
+    total_rows: rows,
+    total_size: 0,
+  };
+  if (!counts) data.partial = true;
+  dbInfoCache = { at: Date.now(), data };
+  return data;
 }
 
 // ============ admin/server/dbSave ============
